@@ -1,83 +1,116 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
+import httpx
+from sqlalchemy.orm import Session
+from datetime import datetime, timezone
 from app.database import SessionLocal
-from app.models.models import Stream, StreamStatus, Channel
+from app.models.models import Channel, Stream, StreamStatus, Platform
+from app.services.youtube_fetcher import (
+    get_channel_live_video_ids, get_videos_details, parse_youtube_stream
+)
+from app.services.bilibili_fetcher import (
+    get_rooms_by_uids, parse_bilibili_room
+)
+
+scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-scheduler = AsyncIOScheduler()
-
-
-async def fetch_youtube_live_status():
-    """
-    模拟从 YouTube API 获取直播状态
-    实际项目中需要调用 YouTube Data API v3
-    """
+async def update_youtube_streams():
     db = SessionLocal()
     try:
-        channels = db.query(Channel).filter(Channel.platform == "youtube").all()
-        for channel in channels:
-            print(f"[Scheduler] Checking YouTube channel: {channel.channel_id}")
-            # TODO: 实际实现需要调用 YouTube API
-            # 伪代码示例:
-            # response = await youtube_api.get_live_streams(channel.channel_id)
-            # update_stream_status(channel.id, response)
-            pass
-    finally:
-        db.close()
-
-
-async def fetch_bilibili_live_status():
-    """
-    模拟从 Bilibili API 获取直播状态
-    实际项目中需要调用 Bilibili API
-    """
-    db = SessionLocal()
-    try:
-        channels = db.query(Channel).filter(Channel.platform == "bilibili").all()
-        for channel in channels:
-            print(f"[Scheduler] Checking Bilibili room: {channel.channel_id}")
-            # TODO: 实际实现需要调用 Bilibili API
-            # 伪代码示例:
-            # response = await bilibili_api.get_room_info(channel.channel_id)
-            # update_stream_status(channel.id, response)
-            pass
-    finally:
-        db.close()
-
-
-def update_stream_from_api(channel_id: int, api_response: dict):
-    """
-    根据 API 响应更新数据库中的直播状态
-    """
-    db = SessionLocal()
-    try:
-        stream = db.query(Stream).filter(Stream.channel_id == channel_id).first()
+        channels = (
+            db.query(Channel)
+            .filter(Channel.platform == Platform.YOUTUBE, Channel.is_active == True)
+            .all()
+        )
         
-        if not stream:
-            stream = Stream(channel_id=channel_id)
-            db.add(stream)
-        
-        stream.status = StreamStatus.LIVE if api_response.get("is_live") else StreamStatus.OFFLINE
-        stream.title = api_response.get("title")
-        stream.viewer_count = api_response.get("viewer_count", 0)
-        stream.video_id = api_response.get("video_id")
-        stream.thumbnail_url = api_response.get("thumbnail")
-        stream.updated_at = datetime.utcnow()
-        
-        if api_response.get("is_live"):
-            stream.started_at = api_response.get("started_at")
+        async with httpx.AsyncClient() as client:
+            # Step 1: 收集所有已知的 live/upcoming videoId
+            known_live_ids = [
+                s.video_id for s in
+                db.query(Stream).filter(
+                    Stream.platform == Platform.YOUTUBE,
+                    Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING])
+                ).all()
+                if s.video_id
+            ]
+            
+            # Step 2: 批量查询已知视频的最新状态（低配额消耗）
+            items = await get_videos_details(client, known_live_ids)
+            
+            for item in items:
+                parsed = parse_youtube_stream(item)
+                if not parsed:
+                    continue
+                _upsert_stream(db, item["snippet"]["channelId"], parsed, Platform.YOUTUBE)
         
         db.commit()
+        print(f"[YouTube] Updated {len(items)} streams")
+    except Exception as e:
+        print(f"[YouTube] Error: {e}")
+        db.rollback()
     finally:
         db.close()
+
+
+async def update_bilibili_streams():
+    db = SessionLocal()
+    try:
+        channels = (
+            db.query(Channel)
+            .filter(Channel.platform == Platform.BILIBILI, Channel.is_active == True)
+            .all()
+        )
+        uids = [ch.channel_id for ch in channels]
+        
+        async with httpx.AsyncClient() as client:
+            rooms_data = await get_rooms_by_uids(client, uids)
+        
+        for uid, room_data in rooms_data.items():
+            parsed = parse_bilibili_room(room_data)
+            _upsert_stream(db, uid, parsed, Platform.BILIBILI)
+        
+        db.commit()
+        print(f"[Bilibili] Updated {len(rooms_data)} rooms")
+    except Exception as e:
+        print(f"[Bilibili] Error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _upsert_stream(db: Session, platform_channel_id: str, parsed: dict, platform: Platform):
+    """差量更新：只有字段变化时才写入 DB"""
+    channel = db.query(Channel).filter(Channel.channel_id == platform_channel_id).first()
+    if not channel:
+        return
+    
+    stream = (
+        db.query(Stream)
+        .filter(Stream.channel_id == channel.id, Stream.video_id == parsed["video_id"])
+        .first()
+    )
+    
+    if not stream:
+        stream = Stream(channel_id=channel.id, platform=platform)
+        db.add(stream)
+    
+    # 差量检测：只有值变化才更新
+    changed = False
+    for field, value in parsed.items():
+        if getattr(stream, field, None) != value:
+            setattr(stream, field, value)
+            changed = True
+    
+    if changed:
+        stream.updated_at = datetime.now(timezone.utc)
+        # 记录峰值观看
+        if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
+            stream.peak_viewers = parsed["viewer_count"]
 
 
 def start_scheduler():
-    """
-    启动定时任务调度器
-    每分钟执行一次更新任务
-    """
-    scheduler.add_job(fetch_youtube_live_status, 'interval', minutes=1, id='youtube_fetch')
-    scheduler.add_job(fetch_bilibili_live_status, 'interval', minutes=1, id='bilibili_fetch')
+    # YouTube：已知流每 1 分钟更新观看数；发现新流每 5 分钟扫描一次
+    scheduler.add_job(update_youtube_streams, "interval", minutes=1,  id="yt_update")
+    scheduler.add_job(update_bilibili_streams, "interval", minutes=1,  id="bili_update")
     scheduler.start()
-    print("[Scheduler] Background task scheduler started")
+    print("[Scheduler] Started")
