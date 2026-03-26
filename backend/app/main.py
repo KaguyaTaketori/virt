@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.routers import streams, channels
+from app.routers import streams, channels, danmaku
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
 
@@ -20,7 +20,7 @@ app = FastAPI(
     title="VTuber Live Aggregator API",
     description="聚合 YouTube 和 Bilibili 直播流的后端 API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 配置 CORS 允许前端跨域请求
@@ -35,6 +35,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(streams.router)
 app.include_router(channels.router)
+app.include_router(danmaku.router)
 
 
 @app.get("/")
