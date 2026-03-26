@@ -1,14 +1,21 @@
+// frontend/src/stores/stream.ts  ← 完整替换
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { streamApi } from '../api'
 
+// 与后端 StreamResponse schema 严格对应
 export interface Stream {
   id: number
-  platform: string
-  name: string
-  url: string
-  is_live: boolean
-  thumbnail?: string
+  channel_id: number
+  platform: 'youtube' | 'bilibili'
+  video_id: string | null
+  title: string | null
+  thumbnail_url: string | null
+  viewer_count: number
+  status: 'live' | 'upcoming' | 'archive' | 'offline'
+  started_at: string | null
+  channel_name: string | null
+  channel_avatar: string | null
 }
 
 export const useStreamStore = defineStore('stream', () => {
@@ -22,18 +29,14 @@ export const useStreamStore = defineStore('stream', () => {
     try {
       const { data } = await streamApi.getLiveStreams()
       liveStreams.value = data
-    } catch (err: any) {
-      error.value = err.message
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      error.value = msg
       console.error('Failed to fetch live streams:', err)
     } finally {
       loading.value = false
     }
   }
 
-  return {
-    liveStreams,
-    loading,
-    error,
-    fetchLiveStreams
-  }
+  return { liveStreams, loading, error, fetchLiveStreams }
 })

@@ -29,7 +29,10 @@ class StreamBase(BaseModel):
     thumbnail_url: Optional[str] = None
     viewer_count: int = 0
     status: StreamStatus = StreamStatus.OFFLINE
+    scheduled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    live_chat_id: Optional[str] = None
 
 
 class StreamCreate(StreamBase):
