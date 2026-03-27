@@ -19,6 +19,7 @@ export interface Channel {
   avatar_url: string | null
   is_active: boolean
   org_id: number | null
+  avatar_shape: 'circle' | 'square'
 }
 
 export interface Organization {
@@ -27,6 +28,7 @@ export interface Organization {
   name_en: string | null
   logo_url: string | null
   website: string | null
+  logo_shape: 'circle' | 'square'
 }
 
 export const channelApi = {
