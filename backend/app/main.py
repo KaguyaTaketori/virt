@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.routers import streams, channels, danmaku
+from app.routers import streams, channels, danmaku, admin
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
 
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(streams.router)
 app.include_router(channels.router)
 app.include_router(danmaku.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
