@@ -27,7 +27,7 @@ def resolve_youtube_channel(input_str: str) -> str | None:
     elif not input_str.startswith("http"):
         url = f"https://www.youtube.com/{input_str}"
 
-    # 方法1: 尝试用 yt-dlp（可能超时）
+    # 方法1: 尝试用 yt-dlp（可能超时，安静模式）
     try:
         result = subprocess.run(
             ["yt-dlp", "--no-warnings", "--print", "channel_id", url],
@@ -37,16 +37,16 @@ def resolve_youtube_channel(input_str: str) -> str | None:
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    except Exception as e:
-        print(f"yt-dlp failed: {e}")
+    except Exception:
+        pass  # 静默失败，后续方法会处理
 
     # 方法2: 直接获取页面解析 channel_id
     try:
         channel_id = resolve_from_page(url)
         if channel_id:
             return channel_id
-    except Exception as e:
-        print(f"Page parse failed: {e}")
+    except Exception:
+        pass  # 静默失败
 
     return None
 
@@ -73,7 +73,7 @@ def resolve_from_page(url: str) -> str | None:
                 return match.group(1)
 
     except Exception as e:
-        print(f"Failed to resolve from page: {e}")
+        pass  # 静默
 
     return None
 
@@ -108,8 +108,8 @@ async def get_youtube_channel_info(input_str: str) -> dict | None:
                             or thumbnails.get("default", {}).get("url"),
                             "channel_id": channel_id,
                         }
-        except Exception as e:
-            print(f"YouTube API failed: {e}")
+        except Exception:
+            pass  # 静默
 
     # 备用方法：从页面获取
     return await get_channel_info_from_page(input_str, channel_id)
@@ -151,7 +151,7 @@ async def get_channel_info_from_page(input_str: str, channel_id: str) -> dict | 
                     "avatar_url": avatar_url,
                     "channel_id": channel_id,
                 }
-    except Exception as e:
-        print(f"Failed to get channel info from page: {e}")
+    except Exception:
+        pass  # 静默
 
     return None
