@@ -1,13 +1,11 @@
 # backend/seed_data.py  ← 完整替换
 from app.database import SessionLocal, engine, Base
-from app.models.models import Channel, Stream, Platform, StreamStatus
-from datetime import datetime, timezone
+from app.models.models import Channel, Platform
 
 
 def seed_data():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
 
     try:
         # 分别判断 channels 和 streams，避免重复 seed 任意一张表
@@ -66,50 +64,6 @@ def seed_data():
             print(f"[Seed] Inserted {len(channels_data)} channels")
         else:
             print("[Seed] Channels already exist, skipping channel seed")
-
-        # streams 独立判断
-        if db.query(Stream).count() == 0:
-            channels = db.query(Channel).all()
-            ch_map = {ch.channel_id: ch for ch in channels}
-
-            streams_data = [
-                {
-                    "channel_id": ch_map["UC5CwaMl1eIgY8h02uZw7u8A"].id,
-                    "platform": Platform.YOUTUBE,
-                    "video_id": "abc123xyz_suisei",
-                    "title": "【歌枠】星街すいせい 3D LIVE",
-                    "thumbnail_url": "https://i.ytimg.com/vi/abc123xyz/maxresdefault.jpg",
-                    "viewer_count": 15234,
-                    "status": StreamStatus.LIVE,
-                    "started_at": now,
-                },
-                {
-                    "channel_id": ch_map["UCvzGlP9oQwU--Y0r9id_jnA"].id,
-                    "platform": Platform.YOUTUBE,
-                    "video_id": "def456uvw_calli",
-                    "title": "REAPER MC RAP STREAM",
-                    "thumbnail_url": "https://i.ytimg.com/vi/def456uvw/maxresdefault.jpg",
-                    "viewer_count": 8921,
-                    "status": StreamStatus.LIVE,
-                    "started_at": now,
-                },
-                {
-                    "channel_id": ch_map["1203217682"].id,
-                    "platform": Platform.BILIBILI,
-                    "video_id": "1203217682",
-                    "title": "泽音Melody Live",
-                    "thumbnail_url": "https://i0.hdslb.com/bfs/live/new_cover/1203217682.jpg",
-                    "viewer_count": 45678,
-                    "status": StreamStatus.LIVE,
-                    "started_at": now,
-                },
-            ]
-            for st in streams_data:
-                db.add(Stream(**st))
-            db.commit()
-            print(f"[Seed] Inserted {len(streams_data)} streams")
-        else:
-            print("[Seed] Streams already exist, skipping stream seed")
 
     except Exception as e:
         db.rollback()
