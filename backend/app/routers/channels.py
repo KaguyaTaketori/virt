@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.database import SessionLocal
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
-from app.models.models import Channel
+from app.models.models import Channel, Platform
+from app.services.youtube_channel import get_youtube_channel_info
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -37,12 +38,22 @@ def get_channel(channel_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ChannelResponse)
-def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
+async def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
     existing = (
         db.query(Channel).filter(Channel.channel_id == channel.channel_id).first()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Channel already exists")
+
+    # 如果是 YouTube 频道且没有提供头像，自动获取
+    if channel.platform == Platform.YOUTUBE and not channel.avatar_url:
+        channel_info = await get_youtube_channel_info(channel.channel_id)
+        if channel_info and channel_info.get("avatar_url"):
+            channel.avatar_url = channel_info["avatar_url"]
+            # 如果没有提供名称，也使用 API 获取的名称
+            if not channel.name:
+                channel.name = channel_info.get("title", channel.name)
+
     db_channel = Channel(**channel.model_dump())
     db.add(db_channel)
     db.commit()
