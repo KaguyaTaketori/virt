@@ -18,6 +18,15 @@ export interface Channel {
   name: string
   avatar_url: string | null
   is_active: boolean
+  org_id: number | null
+}
+
+export interface Organization {
+  id: number
+  name: string
+  name_en: string | null
+  logo_url: string | null
+  website: string | null
 }
 
 export const channelApi = {
@@ -26,6 +35,14 @@ export const channelApi = {
   create: (data: Partial<Channel>) => api.post('/api/channels', data),
   update: (id: number, data: Partial<Channel>) => api.put(`/api/channels/${id}`, data),
   delete: (id: number) => api.delete(`/api/channels/${id}`),
+}
+
+export const orgApi = {
+  getAll: () => api.get('/api/organizations'),
+  get: (id: number) => api.get(`/api/organizations/${id}`),
+  create: (data: Partial<Organization>) => api.post('/api/organizations', data),
+  update: (id: number, data: Partial<Organization>) => api.put(`/api/organizations/${id}`, data),
+  delete: (id: number) => api.delete(`/api/organizations/${id}`),
 }
 
 export default api
