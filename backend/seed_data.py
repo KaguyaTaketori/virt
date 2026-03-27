@@ -8,10 +8,8 @@ def seed_data():
     db = SessionLocal()
 
     try:
-        # 分别判断 channels 和 streams，避免重复 seed 任意一张表
         if db.query(Channel).count() == 0:
-            # backend/seed_data.py  ← channels_data 部分替换
-            channels_data = [
+            youtube_channels = [
                 # Hololive JP
                 {
                     "platform": Platform.YOUTUBE,
@@ -44,24 +42,51 @@ def seed_data():
                 },
                 {
                     "platform": Platform.YOUTUBE,
-                    "channel_id": "UCL9hJsdk9eQa0IlWbFB2oRg",  # 自行替换成你想追踪的
+                    "channel_id": "UCL9hJsdk9eQa0IlWbFB2oRg",
                     "name": "Chouya Hanabi",
                     "avatar_url": "https://yt3.googleusercontent.com/N7qEUQMbq8z1lQdp4WBUz3vQ83gYiYmPt-alI5K1xMYnOh4uAxuQlUVPneZQKetzACogh6E_qA=s160-c-k-c0x00ffffff-no-rj",
                     "is_active": True,
                 },
-                # Bilibili（scheduler 会自动拉真实状态）
+            ]
+            for ch in youtube_channels:
+                db.add(Channel(**ch))
+
+            bilibili_channels = [
                 {
                     "platform": Platform.BILIBILI,
-                    "channel_id": "1203217682",
+                    "channel_id": "1203217682",   # 泽音Melody — 活跃的 VTuber
                     "name": "泽音Melody",
-                    "avatar_url": "https://i1.hdslb.com/bfs/face/bf9ee18706751a9e21a13e6bc0d66977280165e3.jpg",
+                    "avatar_url": "",
+                    "is_active": True,
+                },
+                {
+                    "platform": Platform.BILIBILI,
+                    "channel_id": "672328094",    # 嘉然今天吃什么（大势 VTuber）
+                    "name": "嘉然今天吃什么",
+                    "avatar_url": "",
+                    "is_active": True,
+                },
+                {
+                    "platform": Platform.BILIBILI,
+                    "channel_id": "672346917",    # 向晚大魔王
+                    "name": "向晚大魔王",
+                    "avatar_url": "",
+                    "is_active": True,
+                },
+                {
+                    "platform": Platform.BILIBILI,
+                    "channel_id": "351609538",    # 珈乐Carol
+                    "name": "珈乐Carol",
+                    "avatar_url": "",
                     "is_active": True,
                 },
             ]
-            for ch in channels_data:
+            for ch in bilibili_channels:
+                if db.query(Channel).filter_by(channel_id=ch["channel_id"]).first():
+                    continue
                 db.add(Channel(**ch))
             db.commit()
-            print(f"[Seed] Inserted {len(channels_data)} channels")
+            print(f"[Seed] Inserted {len(youtube_channels+bilibili_channels)} channels")
         else:
             print("[Seed] Channels already exist, skipping channel seed")
 

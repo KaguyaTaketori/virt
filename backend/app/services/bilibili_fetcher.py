@@ -1,12 +1,12 @@
-# backend/app/services/bilibili_fetcher.py
-from datetime import datetime, timezone   # ← 修复点
+# backend/app/services/bilibili_fetcher.py  ← 完整替换
+from datetime import datetime, timezone
 import httpx
 import asyncio
 import random
 from typing import Optional
 
 BILIBILI_LIVE_API = "https://api.live.bilibili.com"
-BILIBILI_API      = "https://api.bilibili.com"
+BILIBILI_API = "https://api.bilibili.com"
 
 BASE_HEADERS = {
     "User-Agent": (
@@ -20,59 +20,101 @@ BASE_HEADERS = {
 }
 
 
-async def get_room_info(client: httpx.AsyncClient, room_id: str) -> Optional[dict]:
-    await asyncio.sleep(random.uniform(0.5, 1.5))
-    resp = await client.get(
-        f"{BILIBILI_LIVE_API}/room/v1/Room/get_info",
-        params={"room_id": room_id},
-        headers=BASE_HEADERS,
-        timeout=10.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("data") if data.get("code") == 0 else None
+async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
+    """
+    拉单个主播的账号信息（头像、名字）。
+    接口：/x/web-interface/card — 不需要登录，不需要 WBI 签名。
+    每次调用加随机延迟，防止被识别为爬虫。
+    """
+    await asyncio.sleep(random.uniform(0.8, 1.8))
+    try:
+        resp = await client.get(
+            f"{BILIBILI_API}/x/web-interface/card",
+            params={"mid": uid, "photo": "true"},
+            headers=BASE_HEADERS,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            return None
+        card = data.get("data", {}).get("card", {})
+        return {
+            "name": card.get("name"),
+            "avatar_url": card.get("face"),  # 头像 URL
+        }
+    except Exception as e:
+        print(f"[Bilibili] get_user_info uid={uid} error: {e}")
+        return None
 
 
 async def get_rooms_by_uids(client: httpx.AsyncClient, uids: list[str]) -> dict:
-    chunk_size = 50
+    """
+    批量拉直播状态，逐个查询。
+    返回 {uid_str: room_data_dict}。
+    遇到风控时退避。
+    """
     results = {}
-    for i in range(0, len(uids), chunk_size):
-        chunk = uids[i:i + chunk_size]
+
+    for uid in uids:
         await asyncio.sleep(random.uniform(1.0, 2.0))
-        resp = await client.get(
-            f"{BILIBILI_LIVE_API}/room/v1/Room/rooms_by_uids",
-            params={"uids": ",".join(chunk)},
-            headers=BASE_HEADERS,
-            timeout=15.0,
-        )
+
+        try:
+            resp = await client.get(
+                f"{BILIBILI_LIVE_API}/room/v1/Room/getRoomInfoOld",
+                params={"mid": uid},
+                headers=BASE_HEADERS,
+                timeout=15.0,
+            )
+        except httpx.TimeoutException:
+            print(f"[Bilibili] getRoomInfoOld timeout for uid={uid}")
+            continue
+
         if resp.status_code == 412:
             print("[Bilibili] Rate limited (412), backing off 60s")
             await asyncio.sleep(60)
             continue
-        data = resp.json()
+
+        try:
+            data = resp.json()
+        except Exception:
+            continue
+
         if data.get("code") == 0:
-            results.update(data.get("data", {}))
+            room_data = data.get("data", {})
+            if room_data:
+                results[str(uid)] = {
+                    "room_id": room_data.get("roomid"),
+                    "title": room_data.get("title"),
+                    "user_cover": room_data.get("cover"),
+                    "live_status": room_data.get("liveStatus"),
+                    "online": room_data.get("online"),
+                }
+
     return results
 
 
-def parse_bilibili_room(data: dict) -> dict:
-    live_status = data.get("live_status", 0)
+def parse_bilibili_room(room: dict) -> dict:
+    """
+    把 rooms_by_uids 返回的单条 room 数据解析成统一内部格式。
+    live_status: 0=未开播, 1=直播中, 2=轮播
+    """
+    live_status = room.get("live_status", 0)
     status_map = {0: "offline", 1: "live", 2: "upcoming"}
 
     started_at = None
-    live_time = data.get("live_time")
+    live_time = room.get("live_time")
     if live_time and live_status == 1:
         try:
-            # B站返回的是 Unix 整数时间戳
             started_at = datetime.fromtimestamp(int(live_time), tz=timezone.utc)
         except (ValueError, OSError, TypeError):
-            started_at = None
+            pass
 
     return {
-        "video_id": str(data.get("room_id", "")),
-        "title": data.get("title"),
-        "thumbnail_url": data.get("user_cover") or data.get("keyframe"),
+        "video_id": str(room.get("room_id", "")),
+        "title": room.get("title"),
+        "thumbnail_url": room.get("user_cover") or room.get("keyframe"),
         "status": status_map.get(live_status, "offline"),
-        "viewer_count": data.get("online", 0),
+        "viewer_count": room.get("online", 0),
         "started_at": started_at,
     }

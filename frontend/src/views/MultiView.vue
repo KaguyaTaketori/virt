@@ -140,7 +140,7 @@ function getEmbedUrl(ch) {
   if (ch.platform === 'youtube') {
     return `https://www.youtube.com/embed/${ch.id}`
   } else if (ch.platform === 'bilibili') {
-    return `https://player.bilibili.com/player.html?roomid=${ch.id}&autoplay=1`
+    return `https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${ch.id}&quality=0`
   }
   return null
 }

@@ -8,7 +8,9 @@ from app.models.models import Channel, Stream, StreamStatus, Platform
 from app.services.youtube_fetcher import (
     get_channel_live_video_ids, get_videos_details, parse_youtube_stream
 )
-from app.services.bilibili_fetcher import get_rooms_by_uids, parse_bilibili_room
+from app.services.bilibili_fetcher import (
+    get_rooms_by_uids, parse_bilibili_room, get_user_info,
+)
 from app.config import settings
 
 scheduler = AsyncIOScheduler(timezone="UTC")
@@ -152,14 +154,56 @@ def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platfor
             stream.peak_viewers = parsed["viewer_count"]
 
 
+async def sync_bilibili_channels():
+    """
+    每日同步 B站频道的头像和名字到 Channel 表。
+    调用 /x/web-interface/card，串行请求加随机延迟，避免风控。
+    """
+    db = SessionLocal()
+    try:
+        channels = db.query(Channel).filter(
+            Channel.platform == Platform.BILIBILI,
+            Channel.is_active == True
+        ).all()
+
+        if not channels:
+            return
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for ch in channels:
+                info = await get_user_info(client, ch.channel_id)
+                if not info:
+                    continue
+
+                changed = False
+                if info.get("name") and ch.name != info["name"]:
+                    ch.name    = info["name"]
+                    changed    = True
+                if info.get("avatar_url") and ch.avatar_url != info["avatar_url"]:
+                    ch.avatar_url = info["avatar_url"]
+                    changed       = True
+
+                if changed:
+                    ch.updated_at = datetime.now(timezone.utc)
+
+        db.commit()
+        print(f"[Bilibili] Synced channel info for {len(channels)} channels")
+    except Exception as e:
+        print(f"[Bilibili] sync_bilibili_channels error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     now = datetime.now(timezone.utc)
-    # 启动时立刻跑一次发现 job，不用等 6 小时
-    scheduler.add_job(discover_youtube_streams, "interval", hours=6,
-                      id="yt_discover", next_run_time=now)
-    scheduler.add_job(update_youtube_streams, "interval", seconds=60,
+    scheduler.add_job(discover_youtube_streams,  "interval", hours=6,
+                      id="yt_discover",   next_run_time=now)
+    scheduler.add_job(update_youtube_streams,    "interval", seconds=60,
                       id="yt_update")
-    scheduler.add_job(update_bilibili_streams, "interval", minutes=2,
-                      id="bili_update", next_run_time=now)
+    scheduler.add_job(update_bilibili_streams,   "interval", minutes=2,
+                      id="bili_update",   next_run_time=now)
+    scheduler.add_job(sync_bilibili_channels,    "interval", hours=24,
+                      id="bili_sync_ch",  next_run_time=now)
     scheduler.start()
-    print("[Scheduler] yt_discover=6h | yt_update=60s | bili=2min")
+    print("[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h")
