@@ -191,7 +191,6 @@ function shareUrl() {
     return
   }
   
-  // 编码：platform_id,platform_id
   const channelStr = channels.value
     .map(ch => `${ch.platform}_${ch.id}`)
     .join(',')
@@ -202,7 +201,6 @@ function shareUrl() {
   navigator.clipboard.writeText(url).then(() => {
     alert('分享链接已复制到剪贴板')
   }).catch(() => {
-    // 复制失败，显示 URL
     prompt('分享链接：', url)
   })
 }
@@ -281,7 +279,6 @@ function addDanmakuMessages(videoId, messages) {
   messages.forEach(msg => {
     const content = msg.comment || msg.message || ''
     
-    // 处理 sticker
     if (msg.message_type === 'sticker' && msg.sticker_url) {
       queue.push({
         message_type: 'sticker',
@@ -292,12 +289,10 @@ function addDanmakuMessages(videoId, messages) {
         loaded: false
       })
       
-      // 预加载 sticker 图片
       if (!stickerImages.value[msg.sticker_url]) {
         const img = new Image()
         img.onload = () => {
           stickerImages.value[msg.sticker_url] = img
-          // 找到并更新该消息的状态
           queue.forEach(m => {
             if (m.sticker_url === msg.sticker_url) {
               m.loaded = true
@@ -312,7 +307,6 @@ function addDanmakuMessages(videoId, messages) {
       return
     }
     
-    // 处理普通文字消息
     if (!content) return
     
     const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#ffaa00', '#aaff00', '#00aaff']
@@ -330,8 +324,7 @@ function addDanmakuMessages(videoId, messages) {
 }
 
 onMounted(() => {
-  // 优先从 URL 参数读取（分享链接）
-  const shareCode = route.query.c as string
+  const shareCode = Array.isArray(route.query.c) ? route.query.c[0] : route.query.c
   if (shareCode) {
     try {
       const decoded = atob(shareCode)
@@ -342,7 +335,6 @@ onMounted(() => {
       if (channelList.length > 0) {
         channels.value = channelList
         localStorage.setItem('multiview_channels', JSON.stringify(channelList))
-        // 清除 URL 参数，避免刷新时重复
         router.replace({ name: 'MultiView' })
         return
       }
@@ -351,7 +343,6 @@ onMounted(() => {
     }
   }
   
-  // 从 localStorage 恢复频道
   const saved = localStorage.getItem('multiview_channels')
   if (saved) {
     try {
@@ -391,14 +382,12 @@ function initDanmaku() {
     startDanmakuLoop(idx)
   })
   
-  // 添加窗口大小变化监听
   window.addEventListener('resize', handleResize)
 }
 
 function handleResize() {
   if (!showDanmaku.value) return
   
-  // 重新设置所有 canvas 尺寸
   channels.value.forEach((ch, idx) => {
     const canvas = danmakuCanvases.value[idx]
     if (!canvas) return
@@ -407,7 +396,6 @@ function handleResize() {
     canvas.width = rect.width
     canvas.height = rect.height
     
-    // 更新 context
     const ctx = canvas.getContext('2d')
     danmakuContexts.value[idx] = { ...danmakuContexts.value[idx], ctx, canvas }
   })
@@ -451,21 +439,17 @@ function renderDanmaku(idx) {
       continue
     }
     
-    // 处理 sticker
     if (msg.message_type === 'sticker') {
       const img = stickerImages.value[msg.sticker_url]
       if (img) {
-        // 绘制 sticker 图片 (50x50)
         ctx.drawImage(img, msg.x, msg.y, 50, 50)
       } else if (msg.loaded === false) {
-        // 图片未加载，显示 alt 文字作为后备
         ctx.fillStyle = '#ffcc00'
         ctx.fillText(msg.alt_text || 'Sticker', msg.x, msg.y)
       }
       continue
     }
     
-    // 普通文字消息
     ctx.fillStyle = msg.color || '#ffffff'
     ctx.fillText(msg.content || msg.message || '', msg.x, msg.y)
   }

@@ -19,7 +19,6 @@ from app.config import settings
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-# ── Job 1: 发现新 YouTube 直播（高配额，每6小时）────────────────────────
 async def discover_youtube_streams():
     """
     search.list = 100配额/次。只对当前没有 LIVE/UPCOMING 记录的频道执行。
@@ -72,7 +71,6 @@ async def discover_youtube_streams():
         db.close()
 
 
-# ── Job 2: 轮询已知 YouTube 直播（1配额/50个，每分钟）──────────────────
 async def update_youtube_streams():
     if not settings.youtube_api_key:
         return
@@ -114,7 +112,6 @@ async def update_youtube_streams():
         db.close()
 
 
-# ── Job 3: Bilibili（每2分钟，防412）────────────────────────────────────
 async def update_bilibili_streams():
     db = SessionLocal()
     try:
@@ -146,7 +143,6 @@ async def update_bilibili_streams():
         db.close()
 
 
-# ── 通用 upsert：接收 channel.id（int），不再二次查库 ──────────────────
 def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platform):
     stream = (
         db.query(Stream)
