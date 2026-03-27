@@ -114,7 +114,6 @@ def parse_youtube_stream(item: dict) -> Optional[dict]:
     concurrent = live_details.get("concurrentViewers")
     viewer_count = int(concurrent) if concurrent and concurrent.isdigit() else 0
 
-    # 缩略图优先级：maxres > high > medium > default
     thumbnails = snippet.get("thumbnails", {})
     thumbnail_url = (
         thumbnails.get("maxres", {}).get("url")

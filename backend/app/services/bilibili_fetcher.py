@@ -40,7 +40,7 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
         card = data.get("data", {}).get("card", {})
         return {
             "name": card.get("name"),
-            "avatar_url": card.get("face"),  # 头像 URL
+            "avatar_url": card.get("face"),
         }
     except Exception as e:
         print(f"[Bilibili] get_user_info uid={uid} error: {e}")

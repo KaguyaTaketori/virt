@@ -97,7 +97,6 @@ class VideoPoller:
         self._initialize()
 
         if not self.continuation:
-            # 尝试获取录播弹幕（一次性）
             self._fetch_replay_once()
             self.running = False
             return
