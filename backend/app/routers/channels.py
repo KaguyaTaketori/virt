@@ -87,9 +87,23 @@ def update_channel(
 
 @router.delete("/{channel_id}")
 def delete_channel(channel_id: int, db: Session = Depends(get_db)):
+    from app.models.models import Stream, Danmaku
+
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
+
+    # 先删除相关的 streams 和 danmakus
+    db.query(Danmaku).filter(
+        Danmaku.stream_id.in_(
+            db.query(Stream.id).filter(Stream.channel_id == channel_id)
+        )
+    ).delete(synchronize_session=False)
+
+    db.query(Stream).filter(Stream.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
+
     db.delete(channel)
     db.commit()
     return {"message": "Channel deleted successfully"}
