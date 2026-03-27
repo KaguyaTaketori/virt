@@ -99,6 +99,7 @@ function openMultiView(stream) {
   const channels = [{ platform, id: ids }]
   localStorage.setItem('multiview_channels', JSON.stringify(channels))
   
+  // 正常观看：不带 URL 参数
   router.push({ name: 'MultiView' })
 }
 </script>
