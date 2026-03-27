@@ -11,6 +11,7 @@
         :src="stream.thumbnail_url"
         :alt="stream.title ?? ''"
         class="w-full h-full object-cover"
+        referrerpolicy="no-referrer"
       />
       <div v-else class="w-full h-full flex items-center justify-center text-gray-600">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -43,6 +44,7 @@
           :src="stream.channel_avatar"
           :alt="stream.channel_name ?? ''"
           class="w-10 h-10 rounded-full object-cover bg-gray-700 flex-shrink-0"
+          referrerpolicy="no-referrer"
         />
         <div v-else class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm font-bold flex-shrink-0">
           {{ stream.channel_name?.charAt(0).toUpperCase() ?? '?' }}
