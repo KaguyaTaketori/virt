@@ -11,6 +11,13 @@
           <span class="text-sm text-gray-300">弹幕</span>
         </label>
         <button 
+          @click="shareUrl" 
+          class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 transition"
+          title="复制分享链接"
+        >
+          分享
+        </button>
+        <button 
           @click="$router.back()" 
           class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 transition"
         >
@@ -98,6 +105,10 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
+const route = useRoute()
+const router = useRouter()
 
 const newChannel = ref({
   platform: 'youtube',
@@ -172,6 +183,28 @@ function removeChannel(idx) {
   }
   channels.value.splice(idx, 1)
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+}
+
+function shareUrl() {
+  if (channels.value.length === 0) {
+    alert('请先添加频道')
+    return
+  }
+  
+  // 编码：platform_id,platform_id
+  const channelStr = channels.value
+    .map(ch => `${ch.platform}_${ch.id}`)
+    .join(',')
+  const shareCode = btoa(channelStr)
+  
+  const url = `${window.location.origin}/multiview?c=${shareCode}`
+  
+  navigator.clipboard.writeText(url).then(() => {
+    alert('分享链接已复制到剪贴板')
+  }).catch(() => {
+    // 复制失败，显示 URL
+    prompt('分享链接：', url)
+  })
 }
 
 function connectWs(videoId) {
@@ -297,6 +330,27 @@ function addDanmakuMessages(videoId, messages) {
 }
 
 onMounted(() => {
+  // 优先从 URL 参数读取（分享链接）
+  const shareCode = route.query.c as string
+  if (shareCode) {
+    try {
+      const decoded = atob(shareCode)
+      const channelList = decoded.split(',').map(item => {
+        const [platform, id] = item.split('_')
+        return { platform, id }
+      }).filter(ch => ch.platform && ch.id)
+      if (channelList.length > 0) {
+        channels.value = channelList
+        localStorage.setItem('multiview_channels', JSON.stringify(channelList))
+        // 清除 URL 参数，避免刷新时重复
+        router.replace({ name: 'MultiView' })
+        return
+      }
+    } catch (e) {
+      console.error('Failed to parse share code:', e)
+    }
+  }
+  
   // 从 localStorage 恢复频道
   const saved = localStorage.getItem('multiview_channels')
   if (saved) {
