@@ -36,6 +36,14 @@
         <n-form-item label="Logo URL">
           <n-input v-model:value="formData.logo_url" placeholder="https://..." />
         </n-form-item>
+        <n-form-item label="Logo 形状">
+          <n-radio-group v-model:value="formData.logo_shape">
+            <n-space>
+              <n-radio value="circle">圆形</n-radio>
+              <n-radio value="square">方形</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
         <n-form-item label="官网">
           <n-input v-model:value="formData.website" placeholder="https://..." />
         </n-form-item>
@@ -64,6 +72,14 @@
         <n-form-item label="Logo URL">
           <n-input v-model:value="formData.logo_url" />
         </n-form-item>
+        <n-form-item label="Logo 形状">
+          <n-radio-group v-model:value="formData.logo_shape">
+            <n-space>
+              <n-radio value="circle">圆形</n-radio>
+              <n-radio value="square">方形</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
         <n-form-item label="官网">
           <n-input v-model:value="formData.website" />
         </n-form-item>
@@ -80,7 +96,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { NButton, NModal, NForm, NFormItem, NSpace, NTag, NDataTable, type DataTableColumns } from 'naive-ui'
+import { NButton, NModal, NForm, NFormItem, NSpace, NTag, NDataTable, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
 import { orgApi, type Organization } from '../api'
 
 const organizations = ref<Organization[]>([])
@@ -94,7 +110,8 @@ const formData = ref({
   name: '',
   name_en: '',
   logo_url: '',
-  website: ''
+  website: '',
+  logo_shape: 'circle'
 })
 
 const columns: DataTableColumns<Organization> = [
@@ -104,7 +121,9 @@ const columns: DataTableColumns<Organization> = [
     width: 80,
     render: (row) => h('img', {
       src: row.logo_url || '',
-      style: 'width: 40px; height: 40px; border-radius: 50%; object-fit: cover;',
+      style: row.logo_shape === 'square' 
+        ? 'width: 40px; height: 40px; border-radius: 8px; object-fit: contain;'
+        : 'width: 40px; height: 40px; border-radius: 50%; object-fit: cover;',
       referrerPolicy: 'no-referrer'
     })
   },
@@ -163,7 +182,8 @@ function editOrganization(org: Organization) {
     name: org.name,
     name_en: org.name_en || '',
     logo_url: org.logo_url || '',
-    website: org.website || ''
+    website: org.website || '',
+    logo_shape: org.logo_shape || 'circle'
   }
   showEditModal.value = true
 }
@@ -188,7 +208,8 @@ function closeModal() {
     name: '',
     name_en: '',
     logo_url: '',
-    website: ''
+    website: '',
+    logo_shape: 'circle'
   }
 }
 
@@ -198,7 +219,8 @@ async function submitForm() {
       name: formData.value.name,
       name_en: formData.value.name_en || null,
       logo_url: formData.value.logo_url || null,
-      website: formData.value.website || null
+      website: formData.value.website || null,
+      logo_shape: formData.value.logo_shape
     }
 
     if (showEditModal.value && editingId.value) {

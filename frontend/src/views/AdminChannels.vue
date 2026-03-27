@@ -64,6 +64,14 @@
         <n-form-item label="头像 URL">
           <n-input v-model:value="formData.avatar_url" placeholder="https://..." />
         </n-form-item>
+        <n-form-item label="头像形状">
+          <n-radio-group v-model:value="formData.avatar_shape">
+            <n-space>
+              <n-radio value="circle">圆形</n-radio>
+              <n-radio value="square">方形</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -92,6 +100,14 @@
         <n-form-item label="头像 URL">
           <n-input v-model:value="formData.avatar_url" />
         </n-form-item>
+        <n-form-item label="头像形状">
+          <n-radio-group v-model:value="formData.avatar_shape">
+            <n-space>
+              <n-radio value="circle">圆形</n-radio>
+              <n-radio value="square">方形</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
         <n-form-item>
           <n-checkbox v-model:checked="formData.is_active">启用</n-checkbox>
         </n-form-item>
@@ -108,7 +124,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { NButton, NSelect, NInput, NModal, NForm, NFormItem, NSpace, NCheckbox, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NSelect, NInput, NModal, NForm, NFormItem, NSpace, NCheckbox, NTag, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
 import { channelApi, type Channel } from '../api'
 
 const channels = ref<Channel[]>([])
@@ -126,7 +142,8 @@ const formData = ref({
   channel_id: '',
   name: '',
   avatar_url: '',
-  is_active: true
+  is_active: true,
+  avatar_shape: 'circle'
 })
 
 const formRules = {
@@ -163,7 +180,9 @@ const columns: DataTableColumns<Channel> = [
     width: 80,
     render: (row) => h('img', {
       src: row.avatar_url || '',
-      style: 'width: 40px; height: 40px; border-radius: 50%; object-fit: cover;',
+      style: row.avatar_shape === 'square'
+        ? 'width: 40px; height: 40px; border-radius: 8px; object-fit: contain;'
+        : 'width: 40px; height: 40px; border-radius: 50%; object-fit: cover;',
       referrerPolicy: 'no-referrer'
     })
   },
@@ -237,7 +256,8 @@ function editChannel(channel: Channel) {
     channel_id: channel.channel_id,
     name: channel.name,
     avatar_url: channel.avatar_url || '',
-    is_active: channel.is_active
+    is_active: channel.is_active,
+    avatar_shape: channel.avatar_shape || 'circle'
   }
   showEditModal.value = true
 }
@@ -263,7 +283,8 @@ function closeModal() {
     channel_id: '',
     name: '',
     avatar_url: '',
-    is_active: true
+    is_active: true,
+    avatar_shape: 'circle'
   }
 }
 
@@ -274,7 +295,8 @@ async function submitForm() {
       channel_id: formData.value.channel_id,
       name: formData.value.name,
       avatar_url: formData.value.avatar_url || null,
-      is_active: formData.value.is_active
+      is_active: formData.value.is_active,
+      avatar_shape: formData.value.avatar_shape
     }
 
     if (showEditModal.value && editingId.value) {

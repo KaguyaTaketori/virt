@@ -9,6 +9,7 @@ class OrganizationBase(BaseModel):
     name_en: Optional[str] = None
     logo_url: Optional[str] = None
     website: Optional[str] = None
+    logo_shape: Optional[str] = "circle"  # circle or square
 
 
 class OrganizationCreate(OrganizationBase):
@@ -20,6 +21,7 @@ class OrganizationUpdate(BaseModel):
     name_en: Optional[str] = None
     logo_url: Optional[str] = None
     website: Optional[str] = None
+    logo_shape: Optional[str] = None
 
 
 class OrganizationResponse(OrganizationBase):
@@ -36,6 +38,7 @@ class ChannelBase(BaseModel):
     avatar_url: Optional[str] = None
     is_active: bool = True
     org_id: Optional[int] = None
+    avatar_shape: Optional[str] = "circle"  # circle or square
 
 
 class ChannelUpdate(BaseModel):
@@ -45,6 +48,7 @@ class ChannelUpdate(BaseModel):
     avatar_url: Optional[str] = None
     is_active: Optional[bool] = None
     org_id: Optional[int] = None
+    avatar_shape: Optional[str] = None
 
 
 class ChannelCreate(ChannelBase):
