@@ -27,20 +27,7 @@ def resolve_youtube_channel(input_str: str) -> str | None:
     elif not input_str.startswith("http"):
         url = f"https://www.youtube.com/{input_str}"
 
-    # 方法1: 尝试用 yt-dlp（可能超时，安静模式）
-    try:
-        result = subprocess.run(
-            ["yt-dlp", "--no-warnings", "--print", "channel_id", url],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass  # 静默失败，后续方法会处理
-
-    # 方法2: 直接获取页面解析 channel_id
+    # 直接从页面解析 channel_id（更快）
     try:
         channel_id = resolve_from_page(url)
         if channel_id:
