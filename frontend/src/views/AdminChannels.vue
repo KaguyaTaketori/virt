@@ -1,186 +1,121 @@
 <template>
   <div class="container mx-auto px-4 py-8">
-    <div class="mb-8 flex items-center justify-between">
+    <div class="mb-6 flex items-center justify-between">
       <div>
         <h1 class="text-3xl font-bold mb-2">频道管理</h1>
         <p class="text-gray-400">管理 VTuber 频道信息</p>
       </div>
-      <button
-        @click="showAddModal = true"
-        class="px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 transition"
-      >
+      <n-button type="primary" @click="showAddModal = true">
         添加频道
-      </button>
+      </n-button>
     </div>
 
     <!-- 筛选 -->
-    <div class="mb-6 flex flex-wrap gap-4">
-      <select v-model="filterPlatform" class="bg-gray-700 border border-gray-600 rounded px-3 py-2">
-        <option value="">全部平台</option>
-        <option value="youtube">YouTube</option>
-        <option value="bilibili">Bilibili</option>
-      </select>
-      <select v-model="filterActive" class="bg-gray-700 border border-gray-600 rounded px-3 py-2">
-        <option value="">全部状态</option>
-        <option value="true">启用</option>
-        <option value="false">禁用</option>
-      </select>
+    <div class="mb-4 flex flex-wrap gap-4">
+      <n-select
+        v-model:value="filterPlatform"
+        placeholder="全部平台"
+        :options="platformOptions"
+        clearable
+        style="width: 150px"
+      />
+      <n-select
+        v-model:value="filterActive"
+        placeholder="全部状态"
+        :options="statusOptions"
+        clearable
+        style="width: 150px"
+      />
+      <n-input
+        v-model:value="searchText"
+        placeholder="搜索名称..."
+        clearable
+        style="width: 200px"
+      />
     </div>
 
-    <!-- 加载状态 -->
-    <div v-if="loading" class="flex justify-center py-12">
-      <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-pink-500"></div>
-    </div>
-
-    <!-- 频道列表 -->
-    <div v-else class="bg-gray-800 rounded-lg overflow-hidden">
-      <table class="w-full">
-        <thead class="bg-gray-700">
-          <tr>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">头像</th>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">名称</th>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">平台</th>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">Channel ID</th>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">状态</th>
-            <th class="px-4 py-3 text-left text-sm font-medium text-gray-300">操作</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-700">
-          <tr v-for="channel in filteredChannels" :key="channel.id" class="hover:bg-gray-750">
-            <td class="px-4 py-3">
-              <img
-                v-if="channel.avatar_url"
-                :src="channel.avatar_url"
-                :alt="channel.name"
-                class="w-10 h-10 rounded-full object-cover"
-                referrerpolicy="no-referrer"
-              />
-              <div v-else class="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-gray-300">
-                {{ channel.name.charAt(0).toUpperCase() }}
-              </div>
-            </td>
-            <td class="px-4 py-3 text-gray-100">{{ channel.name }}</td>
-            <td class="px-4 py-3">
-              <span
-                class="text-xs px-2 py-1 rounded font-medium"
-                :class="channel.platform === 'youtube' ? 'bg-red-600/20 text-red-400' : 'bg-blue-600/20 text-blue-400'"
-              >
-                {{ channel.platform === 'youtube' ? 'YouTube' : 'Bilibili' }}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-gray-400 text-sm font-mono">{{ channel.channel_id }}</td>
-            <td class="px-4 py-3">
-              <span
-                class="text-xs px-2 py-1 rounded"
-                :class="channel.is_active ? 'bg-green-600/20 text-green-400' : 'bg-gray-600/20 text-gray-400'"
-              >
-                {{ channel.is_active ? '启用' : '禁用' }}
-              </span>
-            </td>
-            <td class="px-4 py-3">
-              <button
-                @click="editChannel(channel)"
-                class="text-blue-400 hover:text-blue-300 mr-3"
-              >
-                编辑
-              </button>
-              <button
-                @click="deleteChannel(channel.id)"
-                class="text-red-400 hover:text-red-300"
-              >
-                删除
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div v-if="filteredChannels.length === 0" class="text-center py-12 text-gray-500">
-        暂无频道数据
-      </div>
-    </div>
+    <!-- 表格 -->
+    <n-data-table
+      :columns="columns"
+      :data="filteredChannels"
+      :loading="loading"
+      :row-key="(row: Channel) => row.id"
+      :pagination="pagination"
+      :bordered="false"
+    />
 
     <!-- 添加/编辑弹窗 -->
-    <div v-if="showAddModal || showEditModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="closeModal">
-      <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-        <h2 class="text-xl font-bold mb-4">{{ showEditModal ? '编辑频道' : '添加频道' }}</h2>
-        
-        <form @submit.prevent="submitForm" class="space-y-4">
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">平台</label>
-            <select v-model="formData.platform" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2">
-              <option value="youtube">YouTube</option>
-              <option value="bilibili">Bilibili</option>
-            </select>
-          </div>
-          
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Channel ID / @用户名 / URL</label>
-            <input
-              v-model="formData.channel_id"
-              type="text"
-              class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-              placeholder="UC... / @用户名 / https://youtube.com/@..."
-              required
-            />
-          </div>
-          
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">名称（可选，自动获取）</label>
-            <input
-              v-model="formData.name"
-              type="text"
-              class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-              placeholder="不填则自动获取"
-            />
-          </div>
-          
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">头像 URL</label>
-            <input
-              v-model="formData.avatar_url"
-              type="text"
-              class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-              placeholder="https://..."
-            />
-          </div>
+    <n-modal
+      v-model:show="showAddModal"
+      preset="card"
+      title="添加频道"
+      style="width: 500px"
+    >
+      <n-form ref="formRef" :model="formData" :rules="formRules">
+        <n-form-item label="平台" path="platform">
+          <n-select v-model:value="formData.platform" :options="platformOptions" />
+        </n-form-item>
+        <n-form-item label="Channel ID" path="channel_id">
+          <n-input v-model:value="formData.channel_id" placeholder="UC... / @用户名 / URL" />
+        </n-form-item>
+        <n-form-item label="名称（可选，自动获取）">
+          <n-input v-model:value="formData.name" placeholder="不填则自动获取" />
+        </n-form-item>
+        <n-form-item label="头像 URL">
+          <n-input v-model:value="formData.avatar_url" placeholder="https://..." />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showAddModal = false">取消</n-button>
+          <n-button type="primary" @click="submitForm">添加</n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
-          <div v-if="showEditModal">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input v-model="formData.is_active" type="checkbox" class="w-4 h-4 accent-pink-500">
-              <span class="text-sm text-gray-300">启用</span>
-            </label>
-          </div>
-          
-          <div class="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              @click="closeModal"
-              class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 transition"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              class="px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 transition"
-            >
-              {{ showEditModal ? '保存' : '添加' }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <n-modal
+      v-model:show="showEditModal"
+      preset="card"
+      title="编辑频道"
+      style="width: 500px"
+    >
+      <n-form ref="formRef" :model="formData" :rules="formRules">
+        <n-form-item label="平台" path="platform">
+          <n-select v-model:value="formData.platform" :options="platformOptions" />
+        </n-form-item>
+        <n-form-item label="Channel ID" path="channel_id">
+          <n-input v-model:value="formData.channel_id" placeholder="UC..." />
+        </n-form-item>
+        <n-form-item label="名称">
+          <n-input v-model:value="formData.name" />
+        </n-form-item>
+        <n-form-item label="头像 URL">
+          <n-input v-model:value="formData.avatar_url" />
+        </n-form-item>
+        <n-form-item>
+          <n-checkbox v-model:checked="formData.is_active">启用</n-checkbox>
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="closeModal">取消</n-button>
+          <n-button type="primary" @click="submitForm">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, h } from 'vue'
+import { NButton, NSelect, NInput, NModal, NForm, NFormItem, NSpace, NCheckbox, NTag, type DataTableColumns } from 'naive-ui'
 import { channelApi, type Channel } from '../api'
 
 const channels = ref<Channel[]>([])
 const loading = ref(false)
-const filterPlatform = ref('')
-const filterActive = ref('')
+const filterPlatform = ref<string | null>(null)
+const filterActive = ref<string | null>(null)
+const searchText = ref('')
 
 const showAddModal = ref(false)
 const showEditModal = ref(false)
@@ -194,13 +129,93 @@ const formData = ref({
   is_active: true
 })
 
+const formRules = {
+  channel_id: { required: true, message: '请输入 Channel ID', trigger: 'blur' }
+}
+
+const platformOptions = [
+  { label: 'YouTube', value: 'youtube' },
+  { label: 'Bilibili', value: 'bilibili' }
+]
+
+const statusOptions = [
+  { label: '启用', value: 'true' },
+  { label: '禁用', value: 'false' }
+]
+
+const pagination = {
+  pageSize: 20
+}
+
 const filteredChannels = computed(() => {
   return channels.value.filter(ch => {
     if (filterPlatform.value && ch.platform !== filterPlatform.value) return false
-    if (filterActive.value && ch.is_active !== (filterActive.value === 'true')) return false
+    if (filterActive.value && String(ch.is_active) !== filterActive.value) return false
+    if (searchText.value && !ch.name.toLowerCase().includes(searchText.value.toLowerCase())) return false
     return true
   })
 })
+
+const columns: DataTableColumns<Channel> = [
+  {
+    title: '头像',
+    key: 'avatar_url',
+    width: 80,
+    render: (row) => h('img', {
+      src: row.avatar_url || '',
+      style: 'width: 40px; height: 40px; border-radius: 50%; object-fit: cover;',
+      referrerPolicy: 'no-referrer'
+    })
+  },
+  {
+    title: '名称',
+    key: 'name',
+    sorter: (a, b) => a.name.localeCompare(b.name)
+  },
+  {
+    title: '平台',
+    key: 'platform',
+    width: 120,
+    render: (row) => h(NTag, {
+      type: row.platform === 'youtube' ? 'error' : 'info',
+      size: 'small'
+    }, { default: () => row.platform === 'youtube' ? 'YouTube' : 'Bilibili' })
+  },
+  {
+    title: 'Channel ID',
+    key: 'channel_id',
+    render: (row) => h('code', { style: 'font-size: 12px; color: #888;' }, row.channel_id)
+  },
+  {
+    title: '状态',
+    key: 'is_active',
+    width: 100,
+    sorter: (a, b) => (a.is_active ? 1 : 0) - (b.is_active ? 1 : 0),
+    render: (row) => h(NTag, {
+      type: row.is_active ? 'success' : 'default',
+      size: 'small'
+    }, { default: () => row.is_active ? '启用' : '禁用' })
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 150,
+    render: (row) => h(NSpace, { size: 'small' }, {
+      default: () => [
+        h(NButton, {
+          size: 'small',
+          type: 'info',
+          onClick: () => editChannel(row)
+        }, { default: () => '编辑' }),
+        h(NButton, {
+          size: 'small',
+          type: 'error',
+          onClick: () => deleteChannel(row.id)
+        }, { default: () => '删除' })
+      ]
+    })
+  }
+]
 
 async function fetchChannels() {
   loading.value = true
