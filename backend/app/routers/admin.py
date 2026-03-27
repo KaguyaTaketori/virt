@@ -1,4 +1,3 @@
-# backend/app/routers/admin.py  ← 完整替换
 from fastapi import APIRouter
 from app.scheduler_tasks import (
     discover_youtube_streams,

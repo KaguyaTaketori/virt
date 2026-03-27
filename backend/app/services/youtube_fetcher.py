@@ -1,4 +1,3 @@
-# backend/app/services/youtube_fetcher.py  ← 完整替换
 import httpx
 import asyncio
 from datetime import datetime, timezone
@@ -13,7 +12,6 @@ def _parse_yt_datetime(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
     try:
-        # Python 3.11+ 直接支持 Z 后缀，3.10 以下需替换
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
@@ -79,7 +77,7 @@ async def get_videos_details(
 
     all_items = []
     for i in range(0, len(video_ids), 50):
-        chunk = video_ids[i:i + 50]
+        chunk = video_ids[i : i + 50]
         resp = await client.get(
             f"{YOUTUBE_API_BASE}/videos",
             params={
@@ -104,7 +102,6 @@ def parse_youtube_stream(item: dict) -> Optional[dict]:
     live_details = item.get("liveStreamingDetails", {})
     life_cycle = snippet.get("liveBroadcastContent", "none")
 
-    # "none" 说明是普通视频或已结束很久的录播，不需要追踪
     if life_cycle == "none" and not live_details.get("actualStartTime"):
         return None
 
@@ -115,7 +112,6 @@ def parse_youtube_stream(item: dict) -> Optional[dict]:
     }
 
     concurrent = live_details.get("concurrentViewers")
-    # 统计总观看也可用，但并发更准确
     viewer_count = int(concurrent) if concurrent and concurrent.isdigit() else 0
 
     # 缩略图优先级：maxres > high > medium > default

@@ -18,7 +18,7 @@ class DanmakuPoller:
         """启动指定视频的轮询任务"""
         with self.lock:
             if video_id in self.pollers:
-                return  # 已经在运行
+                return
 
             poller = VideoPoller(video_id)
             self.pollers[video_id] = poller
@@ -110,7 +110,7 @@ class VideoPoller:
                     if new_messages:
                         asyncio.run(self._send_messages(new_messages))
 
-                time.sleep(1.0)  # 1秒轮询间隔
+                time.sleep(1.0)
             except Exception as e:
                 print(f"Polling error for {self.video_id}: {e}")
                 time.sleep(5)
@@ -130,11 +130,9 @@ class VideoPoller:
 
             messages, _ = self.downloader.parse_live_chat_messages(chat_data)
 
-            # 额外解析 sticker 消息
             sticker_messages = self._parse_sticker_messages(chat_data)
             messages.extend(sticker_messages)
 
-            # 更新continuation token
             next_cont = self.downloader.extract_next_continuation(chat_data)
             if next_cont:
                 self.continuation = next_cont
@@ -149,7 +147,6 @@ class VideoPoller:
         messages = []
 
         try:
-            # 获取 actions
             actions = None
             if "actions" in chat_data:
                 actions = chat_data["actions"]
@@ -164,7 +161,6 @@ class VideoPoller:
                 return messages
 
             for action in actions:
-                # 处理录播中的 sticker
                 if "replayChatItemAction" in action:
                     replay_action = action["replayChatItemAction"]
                     video_offset = replay_action.get("videoOffsetTimeMsec", "0")
@@ -177,7 +173,6 @@ class VideoPoller:
                         if sticker_msg:
                             messages.append(sticker_msg)
 
-                # 处理直播中的 sticker
                 elif "addChatItemAction" in action:
                     item = action["addChatItemAction"]["item"]
                     video_offset = "0"
@@ -204,7 +199,6 @@ class VideoPoller:
 
             renderer = item["liveChatStickerRenderer"]
 
-            # 获取 sticker 图片 URL
             sticker = renderer.get("sticker", {})
             thumbnails = sticker.get("thumbnails", [])
             img_url = thumbnails[0].get("url", "") if thumbnails else ""
@@ -212,13 +206,11 @@ class VideoPoller:
             if not img_url:
                 return None
 
-            # 获取 alt 文字
             accessibility = sticker.get("accessibility", {})
             alt_text = accessibility.get("accessibilityData", {}).get(
                 "label", "Sticker"
             )
 
-            # 获取作者信息
             author = renderer.get("authorName", {})
             author_name = author.get("simpleText", "").strip() if author else ""
             author_id = renderer.get("authorExternalChannelId", "")
@@ -277,7 +269,6 @@ class VideoPoller:
                 self.last_message_ids.add(msg_id)
                 new_messages.append(msg)
 
-        # 限制发送数量，避免消息太多
         if len(new_messages) > 50:
             new_messages = new_messages[-50:]
 

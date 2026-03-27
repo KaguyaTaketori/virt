@@ -8,12 +8,9 @@ from app.scheduler_tasks import start_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时：创建数据库表
     Base.metadata.create_all(bind=engine)
-    # 启动定时任务
     start_scheduler()
     yield
-    # 关闭时：清理资源
 
 
 app = FastAPI(
@@ -23,7 +20,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 配置 CORS 允许前端跨域请求
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -32,7 +28,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由
 app.include_router(streams.router)
 app.include_router(channels.router)
 app.include_router(danmaku.router)

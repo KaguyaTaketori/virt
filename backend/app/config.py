@@ -3,10 +3,10 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     youtube_api_key: str = ""
-    bilibili_sessdata: str = ""  # 可选，B站账号 cookie
+    bilibili_sessdata: str = ""
     db_url: str = "sqlite:///./streams.db"
-    enable_danmaku: bool = False  # 是否启用弹幕
-    danmaku_storage_path: str = "./danmaku_data"  # 弹幕JSON文件存储目录
+    enable_danmaku: bool = False
+    danmaku_storage_path: str = "./danmaku_data"
 
     class Config:
         env_file = ".env"
