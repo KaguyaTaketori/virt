@@ -115,24 +115,23 @@
           </div>
           
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Channel ID</label>
+            <label class="block text-sm text-gray-400 mb-1">Channel ID / @用户名 / URL</label>
             <input
               v-model="formData.channel_id"
               type="text"
               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-              placeholder="UC... 或 房间号"
+              placeholder="UC... / @用户名 / https://youtube.com/@..."
               required
             />
           </div>
           
           <div>
-            <label class="block text-sm text-gray-400 mb-1">名称</label>
+            <label class="block text-sm text-gray-400 mb-1">名称（可选，自动获取）</label>
             <input
               v-model="formData.name"
               type="text"
               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-              placeholder="频道名称"
-              required
+              placeholder="不填则自动获取"
             />
           </div>
           
