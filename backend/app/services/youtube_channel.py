@@ -1,3 +1,5 @@
+import re
+import subprocess
 import httpx
 from app.config import settings
 
@@ -5,8 +7,38 @@ from app.config import settings
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-async def get_youtube_channel_info(channel_id: str) -> dict | None:
+def resolve_youtube_channel(input_str: str) -> str | None:
+    """解析各种YouTube频道格式，返回channel_id"""
+    if not input_str:
+        return None
+
+    # 如果已经是 channel_id 格式 (UC开头)
+    if input_str.startswith("UC") and len(input_str) >= 22:
+        return input_str
+
+    try:
+        # 使用 yt-dlp 解析
+        result = subprocess.run(
+            ["yt-dlp", "--print", "channel_id", input_str],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception as e:
+        print(f"Failed to resolve channel: {e}")
+
+    return None
+
+
+async def get_youtube_channel_info(input_str: str) -> dict | None:
     """通过 YouTube Data API 获取频道信息"""
+    # 先解析为 channel_id
+    channel_id = resolve_youtube_channel(input_str)
+    if not channel_id:
+        return None
+
     if not settings.youtube_api_key:
         return None
 
@@ -34,6 +66,7 @@ async def get_youtube_channel_info(channel_id: str) -> dict | None:
                 "title": snippet.get("title"),
                 "avatar_url": thumbnails.get("medium", {}).get("url")
                 or thumbnails.get("default", {}).get("url"),
+                "channel_id": channel_id,
             }
     except Exception as e:
         print(f"Failed to get YouTube channel info for {channel_id}: {e}")
