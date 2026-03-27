@@ -12,20 +12,68 @@ def resolve_youtube_channel(input_str: str) -> str | None:
     if not input_str:
         return None
 
+    # 清理输入
+    input_str = input_str.strip()
+
+    # 如果已经是 channel_id 格式 (UC开头)
     if input_str.startswith("UC") and len(input_str) >= 22:
         return input_str
 
+    # 转换为完整 URL
+    url = input_str
+    if input_str.startswith("@"):
+        username = input_str[1:]
+        url = f"https://www.youtube.com/@{username}"
+    elif not input_str.startswith("http"):
+        url = f"https://www.youtube.com/{input_str}"
+
+    # 方法1: 尝试用 yt-dlp（可能超时）
     try:
         result = subprocess.run(
-            ["yt-dlp", "--print", "channel_id", input_str],
+            ["yt-dlp", "--no-warnings", "--print", "channel_id", url],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=15,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception as e:
-        print(f"Failed to resolve channel: {e}")
+        print(f"yt-dlp failed: {e}")
+
+    # 方法2: 直接获取页面解析 channel_id
+    try:
+        channel_id = resolve_from_page(url)
+        if channel_id:
+            return channel_id
+    except Exception as e:
+        print(f"Page parse failed: {e}")
+
+    return None
+
+
+def resolve_from_page(url: str) -> str | None:
+    """从 YouTube 页面获取 channel_id"""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        resp = httpx.get(url, headers=headers, timeout=10.0)
+        html = resp.text
+
+        # 查找 channel_id (已经是完整 UC 格式)
+        patterns = [
+            r'"channelId":"(UC[0-9a-zA-Z_-]{22})"',
+            r'"externalId":"(UC[0-9a-zA-Z_-]{22})"',
+            r"channel_id=(UC[0-9a-zA-Z_-]{22})",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, html)
+            if match:
+                return match.group(1)
+
+    except Exception as e:
+        print(f"Failed to resolve from page: {e}")
 
     return None
 
@@ -36,35 +84,74 @@ async def get_youtube_channel_info(input_str: str) -> dict | None:
     if not channel_id:
         return None
 
-    if not settings.youtube_api_key:
-        return None
+    # 优先尝试 API
+    if settings.youtube_api_key:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{YOUTUBE_API_BASE}/channels",
+                    params={
+                        "part": "snippet",
+                        "id": channel_id,
+                        "key": settings.youtube_api_key,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    items = data.get("items", [])
+                    if items:
+                        snippet = items[0].get("snippet", {})
+                        thumbnails = snippet.get("thumbnails", {})
+                        return {
+                            "title": snippet.get("title"),
+                            "avatar_url": thumbnails.get("medium", {}).get("url")
+                            or thumbnails.get("default", {}).get("url"),
+                            "channel_id": channel_id,
+                        }
+        except Exception as e:
+            print(f"YouTube API failed: {e}")
+
+    # 备用方法：从页面获取
+    return await get_channel_info_from_page(input_str, channel_id)
+
+
+async def get_channel_info_from_page(input_str: str, channel_id: str) -> dict | None:
+    """从 YouTube 页面获取频道信息（备用方法）"""
+    # 构建 URL
+    if input_str.startswith("@"):
+        url = f"https://www.youtube.com/{input_str}"
+    elif not input_str.startswith("http"):
+        url = f"https://www.youtube.com/{input_str}"
+    else:
+        url = input_str
 
     try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{YOUTUBE_API_BASE}/channels",
-                params={
-                    "part": "snippet",
-                    "id": channel_id,
-                    "key": settings.youtube_api_key,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            resp = await client.get(url, headers=headers)
+            html = resp.text
 
-            items = data.get("items", [])
-            if not items:
-                return None
+            # 提取 title (从 <title> 标签)
+            title_match = re.search(r"<title>([^<]+)</title>", html)
+            title = None
+            if title_match:
+                title_full = title_match.group(1)
+                # 移除 " - YouTube" 后缀
+                title = title_full.replace(" - YouTube", "").strip()
 
-            snippet = items[0].get("snippet", {})
-            thumbnails = snippet.get("thumbnails", {})
+            # 提取 avatar (从 ytInitialData)
+            avatar_match = re.search(r'"avatar":{"thumbnails":\[{"url":"([^"]+)"', html)
+            avatar_url = avatar_match.group(1) if avatar_match else None
 
-            return {
-                "title": snippet.get("title"),
-                "avatar_url": thumbnails.get("medium", {}).get("url")
-                or thumbnails.get("default", {}).get("url"),
-                "channel_id": channel_id,
-            }
+            if title or avatar_url:
+                return {
+                    "title": title,
+                    "avatar_url": avatar_url,
+                    "channel_id": channel_id,
+                }
     except Exception as e:
-        print(f"Failed to get YouTube channel info for {channel_id}: {e}")
-        return None
+        print(f"Failed to get channel info from page: {e}")
+
+    return None
