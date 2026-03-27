@@ -9,6 +9,15 @@ class ChannelBase(BaseModel):
     channel_id: str
     name: str
     avatar_url: Optional[str] = None
+    is_active: bool = True
+
+
+class ChannelUpdate(BaseModel):
+    platform: Optional[Platform] = None
+    channel_id: Optional[str] = None
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class ChannelCreate(ChannelBase):

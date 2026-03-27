@@ -7,6 +7,7 @@
         </router-link>
         <div class="flex gap-6">
           <router-link to="/" class="hover:text-pink-400 transition">首页</router-link>
+          <router-link to="/admin/channels" class="hover:text-pink-400 transition">管理</router-link>
         </div>
       </nav>
     </header>

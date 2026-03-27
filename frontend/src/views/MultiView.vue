@@ -98,9 +98,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-
-const route = useRoute()
 
 const newChannel = ref({
   platform: 'youtube',
@@ -113,20 +110,13 @@ const danmakuCanvases = ref([])
 const danmakuContexts = ref([])
 const danmakuTimers = ref([])
 const danmakuQueues = ref([])
-const danmakuNextPageTokens = ref({})
 
-const mockMessages = [
-  { content: "你好可爱！", color: "#ff0000" },
-  { content: "加油！", color: "#00ff00" },
-  { content: "哈哈笑死了", color: "#0000ff" },
-  { content: "dddd", color: "#ffff00" },
-  { content: "前方高能！", color: "#ff00ff" },
-  { content: "太强了", color: "#00ffff" },
-  { content: "awsl", color: "#ffffff" },
-  { content: "火钳刘明", color: "#ffaa00" },
-  { content: "绝了", color: "#aaff00" },
-  { content: "666", color: "#00aaff" },
-]
+const wsConnections = ref({})
+const reconnectTimers = ref({})
+const stickerImages = ref({})
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const WS_BASE = import.meta.env.VITE_WS_BASE || 'ws://localhost:8000'
 
 const gridStyle = computed(() => {
   const count = channels.value.length
@@ -168,19 +158,153 @@ function addChannel() {
   if (!id) return
   channels.value.push({ platform: newChannel.value.platform, id })
   newChannel.value.id = ''
+  localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+  
+  if (showDanmaku.value) {
+    initDanmaku()
+  }
 }
 
 function removeChannel(idx) {
+  const ch = channels.value[idx]
+  if (ch && ch.platform === 'youtube') {
+    disconnectWs(ch.id)
+  }
   channels.value.splice(idx, 1)
+  localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+}
+
+function connectWs(videoId) {
+  if (wsConnections.value[videoId]) {
+    return
+  }
+  
+  const ws = new WebSocket(`${WS_BASE}/ws/danmaku/${videoId}`)
+  
+  ws.onopen = () => {
+    console.log(`WebSocket connected: ${videoId}`)
+    delete reconnectTimers.value[videoId]
+  }
+  
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'danmaku' && data.data) {
+        addDanmakuMessages(videoId, data.data)
+      }
+    } catch (e) {
+      console.error('Failed to parse danmaku message:', e)
+    }
+  }
+  
+  ws.onclose = () => {
+    console.log(`WebSocket closed: ${videoId}`)
+    delete wsConnections.value[videoId]
+    
+    if (showDanmaku.value) {
+      scheduleReconnect(videoId)
+    }
+  }
+  
+  ws.onerror = (error) => {
+    console.error(`WebSocket error for ${videoId}:`, error)
+  }
+  
+  wsConnections.value[videoId] = ws
+}
+
+function disconnectWs(videoId) {
+  const ws = wsConnections.value[videoId]
+  if (ws) {
+    ws.close()
+    delete wsConnections.value[videoId]
+  }
+  
+  if (reconnectTimers.value[videoId]) {
+    clearTimeout(reconnectTimers.value[videoId])
+    delete reconnectTimers.value[videoId]
+  }
+}
+
+function scheduleReconnect(videoId) {
+  if (reconnectTimers.value[videoId]) {
+    return
+  }
+  
+  reconnectTimers.value[videoId] = setTimeout(() => {
+    delete reconnectTimers.value[videoId]
+    if (showDanmaku.value) {
+      connectWs(videoId)
+    }
+  }, 3000)
+}
+
+function addDanmakuMessages(videoId, messages) {
+  const idx = channels.value.findIndex(ch => ch.id === videoId)
+  if (idx === -1) return
+  
+  const queue = danmakuQueues.value[idx] || []
+  
+  messages.forEach(msg => {
+    const content = msg.comment || msg.message || ''
+    
+    // 处理 sticker
+    if (msg.message_type === 'sticker' && msg.sticker_url) {
+      queue.push({
+        message_type: 'sticker',
+        sticker_url: msg.sticker_url,
+        alt_text: msg.alt_text || 'Sticker',
+        x: 800,
+        y: 50 + Math.random() * 300,
+        loaded: false
+      })
+      
+      // 预加载 sticker 图片
+      if (!stickerImages.value[msg.sticker_url]) {
+        const img = new Image()
+        img.onload = () => {
+          stickerImages.value[msg.sticker_url] = img
+          // 找到并更新该消息的状态
+          queue.forEach(m => {
+            if (m.sticker_url === msg.sticker_url) {
+              m.loaded = true
+            }
+          })
+        }
+        img.onerror = () => {
+          stickerImages.value[msg.sticker_url] = null
+        }
+        img.src = msg.sticker_url
+      }
+      return
+    }
+    
+    // 处理普通文字消息
+    if (!content) return
+    
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#ffaa00', '#aaff00', '#00aaff']
+    const color = colors[Math.floor(Math.random() * colors.length)]
+    
+    queue.push({
+      content,
+      color,
+      x: 800,
+      y: 50 + Math.random() * 300
+    })
+  })
+  
+  danmakuQueues.value[idx] = queue
 }
 
 onMounted(() => {
-  const { platform, ids } = route.params
-  if (platform && ids) {
-    const idList = ids.split(',')
-    idList.forEach(id => {
-      channels.value.push({ platform, id: id.trim() })
-    })
+  // 从 localStorage 恢复频道
+  const saved = localStorage.getItem('multiview_channels')
+  if (saved) {
+    try {
+      channels.value = JSON.parse(saved)
+    } catch (e) {
+      console.error('Failed to restore channels:', e)
+    }
   }
 })
 
@@ -203,12 +327,35 @@ function initDanmaku() {
     canvas.height = rect.height
     
     const ctx = canvas.getContext('2d')
-    danmakuContexts.value[idx] = { ctx, tracks: [] }
+    danmakuContexts.value[idx] = { ctx, canvas, tracks: [] }
     danmakuQueues.value[idx] = []
-    danmakuNextPageTokens.value[idx] = null
     
-    fetchDanmaku(idx)
+    if (ch.platform === 'youtube') {
+      connectWs(ch.id)
+    }
+    
     startDanmakuLoop(idx)
+  })
+  
+  // 添加窗口大小变化监听
+  window.addEventListener('resize', handleResize)
+}
+
+function handleResize() {
+  if (!showDanmaku.value) return
+  
+  // 重新设置所有 canvas 尺寸
+  channels.value.forEach((ch, idx) => {
+    const canvas = danmakuCanvases.value[idx]
+    if (!canvas) return
+    
+    const rect = canvas.parentElement.getBoundingClientRect()
+    canvas.width = rect.width
+    canvas.height = rect.height
+    
+    // 更新 context
+    const ctx = canvas.getContext('2d')
+    danmakuContexts.value[idx] = { ...danmakuContexts.value[idx], ctx, canvas }
   })
 }
 
@@ -217,21 +364,13 @@ function stopDanmaku() {
   danmakuTimers.value = []
   danmakuContexts.value = []
   danmakuQueues.value = []
-}
-
-function fetchDanmaku(idx) {
-  const mockMsg = mockMessages[Math.floor(Math.random() * mockMessages.length)]
-  const queue = danmakuQueues.value[idx] || []
-  queue.push({ ...mockMsg, x: 800, y: 50 + Math.random() * 300 })
-  danmakuQueues.value[idx] = queue
+  
+  Object.keys(wsConnections.value).forEach(videoId => {
+    disconnectWs(videoId)
+  })
 }
 
 function startDanmakuLoop(idx) {
-  const timer = setInterval(() => {
-    fetchDanmaku(idx)
-  }, 800)
-  danmakuTimers.value[idx] = timer
-  
   const renderTimer = setInterval(() => {
     renderDanmaku(idx)
   }, 30)
@@ -257,12 +396,29 @@ function renderDanmaku(idx) {
       queue.splice(i, 1)
       continue
     }
+    
+    // 处理 sticker
+    if (msg.message_type === 'sticker') {
+      const img = stickerImages.value[msg.sticker_url]
+      if (img) {
+        // 绘制 sticker 图片 (50x50)
+        ctx.drawImage(img, msg.x, msg.y, 50, 50)
+      } else if (msg.loaded === false) {
+        // 图片未加载，显示 alt 文字作为后备
+        ctx.fillStyle = '#ffcc00'
+        ctx.fillText(msg.alt_text || 'Sticker', msg.x, msg.y)
+      }
+      continue
+    }
+    
+    // 普通文字消息
     ctx.fillStyle = msg.color || '#ffffff'
     ctx.fillText(msg.content || msg.message || '', msg.x, msg.y)
   }
 }
 
 onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
   stopDanmaku()
 })
 </script>
