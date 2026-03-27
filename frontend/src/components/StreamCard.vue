@@ -20,13 +20,21 @@
         </svg>
       </div>
 
-      <!-- LIVE 角标 -->
-      <div class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-1 rounded font-bold animate-pulse">
-        LIVE
+      <!-- 状态角标 -->
+      <div 
+        class="absolute top-2 left-2 text-xs px-2 py-1 rounded font-bold"
+        :class="{
+          'bg-red-600 text-white animate-pulse': stream.status === 'live',
+          'bg-yellow-600 text-white': stream.status === 'upcoming',
+          'bg-blue-600 text-white': stream.status === 'archive',
+          'bg-gray-600 text-gray-300': stream.status === 'offline'
+        }"
+      >
+        {{ statusText }}
       </div>
 
-      <!-- 观看人数 -->
-      <div class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+      <!-- 观看人数（仅直播时显示） -->
+      <div v-if="stream.status === 'live'" class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
           <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
@@ -77,10 +85,21 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Stream } from '../stores/stream'
 
-defineProps<{ stream: Stream }>()
+const props = defineProps<{ stream: Stream }>()
 defineEmits<{ (e: 'click', stream: Stream): void }>()
+
+const statusText = computed(() => {
+  switch (props.stream.status) {
+    case 'live': return 'LIVE'
+    case 'upcoming': return '预约'
+    case 'archive': return '录播'
+    case 'offline': return '离线'
+    default: return ''
+  }
+})
 
 function formatViewerCount(count: number | null | undefined): string {
   if (!count) return '0'

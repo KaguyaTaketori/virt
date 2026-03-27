@@ -100,3 +100,18 @@ class Stream(Base):
         # 轮询更新时按 channel 查最新
         Index("ix_stream_channel_status", "channel_id", "status"),
     )
+
+
+class Danmaku(Base):
+    """弹幕存储表"""
+
+    __tablename__ = "danmakus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stream_id = Column(Integer, ForeignKey("streams.id"), nullable=False, index=True)
+    video_id = Column(String(100), nullable=False)
+    messages = Column(Text, nullable=False)  # JSON字符串
+    source = Column(String(20), default="youtube")  # youtube/bilibili
+    downloaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    stream = relationship("Stream", backref="danmakus")
