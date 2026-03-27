@@ -176,6 +176,7 @@ const columns: DataTableColumns<Channel> = [
     title: '平台',
     key: 'platform',
     width: 120,
+    sorter: (a, b) => a.platform.localeCompare(b.platform),
     render: (row) => h(NTag, {
       type: row.platform === 'youtube' ? 'error' : 'info',
       size: 'small'
