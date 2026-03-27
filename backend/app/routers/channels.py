@@ -39,20 +39,33 @@ def get_channel(channel_id: int, db: Session = Depends(get_db)):
 
 @router.post("", response_model=ChannelResponse)
 async def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
+    # 解析 YouTube 频道输入（支持 @username, 自定义URL, channel_id）
+    resolved_channel_id = None
+    if channel.platform == Platform.YOUTUBE:
+        channel_info = await get_youtube_channel_info(channel.channel_id)
+        if channel_info and channel_info.get("channel_id"):
+            resolved_channel_id = channel_info["channel_id"]
+            # 如果没有提供头像，使用 API 获取的
+            if not channel.avatar_url and channel_info.get("avatar_url"):
+                channel.avatar_url = channel_info["avatar_url"]
+            # 如果没有提供名称，使用 API 获取的
+            if not channel.name and channel_info.get("title"):
+                channel.name = channel_info["title"]
+        else:
+            # 解析失败，尝试直接使用输入
+            resolved_channel_id = channel.channel_id
+    else:
+        resolved_channel_id = channel.channel_id
+
+    # 检查是否已存在
     existing = (
-        db.query(Channel).filter(Channel.channel_id == channel.channel_id).first()
+        db.query(Channel).filter(Channel.channel_id == resolved_channel_id).first()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Channel already exists")
 
-    # 如果是 YouTube 频道且没有提供头像，自动获取
-    if channel.platform == Platform.YOUTUBE and not channel.avatar_url:
-        channel_info = await get_youtube_channel_info(channel.channel_id)
-        if channel_info and channel_info.get("avatar_url"):
-            channel.avatar_url = channel_info["avatar_url"]
-            # 如果没有提供名称，也使用 API 获取的名称
-            if not channel.name:
-                channel.name = channel_info.get("title", channel.name)
+    # 更新为解析后的 channel_id
+    channel.channel_id = resolved_channel_id
 
     db_channel = Channel(**channel.model_dump())
     db.add(db_channel)
