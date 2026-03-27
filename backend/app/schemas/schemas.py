@@ -4,12 +4,38 @@ from datetime import datetime
 from app.models.models import Platform, StreamStatus
 
 
+class OrganizationBase(BaseModel):
+    name: str
+    name_en: Optional[str] = None
+    logo_url: Optional[str] = None
+    website: Optional[str] = None
+
+
+class OrganizationCreate(OrganizationBase):
+    pass
+
+
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = None
+    name_en: Optional[str] = None
+    logo_url: Optional[str] = None
+    website: Optional[str] = None
+
+
+class OrganizationResponse(OrganizationBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 class ChannelBase(BaseModel):
     platform: Platform
     channel_id: str
     name: str
     avatar_url: Optional[str] = None
     is_active: bool = True
+    org_id: Optional[int] = None
 
 
 class ChannelUpdate(BaseModel):
@@ -18,6 +44,7 @@ class ChannelUpdate(BaseModel):
     name: Optional[str] = None
     avatar_url: Optional[str] = None
     is_active: Optional[bool] = None
+    org_id: Optional[int] = None
 
 
 class ChannelCreate(ChannelBase):
@@ -26,6 +53,7 @@ class ChannelCreate(ChannelBase):
 
 class ChannelResponse(ChannelBase):
     id: int
+    org_id: Optional[int] = None
 
     class Config:
         from_attributes = True

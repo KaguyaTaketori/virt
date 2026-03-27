@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Home from '../views/Home.vue'
 import MultiView from '../views/MultiView.vue'
 import AdminChannels from '../views/AdminChannels.vue'
+import AdminOrganizations from '../views/AdminOrganizations.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -19,6 +20,11 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/channels',
     name: 'AdminChannels',
     component: AdminChannels
+  },
+  {
+    path: '/admin/organizations',
+    name: 'AdminOrganizations',
+    component: AdminOrganizations
   }
 ]
 

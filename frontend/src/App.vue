@@ -9,7 +9,9 @@
             </router-link>
             <div class="flex items-center gap-4">
               <router-link to="/" class="transition" :style="{ color: themeStore.currentTheme.colors.primary }">首页</router-link>
-              <router-link to="/admin/channels" class="transition" :style="{ color: themeStore.currentTheme.colors.primary }">管理</router-link>
+              <n-dropdown :options="adminMenuOptions" @select="handleAdminMenu">
+                <n-button text :style="{ color: themeStore.currentTheme.colors.primary }">管理</n-button>
+              </n-dropdown>
               <n-select
                 v-model:value="themeStore.currentThemeId"
                 :options="themeOptions"
@@ -45,11 +47,22 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { NConfigProvider, NMessageProvider, NSelect, NSwitch, darkTheme } from 'naive-ui'
+import { useRouter } from 'vue-router'
+import { NConfigProvider, NMessageProvider, NSelect, NSwitch, NDropdown, NButton, darkTheme } from 'naive-ui'
 import { useThemeStore } from './stores/theme'
 
+const router = useRouter()
 const themeStore = useThemeStore()
 const isDark = ref(true)
+
+const adminMenuOptions = [
+  { label: '频道管理', key: 'channels' },
+  { label: '机构管理', key: 'organizations' }
+]
+
+function handleAdminMenu(key) {
+  router.push(`/admin/${key}`)
+}
 
 // 从 localStorage 恢复主题设置
 onMounted(() => {
