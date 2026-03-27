@@ -1,4 +1,3 @@
-# backend/app/scheduler_tasks.py  ← 完整替换
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import httpx
 from sqlalchemy.orm import Session
@@ -6,10 +5,14 @@ from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.models.models import Channel, Stream, StreamStatus, Platform
 from app.services.youtube_fetcher import (
-    get_channel_live_video_ids, get_videos_details, parse_youtube_stream
+    get_channel_live_video_ids,
+    get_videos_details,
+    parse_youtube_stream,
 )
 from app.services.bilibili_fetcher import (
-    get_rooms_by_uids, parse_bilibili_room, get_user_info,
+    get_rooms_by_uids,
+    parse_bilibili_room,
+    get_user_info,
 )
 from app.config import settings
 
@@ -26,18 +29,24 @@ async def discover_youtube_streams():
 
     db = SessionLocal()
     try:
-        # 找出已有活跃流的 channel_id 集合，避免重复 search
         busy_channel_ids = {
-            s.channel_id for s in db.query(Stream.channel_id).filter(
+            s.channel_id
+            for s in db.query(Stream.channel_id)
+            .filter(
                 Stream.platform == Platform.YOUTUBE,
-                Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING])
-            ).all()
+                Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
+            )
+            .all()
         }
-        channels = db.query(Channel).filter(
-            Channel.platform == Platform.YOUTUBE,
-            Channel.is_active == True,
-            ~Channel.id.in_(busy_channel_ids)
-        ).all()
+        channels = (
+            db.query(Channel)
+            .filter(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active == True,
+                ~Channel.id.in_(busy_channel_ids),
+            )
+            .all()
+        )
 
         if not channels:
             return
@@ -70,16 +79,19 @@ async def update_youtube_streams():
 
     db = SessionLocal()
     try:
-        active = db.query(Stream).filter(
-            Stream.platform == Platform.YOUTUBE,
-            Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
-            Stream.video_id.isnot(None)
-        ).all()
+        active = (
+            db.query(Stream)
+            .filter(
+                Stream.platform == Platform.YOUTUBE,
+                Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
+                Stream.video_id.isnot(None),
+            )
+            .all()
+        )
 
         if not active:
             return
 
-        # video_id → channel_id(int) 映射，避免额外查库
         vid_to_ch_id = {s.video_id: s.channel_id for s in active}
         video_ids = list(vid_to_ch_id.keys())
 
@@ -89,7 +101,9 @@ async def update_youtube_streams():
         for item in items:
             parsed = parse_youtube_stream(item)
             if parsed and parsed["video_id"] in vid_to_ch_id:
-                _upsert_stream(db, vid_to_ch_id[parsed["video_id"]], parsed, Platform.YOUTUBE)
+                _upsert_stream(
+                    db, vid_to_ch_id[parsed["video_id"]], parsed, Platform.YOUTUBE
+                )
 
         db.commit()
         print(f"[YT Update] Refreshed {len(items)} streams")
@@ -104,10 +118,11 @@ async def update_youtube_streams():
 async def update_bilibili_streams():
     db = SessionLocal()
     try:
-        channels = db.query(Channel).filter(
-            Channel.platform == Platform.BILIBILI,
-            Channel.is_active == True
-        ).all()
+        channels = (
+            db.query(Channel)
+            .filter(Channel.platform == Platform.BILIBILI, Channel.is_active == True)
+            .all()
+        )
         if not channels:
             return
 
@@ -133,10 +148,11 @@ async def update_bilibili_streams():
 
 # ── 通用 upsert：接收 channel.id（int），不再二次查库 ──────────────────
 def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platform):
-    stream = db.query(Stream).filter(
-        Stream.channel_id == channel_id,
-        Stream.video_id == parsed["video_id"]
-    ).first()
+    stream = (
+        db.query(Stream)
+        .filter(Stream.channel_id == channel_id, Stream.video_id == parsed["video_id"])
+        .first()
+    )
 
     if not stream:
         stream = Stream(channel_id=channel_id, platform=platform)
@@ -161,10 +177,11 @@ async def sync_bilibili_channels():
     """
     db = SessionLocal()
     try:
-        channels = db.query(Channel).filter(
-            Channel.platform == Platform.BILIBILI,
-            Channel.is_active == True
-        ).all()
+        channels = (
+            db.query(Channel)
+            .filter(Channel.platform == Platform.BILIBILI, Channel.is_active == True)
+            .all()
+        )
 
         if not channels:
             return
@@ -177,11 +194,11 @@ async def sync_bilibili_channels():
 
                 changed = False
                 if info.get("name") and ch.name != info["name"]:
-                    ch.name    = info["name"]
-                    changed    = True
+                    ch.name = info["name"]
+                    changed = True
                 if info.get("avatar_url") and ch.avatar_url != info["avatar_url"]:
                     ch.avatar_url = info["avatar_url"]
-                    changed       = True
+                    changed = True
 
                 if changed:
                     ch.updated_at = datetime.now(timezone.utc)
@@ -197,13 +214,29 @@ async def sync_bilibili_channels():
 
 def start_scheduler():
     now = datetime.now(timezone.utc)
-    scheduler.add_job(discover_youtube_streams,  "interval", hours=6,
-                      id="yt_discover",   next_run_time=now)
-    scheduler.add_job(update_youtube_streams,    "interval", seconds=60,
-                      id="yt_update")
-    scheduler.add_job(update_bilibili_streams,   "interval", minutes=2,
-                      id="bili_update",   next_run_time=now)
-    scheduler.add_job(sync_bilibili_channels,    "interval", hours=24,
-                      id="bili_sync_ch",  next_run_time=now)
+    scheduler.add_job(
+        discover_youtube_streams,
+        "interval",
+        hours=6,
+        id="yt_discover",
+        next_run_time=now,
+    )
+    scheduler.add_job(update_youtube_streams, "interval", seconds=60, id="yt_update")
+    scheduler.add_job(
+        update_bilibili_streams,
+        "interval",
+        minutes=2,
+        id="bili_update",
+        next_run_time=now,
+    )
+    scheduler.add_job(
+        sync_bilibili_channels,
+        "interval",
+        hours=24,
+        id="bili_sync_ch",
+        next_run_time=now,
+    )
     scheduler.start()
-    print("[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h")
+    print(
+        "[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h"
+    )
