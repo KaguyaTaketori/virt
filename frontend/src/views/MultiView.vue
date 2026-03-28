@@ -18,6 +18,13 @@
           分享
         </button>
         <button 
+          @click="showDanmakuSettings = true" 
+          class="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 transition text-sm"
+          title="弹幕设置"
+        >
+          设置
+        </button>
+        <button 
           @click="$router.back()" 
           class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 transition"
         >
@@ -100,6 +107,130 @@
     <div v-if="channels.length === 0" class="text-center py-12 text-gray-500">
       <p class="text-xl">添加频道开始多窗观看</p>
     </div>
+
+    <div v-if="hoveredDanmaku.show" class="fixed bg-gray-800 rounded-lg shadow-xl z-50 py-2 min-w-[160px]" :style="getHoveredMenuStyle()">
+      <div class="px-3 py-1 text-xs text-gray-400 border-b border-gray-700 mb-1">
+        {{ hoveredDanmaku.displayName || hoveredDanmaku.userId }}
+      </div>
+      <button @click="addRuleFromHover('highlight')" class="w-full px-4 py-2 text-left text-sm hover:bg-gray-700">高亮</button>
+      <button @click="addRuleFromHover('block')" class="w-full px-4 py-2 text-left text-sm hover:bg-gray-700 text-red-400">屏蔽</button>
+    </div>
+
+    <div v-if="showDanmakuSettings" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showDanmakuSettings = false">
+      <div class="bg-gray-800 rounded-lg p-6 w-[500px] max-h-[80vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold">弹幕设置</h2>
+          <button @click="showDanmakuSettings = false" class="text-gray-400 hover:text-white">×</button>
+        </div>
+
+        <div class="mb-6">
+          <h3 class="text-sm font-semibold text-gray-300 mb-3">全局样式</h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">字体大小</label>
+              <input type="number" v-model.number="danmakuSettings.global.fontSize" min="12" max="36" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">弹幕速度</label>
+              <input type="number" v-model.number="danmakuSettings.global.speed" min="1" max="6" step="0.5" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">不透明度</label>
+              <input type="range" v-model.number="danmakuSettings.global.opacity" min="0.3" max="1" step="0.1" class="w-full">
+              <span class="text-xs text-gray-400">{{ danmakuSettings.global.opacity }}</span>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">默认颜色</label>
+              <div class="flex gap-2 flex-wrap">
+                <button 
+                  v-for="c in defaultColors" 
+                  :key="c"
+                  @click="danmakuSettings.global.color = c"
+                  :style="{ backgroundColor: c }"
+                  class="w-6 h-6 rounded border-2"
+                  :class="danmakuSettings.global.color === c ? 'border-white' : 'border-transparent'"
+                ></button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mt-4 pt-4 border-t border-gray-700">
+            <div class="flex items-center gap-4 mb-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="danmakuSettings.global.strokeEnabled" class="w-4 h-4 accent-pink-500">
+                <span class="text-sm text-gray-300">描边</span>
+              </label>
+              <template v-if="danmakuSettings.global.strokeEnabled">
+                <input 
+                  v-model="danmakuSettings.global.strokeColor"
+                  type="color"
+                  class="w-8 h-8 rounded cursor-pointer"
+                >
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-400">宽度</span>
+                  <input 
+                    type="number" 
+                    v-model.number="danmakuSettings.global.strokeWidth" 
+                    min="0" 
+                    max="8" 
+                    class="w-16 bg-gray-700 border border-gray-600 rounded px-2 py-1"
+                  >
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-6">
+          <h3 class="text-sm font-semibold text-gray-300 mb-3">用户管理 (仅YouTube)</h3>
+          <div class="flex gap-2 mb-3">
+            <input 
+              v-model="newUserRule.userId" 
+              type="text" 
+              placeholder="用户ID或名称"
+              class="bg-gray-700 border border-gray-600 rounded px-3 py-1 flex-1"
+            >
+            <select v-model="newUserRule.action" class="bg-gray-700 border border-gray-600 rounded px-3 py-1">
+              <option value="block">屏蔽</option>
+              <option value="highlight">高亮</option>
+            </select>
+            <input 
+              v-if="newUserRule.action === 'highlight'"
+              v-model="newUserRule.color"
+              type="color"
+              class="w-10 h-8 rounded cursor-pointer"
+            >
+            <button @click="addUserRule" class="px-3 py-1 bg-pink-600 rounded hover:bg-pink-700">添加</button>
+          </div>
+          
+          <div class="space-y-2 max-h-48 overflow-y-auto">
+            <div 
+              v-for="(rule, userId) in danmakuSettings.userRules" 
+              :key="userId"
+              class="flex items-center gap-2 bg-gray-700 rounded px-3 py-2"
+            >
+              <span class="flex-1 text-sm truncate" :title="userId">{{ userId }}</span>
+              <span 
+                class="px-2 py-0.5 rounded text-xs"
+                :class="rule.action === 'block' ? 'bg-red-900 text-red-200' : 'bg-yellow-900 text-yellow-200'"
+              >
+                {{ rule.action === 'block' ? '屏蔽' : '高亮' }}
+              </span>
+              <span v-if="rule.action === 'highlight'" class="w-4 h-4 rounded" :style="{ backgroundColor: rule.color }"></span>
+              <button @click="removeUserRule(userId)" class="text-gray-400 hover:text-red-400">×</button>
+            </div>
+            <p v-if="Object.keys(danmakuSettings.userRules).length === 0" class="text-gray-500 text-sm text-center py-2">
+              暂无用户规则
+            </p>
+          </div>
+        </div>
+
+        <div class="flex justify-between gap-2">
+          <button @click="resetDanmakuSettings" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">恢复默认</button>
+          <button @click="showDanmakuSettings = false" class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -117,6 +248,7 @@ const newChannel = ref({
 
 const channels = ref([])
 const showDanmaku = ref(false)
+const showDanmakuSettings = ref(false)
 const danmakuCanvases = ref([])
 const danmakuContexts = ref([])
 const danmakuTimers = ref([])
@@ -125,6 +257,35 @@ const danmakuQueues = ref([])
 const wsConnections = ref({})
 const reconnectTimers = ref({})
 const stickerImages = ref({})
+
+const defaultColors = ['#ffffff', '#ff6b6b', '#ffd700', '#90EE90', '#87CEEB', '#ff69b4']
+
+const defaultDanmakuSettings = {
+  global: {
+    fontSize: 20,
+    speed: 2,
+    opacity: 1,
+    color: '#ffffff',
+    strokeEnabled: true,
+    strokeColor: '#000000',
+    strokeWidth: 2
+  },
+  userRules: {}
+}
+
+const danmakuSettings = ref({ ...defaultDanmakuSettings })
+const newUserRule = ref({ userId: '', action: 'block', color: '#ff6b6b' })
+
+const hoveredDanmaku = ref({ 
+  show: false, 
+  userId: '', 
+  displayName: '', 
+  idx: -1,
+  danmakuX: 0,
+  danmakuY: 0,
+  danmakuWidth: 100,
+  danmakuHeight: 28
+})
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const WS_BASE = import.meta.env.VITE_WS_BASE || 'ws://localhost:8000'
@@ -183,6 +344,113 @@ function removeChannel(idx) {
   }
   channels.value.splice(idx, 1)
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+}
+
+function loadDanmakuSettings() {
+  const saved = localStorage.getItem('multiview_danmaku_settings')
+  if (saved) {
+    try {
+      danmakuSettings.value = { ...defaultDanmakuSettings, ...JSON.parse(saved) }
+    } catch (e) {
+      console.error('Failed to load danmaku settings:', e)
+    }
+  }
+}
+
+function saveDanmakuSettings() {
+  localStorage.setItem('multiview_danmaku_settings', JSON.stringify(danmakuSettings.value))
+}
+
+function resetDanmakuSettings() {
+  danmakuSettings.value = JSON.parse(JSON.stringify(defaultDanmakuSettings))
+  saveDanmakuSettings()
+}
+
+function addUserRule() {
+  if (!newUserRule.value.userId) return
+  const userId = newUserRule.value.userId.trim()
+  if (danmakuSettings.value.userRules[userId]) {
+    alert('该用户规则已存在')
+    return
+  }
+  danmakuSettings.value.userRules[userId] = {
+    action: newUserRule.value.action,
+    color: newUserRule.value.action === 'highlight' ? newUserRule.value.color : null
+  }
+  newUserRule.value.userId = ''
+  saveDanmakuSettings()
+}
+
+function removeUserRule(userId) {
+  delete danmakuSettings.value.userRules[userId]
+  saveDanmakuSettings()
+}
+
+function getUserRule(userId, displayName) {
+  if (danmakuSettings.value.userRules[userId]) {
+    return danmakuSettings.value.userRules[userId]
+  }
+  if (displayName && danmakuSettings.value.userRules[displayName]) {
+    return danmakuSettings.value.userRules[displayName]
+  }
+  return null
+}
+
+function addRuleFromHover(action) {
+  const { userId, displayName } = hoveredDanmaku.value
+  const targetId = userId || displayName
+  if (!targetId) return
+
+  if (danmakuSettings.value.userRules[targetId]) {
+    alert('该用户规则已存在')
+  } else {
+    danmakuSettings.value.userRules[targetId] = {
+      action,
+      color: action === 'highlight' ? '#ff6b6b' : null
+    }
+    saveDanmakuSettings()
+  }
+}
+
+function getHoveredMenuStyle() {
+  const idx = hoveredDanmaku.value.idx
+  const canvas = danmakuCanvases.value[idx]
+  if (!canvas) return { bottom: '20px', right: '20px' }
+
+  const wrapper = canvas.parentElement
+  if (!wrapper) return { bottom: '20px', right: '20px' }
+
+  const rect = wrapper.getBoundingClientRect()
+  const danmakuY = hoveredDanmaku.value.danmakuY || 0
+  const danmakuX = hoveredDanmaku.value.danmakuX || 0
+  const danmakuWidth = hoveredDanmaku.value.danmakuWidth || 100
+  const danmakuHeight = hoveredDanmaku.value.danmakuHeight || 28
+
+  const menuHeight = 140
+
+  const absoluteY = rect.top + danmakuY
+  const absoluteX = rect.left + danmakuX
+
+  const spaceBelow = window.innerHeight - absoluteY - danmakuHeight
+  const spaceAbove = absoluteY - menuHeight
+
+  let top
+
+  if (spaceBelow >= menuHeight + 10 || spaceBelow > spaceAbove) {
+    top = absoluteY + danmakuHeight + 5
+  } else {
+    top = absoluteY - menuHeight - 5
+  }
+
+  let right = window.innerWidth - absoluteX - danmakuWidth - 10
+  if (right < 10) {
+    right = 10
+  }
+
+  return {
+    top: top + 'px',
+    right: right + 'px'
+  }
 }
 
 function shareUrl() {
@@ -324,6 +592,7 @@ function addDanmakuMessages(videoId, messages) {
 }
 
 onMounted(() => {
+  loadDanmakuSettings()
   const shareCode = Array.isArray(route.query.c) ? route.query.c[0] : route.query.c
   if (shareCode) {
     try {
