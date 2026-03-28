@@ -98,6 +98,11 @@
           :ref="el => danmakuCanvases[idx] = el"
           class="absolute inset-0 w-full h-full pointer-events-none"
         ></canvas>
+        <div
+          v-if="showDanmaku && ch.platform === 'youtube'"
+          :ref="el => { if (el) hitboxLayers[idx] = el }"
+          class="absolute inset-0 pointer-events-none"
+        ></div>
         <div v-if="!getEmbedUrl(ch)" class="flex items-center justify-center h-full text-gray-500">
           无效的嵌入链接
         </div>
@@ -253,6 +258,9 @@ const danmakuCanvases = ref([])
 const danmakuContexts = ref([])
 const danmakuTimers = ref([])
 const danmakuQueues = ref([])
+const trackStates = ref([])
+
+const TRACK_TOP_OFFSET = 10
 
 const wsConnections = ref({})
 const reconnectTimers = ref({})
@@ -275,6 +283,9 @@ const defaultDanmakuSettings = {
 
 const danmakuSettings = ref({ ...defaultDanmakuSettings })
 const newUserRule = ref({ userId: '', action: 'block', color: '#ff6b6b' })
+const hitboxLayers = ref([])
+const hitboxPool = ref([])
+const MAX_HITBOXES = 50
 
 const hoveredDanmaku = ref({ 
   show: false, 
@@ -386,6 +397,20 @@ function removeUserRule(userId) {
   saveDanmakuSettings()
 }
 
+function getFontSize() {
+  return danmakuSettings.value.global.fontSize || 20
+}
+
+function getTrackHeight() {
+  return getFontSize() + 8
+}
+
+function initTrackState(idx, canvasHeight) {
+  const trackHeight = getTrackHeight()
+  const numTracks = Math.floor((canvasHeight - TRACK_TOP_OFFSET) / trackHeight)
+  trackStates.value[idx] = Array.from({ length: numTracks }, () => ({ tailX: 0 }))
+}
+
 function getUserRule(userId, displayName) {
   if (danmakuSettings.value.userRules[userId]) {
     return danmakuSettings.value.userRules[userId]
@@ -394,7 +419,6 @@ function getUserRule(userId, displayName) {
     return danmakuSettings.value.userRules[displayName]
   }
   return null
-}
 
 function addRuleFromHover(action) {
   const { userId, displayName } = hoveredDanmaku.value
@@ -410,6 +434,67 @@ function addRuleFromHover(action) {
     }
     saveDanmakuSettings()
   }
+}
+
+function initHitboxPool() {
+  for (let i = 0; i < MAX_HITBOXES; i++) {
+    const el = document.createElement('div')
+    el.className = 'danmaku-hitbox'
+    el.style.cssText = 'position: absolute; pointer-events: auto; cursor: pointer; display: none;'
+    el.dataset.userId = ''
+    el.dataset.displayName = ''
+    el.dataset.idx = '-1'
+    el.addEventListener('mouseenter', handleHitboxHover)
+    el.addEventListener('mouseleave', handleHitboxLeave)
+    document.body.appendChild(el)
+    hitboxPool.value.push({ el, inUse: false })
+  }
+}
+
+function getHitboxFromPool() {
+  const hitbox = hitboxPool.value.find(h => !h.inUse)
+  if (hitbox) {
+    hitbox.inUse = true
+    hitbox.el.style.display = 'block'
+    return hitbox
+  }
+  return null
+}
+
+function returnHitboxToPool(hitbox) {
+  hitbox.inUse = false
+  hitbox.el.style.display = 'none'
+}
+
+function handleHitboxHover(event) {
+  const el = event.target
+  const userId = el.dataset.userId || ''
+  const displayName = el.dataset.displayName || ''
+  const idx = parseInt(el.dataset.idx) || -1
+  
+  if (!userId && !displayName) return
+
+  hoveredDanmaku.value = {
+    show: true,
+    userId,
+    displayName,
+    idx,
+    danmakuX: parseFloat(el.style.left) || 0,
+    danmakuY: parseFloat(el.style.top) || 0,
+    danmakuWidth: parseFloat(el.style.width) || 100,
+    danmakuHeight: 28
+  }
+}
+
+function handleHitboxLeave() {
+  hoveredDanmaku.value.show = false
+}
+
+function updateHitboxPosition(hitbox, x, y, width, height) {
+  hitbox.el.style.left = x + 'px'
+  hitbox.el.style.top = y + 'px'
+  hitbox.el.style.width = width + 'px'
+  hitbox.el.style.height = height + 'px'
 }
 
 function getHoveredMenuStyle() {
@@ -541,11 +626,28 @@ function scheduleReconnect(videoId) {
 function addDanmakuMessages(videoId, messages) {
   const idx = channels.value.findIndex(ch => ch.id === videoId)
   if (idx === -1) return
-  
+
+  const canvas = danmakuCanvases.value[idx]
+  if (!canvas) return
+
   const queue = danmakuQueues.value[idx] || []
+  const tracks = trackStates.value[idx]
+  if (!tracks) return
+
+  const fontSize = getFontSize()
+  if (!window._measureCtx) {
+    window._measureCtx = document.createElement('canvas').getContext('2d')
+  }
+  window._measureCtx.font = `${fontSize}px "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`
   
   messages.forEach(msg => {
-    const content = msg.comment || msg.message || ''
+    const userId = msg.user_id || ''
+    const displayName = msg.user_display_name || ''
+    
+    const userRule = getUserRule(userId, displayName)
+    if (userRule && userRule.action === 'block') {
+      return
+    }
     
     if (msg.message_type === 'sticker' && msg.sticker_url) {
       queue.push({
@@ -575,23 +677,64 @@ function addDanmakuMessages(videoId, messages) {
       return
     }
     
-    if (!content) return
+    const text = msg.comment || msg.message || ''
+    if (!text) return
+
+    const textWidth = window._measureCtx.measureText(text).width
+    const baseSpeed = danmakuSettings.value.global.speed || 2
+    const speed = baseSpeed + Math.random() * 1.2
+
+    let targetTrack = -1
+    for (let t = 0; t < tracks.length; t++) {
+      if (tracks[t].tailX <= canvas.width) {
+        targetTrack = t
+        break
+      }
+    }
+
+    if (targetTrack === -1) {
+      targetTrack = Math.floor(Math.random() * tracks.length)
+    }
+
+    tracks[targetTrack].tailX = canvas.width + textWidth + 20
+
+    let danmakuColor = danmakuSettings.value.global.color || '#ffffff'
+    let isHighlighted = false
+    let fontWeight = 'normal'
     
-    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#ffaa00', '#aaff00', '#00aaff']
-    const color = colors[Math.floor(Math.random() * colors.length)]
+    if (userRule && userRule.action === 'highlight') {
+      danmakuColor = userRule.color || danmakuColor
+      isHighlighted = true
+      fontWeight = 'bold'
+    }
     
     queue.push({
-      content,
-      color,
-      x: 800,
-      y: 50 + Math.random() * 300
+      content: text,
+      color: isHighlighted ? danmakuColor : randomColor(),
+      x: canvas.width + 10,
+      trackIdx: targetTrack,
+      speed,
+      width: textWidth,
+      isHighlighted,
+      fontWeight,
+      userId,
+      displayName
     })
   })
+
+  danmakuQueues.value[idx] = queue
+}
+
+function randomColor() {
+  const colors = ['#ffffff', '#ffb3ba', '#ffdfba', '#ffffba', '#baffc9', '#bae1ff']
+  return colors[Math.floor(Math.random() * colors.length)]
+}
   
   danmakuQueues.value[idx] = queue
 }
 
 onMounted(() => {
+  initHitboxPool()
   loadDanmakuSettings()
   const shareCode = Array.isArray(route.query.c) ? route.query.c[0] : route.query.c
   if (shareCode) {
@@ -635,19 +778,23 @@ function initDanmaku() {
   channels.value.forEach((ch, idx) => {
     const canvas = danmakuCanvases.value[idx]
     if (!canvas) return
-    
-    const rect = canvas.parentElement.getBoundingClientRect()
-    canvas.width = rect.width
-    canvas.height = rect.height
-    
-    const ctx = canvas.getContext('2d')
-    danmakuContexts.value[idx] = { ctx, canvas, tracks: [] }
-    danmakuQueues.value[idx] = []
-    
+
+    const wrapper = canvas.parentElement
+    if (!wrapper) return
+
+    const rect = wrapper.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      canvas.width = rect.width
+      canvas.height = rect.height
+      initTrackState(idx, rect.height)
+    }
+
+    danmakuQueues.value[idx] = danmakuQueues.value[idx] || []
+
     if (ch.platform === 'youtube') {
       connectWs(ch.id)
     }
-    
+
     startDanmakuLoop(idx)
   })
   
@@ -689,43 +836,102 @@ function startDanmakuLoop(idx) {
 }
 
 function renderDanmaku(idx) {
-  const { ctx } = danmakuContexts.value[idx] || {}
-  const queue = danmakuQueues.value[idx]
-  if (!ctx || !queue || queue.length === 0) return
-  
   const canvas = danmakuCanvases.value[idx]
   if (!canvas) return
-  
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  if (canvas.width === 0 || canvas.height === 0) return
+
+  const queue = danmakuQueues.value[idx]
+  if (!queue || queue.length === 0) {
+    hoveredDanmaku.value.show = false
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    return
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.font = '20px sans-serif'
+
+  const fontSize = getFontSize()
+  const opacity = danmakuSettings.value.global.opacity || 1
+  const font = `${fontSize}px "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`
+  ctx.font = font
   ctx.textBaseline = 'top'
-  
+  ctx.globalAlpha = opacity
+
+  const y0 = TRACK_TOP_OFFSET
+  const trackHeight = getTrackHeight()
+  const tracks = trackStates.value[idx]
+
+  const activeHitboxIds = new Set()
+
   for (let i = queue.length - 1; i >= 0; i--) {
     const msg = queue[i]
-    msg.x -= 2
-    if (msg.x < -200) {
+    
+    const userId = msg.userId || ''
+    const displayName = msg.displayName || ''
+    const hasUser = userId || displayName
+
+    if (!msg.paused) {
+      msg.x -= msg.speed
+    }
+
+    if (msg.x + msg.width < 0) {
+      if (msg.hitbox) {
+        returnHitboxToPool(msg.hitbox)
+        msg.hitbox = null
+      }
       queue.splice(i, 1)
       continue
     }
-    
-    if (msg.message_type === 'sticker') {
-      const img = stickerImages.value[msg.sticker_url]
-      if (img) {
-        ctx.drawImage(img, msg.x, msg.y, 50, 50)
-      } else if (msg.loaded === false) {
-        ctx.fillStyle = '#ffcc00'
-        ctx.fillText(msg.alt_text || 'Sticker', msg.x, msg.y)
+
+    const y = y0 + msg.trackIdx * trackHeight
+
+    if (hasUser) {
+      if (!msg.hitbox) {
+        msg.hitbox = getHitboxFromPool()
       }
-      continue
+      
+      if (msg.hitbox) {
+        msg.hitbox.el.dataset.userId = userId
+        msg.hitbox.el.dataset.displayName = displayName
+        msg.hitbox.el.dataset.idx = String(idx)
+        
+        const wrapper = canvas.parentElement
+        if (wrapper) {
+          updateHitboxPosition(msg.hitbox, msg.x, y, msg.width || 100, trackHeight)
+          
+          const layer = hitboxLayers.value[idx]
+          if (layer && msg.hitbox.el.parentElement !== layer) {
+            layer.appendChild(msg.hitbox.el)
+          }
+        }
+        
+        activeHitboxIds.add(msg.hitbox)
+      }
     }
-    
-    ctx.fillStyle = msg.color || '#ffffff'
-    ctx.fillText(msg.content || msg.message || '', msg.x, msg.y)
+
+    ctx.fillStyle = msg.color
+    ctx.fillText(msg.content, msg.x, y)
   }
+
+  hitboxPool.value.forEach(hitbox => {
+    if (hitbox.inUse && hitbox.idx === idx && !activeHitboxIds.has(hitbox)) {
+      returnHitboxToPool(hitbox)
+    }
+  })
+
+  ctx.globalAlpha = 1
 }
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   stopDanmaku()
+  hitboxPool.value.forEach(h => {
+    if (h.el && h.el.parentElement) {
+      h.el.parentElement.removeChild(h.el)
+    }
+  })
+  hitboxPool.value = []
 })
 </script>
