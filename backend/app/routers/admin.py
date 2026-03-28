@@ -4,6 +4,7 @@ from app.scheduler_tasks import (
     update_bilibili_streams,
     sync_bilibili_channels,
 )
+from app.services.quota_guard import status as quota_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -25,3 +26,8 @@ async def trigger_bilibili_sync_channels():
     """同步 B站频道头像和名字，调试用。"""
     await sync_bilibili_channels()
     return {"status": "ok", "message": "Bilibili channel sync completed"}
+
+@router.get("/quota")
+def get_quota_status():
+    """查看当日 YouTube API 配额使用情况。"""
+    return quota_status()

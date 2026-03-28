@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "apscheduler>=3.10.4",
     "alembic>=1.13.0",
+    "yt-chat-downloader>=0.0.3",
 ]
 
 [project.optional-dependencies]

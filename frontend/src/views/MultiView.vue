@@ -1,111 +1,170 @@
 <template>
-  <div class="container mx-auto px-4 py-8">
-    <div class="mb-6 flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold">多窗播放</h1>
-        <p class="text-gray-400 text-sm mt-1">同时观看多个直播</p>
-      </div>
-      <div class="flex items-center gap-4">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" v-model="showDanmaku" class="w-4 h-4 accent-pink-500">
-          <span class="text-sm text-gray-300">弹幕</span>
-        </label>
-        <button 
-          @click="shareUrl" 
-          class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 transition"
-          title="复制分享链接"
-        >
-          分享
-        </button>
-        <button 
-          @click="showDanmakuSettings = true" 
-          class="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 transition text-sm"
-          title="弹幕设置"
-        >
-          设置
-        </button>
+  <div class="min-h-screen bg-black text-white">
+    <div class="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-b border-gray-800 sticky top-0 z-40">
+      <div class="flex items-center gap-3">
         <button 
           @click="$router.back()" 
-          class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 transition"
+          class="p-2 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
+          title="返回"
         >
-          返回
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div>
+          <h1 class="text-base font-semibold text-white">Multiview</h1>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <div class="flex bg-gray-800 rounded-lg p-0.5">
+          <button
+            v-for="layout in layouts"
+            :key="layout.name"
+            @click="selectedLayout = layout.name"
+            class="px-2 py-1 text-xs rounded-md transition min-w-[32px]"
+            :class="selectedLayout === layout.name ? 'bg-pink-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'"
+          >
+            {{ layout.label }}
+          </button>
+        </div>
+        
+        <label class="flex items-center gap-1.5 cursor-pointer px-2 py-1.5 hover:bg-gray-800 rounded-lg transition">
+          <input type="checkbox" v-model="showDanmaku" class="w-3.5 h-3.5 accent-pink-500 rounded">
+          <span class="text-xs text-gray-300">弹幕</span>
+        </label>
+        
+        <button 
+          @click="shareUrl" 
+          class="p-2 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
+          title="复制分享链接"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+        </button>
+        
+        <button 
+          @click="showDanmakuSettings = true" 
+          class="p-2 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
+          title="弹幕设置"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
         </button>
       </div>
     </div>
 
-    <div class="bg-gray-800 rounded-lg p-4 mb-6">
-      <div class="flex flex-wrap gap-4 items-center">
-        <div class="flex-1 min-w-[200px]">
-          <label class="block text-sm text-gray-400 mb-2">添加频道</label>
-          <div class="flex gap-2">
-            <select v-model="newChannel.platform" class="bg-gray-700 border border-gray-600 rounded px-3 py-2">
-              <option value="youtube">YouTube</option>
-              <option value="bilibili">Bilibili</option>
-            </select>
-            <input 
-              v-model="newChannel.id" 
-              type="text" 
-              placeholder="视频ID/房间ID"
-              class="bg-gray-700 border border-gray-600 rounded px-3 py-2 flex-1"
-            />
+    <div class="px-4 py-2 bg-[#1a1a1a] border-b border-gray-800">
+      <div class="flex flex-wrap gap-2 items-center">
+        <select v-model="newChannel.platform" class="bg-[#2a2a2a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300">
+          <option value="youtube">YouTube</option>
+          <option value="bilibili">Bilibili</option>
+        </select>
+        <input 
+          v-model="newChannel.id" 
+          type="text" 
+          placeholder="Video ID / Room ID"
+          class="bg-[#2a2a2a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 flex-1 min-w-[120px] placeholder-gray-600"
+          @keyup.enter="addChannel"
+        />
+        <button 
+          @click="addChannel" 
+          class="px-3 py-1.5 bg-pink-600 hover:bg-pink-700 rounded text-xs font-medium transition"
+        >
+          Add
+        </button>
+        
+        <div class="flex flex-wrap gap-1.5 ml-auto">
+          <span 
+            v-for="(ch, idx) in channels" 
+            :key="idx"
+            class="inline-flex items-center gap-1.5 px-2 py-1 bg-[#2a2a2a] rounded text-xs"
+          >
+            <span class="text-gray-500">{{ ch.platform === 'youtube' ? 'YT' : 'B' }}</span>
+            <span class="max-w-[80px] truncate text-gray-300">{{ ch.id }}</span>
             <button 
-              @click="addChannel" 
-              class="px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 transition"
+              @click="removeChannel(idx)" 
+              class="text-gray-600 hover:text-red-400 transition"
             >
-              添加
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-1 bg-black min-h-0 flex-1">
+      <div 
+        class="grid gap-0.5 h-full"
+        :style="gridStyle"
+      >
+        <div 
+          v-for="(ch, idx) in channels" 
+          :key="idx"
+          class="relative bg-[#0a0a0a] overflow-hidden group"
+          style="aspect-ratio: 16/9;"
+        >
+          <iframe
+            v-if="getEmbedUrl(ch)"
+            :src="getEmbedUrl(ch)"
+            class="absolute inset-0 w-full h-full"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+          <canvas
+            v-if="showDanmaku"
+            :ref="el => danmakuCanvases[idx] = el"
+            class="absolute inset-0 w-full h-full pointer-events-none"
+          ></canvas>
+          <div class="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span class="px-1.5 py-0.5 bg-black/70 rounded text-[10px] text-gray-300">
+              {{ ch.platform === 'youtube' ? 'YouTube' : 'Bilibili' }}
+            </span>
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="flex items-center justify-between">
+              <span class="text-xs truncate max-w-[150px]">{{ ch.id }}</span>
+              <button 
+                @click.stop="removeChannel(idx)" 
+                class="p-1 bg-red-600/80 hover:bg-red-600 rounded transition"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div 
+          v-for="n in emptyCellCount" 
+          :key="'empty-' + n"
+          class="relative bg-[#0a0a0a] border-2 border-dashed border-gray-800 hover:border-gray-700 transition-colors cursor-pointer"
+          style="aspect-ratio: 16/9;"
+          @click="focusInput"
+        >
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-gray-600 hover:text-gray-400 transition-colors">
+            <svg class="w-8 h-8 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
+            </svg>
+            <span class="text-xs">Add Video</span>
           </div>
         </div>
       </div>
-
-      <div class="mt-4 flex flex-wrap gap-2">
-        <span 
-          v-for="(ch, idx) in channels" 
-          :key="idx"
-          class="inline-flex items-center gap-2 px-3 py-1 bg-gray-700 rounded-full"
-        >
-          <span class="text-sm">{{ ch.platform }}: {{ ch.id }}</span>
-          <button 
-            @click="removeChannel(idx)" 
-            class="text-gray-400 hover:text-red-400"
-          >
-            ×
-          </button>
-        </span>
-      </div>
     </div>
 
-    <div 
-      class="grid gap-4"
-      :style="gridStyle"
-    >
-      <div 
-        v-for="(ch, idx) in channels" 
-        :key="idx"
-        class="relative bg-black rounded-lg overflow-hidden"
-        style="aspect-ratio: 16/9;"
-      >
-        <iframe
-          v-if="getEmbedUrl(ch)"
-          :src="getEmbedUrl(ch)"
-          class="absolute inset-0 w-full h-full"
-          frameborder="0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowfullscreen
-        ></iframe>
-        <canvas
-          v-if="showDanmaku"
-          :ref="el => danmakuCanvases[idx] = el"
-          class="absolute inset-0 w-full h-full pointer-events-none"
-        ></canvas>
-        <div v-if="!getEmbedUrl(ch)" class="flex items-center justify-center h-full text-gray-500">
-          无效的嵌入链接
-        </div>
-      </div>
-    </div>
-
-    <div v-if="channels.length === 0" class="text-center py-12 text-gray-500">
-      <p class="text-xl">添加频道开始多窗观看</p>
+    <div v-if="channels.length === 0" class="flex flex-col items-center justify-center h-[50vh] text-gray-500 bg-black">
+      <svg class="w-14 h-14 mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+      </svg>
+      <p class="text-base mb-1">Add videos to start multiview</p>
+      <p class="text-xs text-gray-600">Enter YouTube video ID or Bilibili room ID above</p>
     </div>
 
     <div v-if="hoveredDanmaku.show" class="fixed bg-gray-800 rounded-lg shadow-xl z-50 py-2 min-w-[160px]" :style="getHoveredMenuStyle()">
@@ -290,13 +349,35 @@ const hoveredDanmaku = ref({
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const WS_BASE = import.meta.env.VITE_WS_BASE || 'ws://localhost:8000'
 
+const layouts = [
+  { name: '1x1', label: '1×1', cols: 1, cells: 1 },
+  { name: '2x1', label: '2×1', cols: 2, cells: 2 },
+  { name: '2x2', label: '2×2', cols: 2, cells: 4 },
+  { name: '3x2', label: '3×2', cols: 3, cells: 6 },
+  { name: '3x3', label: '3×3', cols: 3, cells: 9 },
+  { name: '4x3', label: '4×3', cols: 4, cells: 12 },
+  { name: '4x4', label: '4×4', cols: 4, cells: 16 },
+]
+
+const selectedLayout = ref('2x2')
+
 const gridStyle = computed(() => {
-  const count = channels.value.length
-  if (count <= 1) return { gridTemplateColumns: '1fr' }
-  if (count <= 2) return { gridTemplateColumns: 'repeat(2, 1fr)' }
-  if (count <= 4) return { gridTemplateColumns: 'repeat(2, 1fr)' }
-  return { gridTemplateColumns: 'repeat(3, 1fr)' }
+  const layout = layouts.find(l => l.name === selectedLayout.value) || layouts[2]
+  return { 
+    gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
+    minHeight: 'calc(100vh - 120px)'
+  }
 })
+
+const emptyCellCount = computed(() => {
+  const layout = layouts.find(l => l.name === selectedLayout.value) || layouts[2]
+  return Math.max(0, layout.cells - channels.value.length)
+})
+
+function focusInput() {
+  const input = document.querySelector('input[placeholder="Video ID / Room ID"]') as HTMLInputElement
+  if (input) input.focus()
+}
 
 function getEmbedUrl(ch) {
   if (ch.platform === 'youtube') {
