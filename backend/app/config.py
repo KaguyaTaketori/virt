@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///./streams.db"
     enable_danmaku: bool = False
     danmaku_storage_path: str = "./danmaku_data"
+    admin_secret_key: str = ""
 
     class Config:
         env_file = ".env"

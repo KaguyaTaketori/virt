@@ -57,19 +57,26 @@ def status() -> dict:
 def can_spend(op: str, count: int = 1) -> bool:
     """
     检查能否执行 count 次 op 操作。
-    discover 类操作额外受 DISCOVER_RESERVE 限制。
+    search.list 额外受 DISCOVER_RESERVE 保护：
+    剩余配额必须在扣除本次消耗后仍 >= DISCOVER_RESERVE，才允许执行。
     """
     cost = COSTS.get(op, 1) * count
     with _lock:
         data = _load()
         remaining = DAILY_LIMIT - data["used"]
+
         if remaining < cost:
             print(f"[QuotaGuard] 拒绝 {op}×{count}（需要 {cost}，剩余 {remaining}）")
             return False
-        if op == "search.list" and remaining - cost < DAILY_LIMIT - DISCOVER_RESERVE - data["used"]:
-            pass
-        return True
 
+        if op == "search.list" and (remaining - cost) < DISCOVER_RESERVE:
+            print(
+                f"[QuotaGuard] search.list 被储备保护拦截"
+                f"（剩余 {remaining}，扣后 {remaining - cost} < 储备 {DISCOVER_RESERVE}）"
+            )
+            return False
+
+        return True
 
 def spend(op: str, count: int = 1) -> int:
     """

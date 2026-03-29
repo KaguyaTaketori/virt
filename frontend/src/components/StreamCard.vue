@@ -51,7 +51,10 @@
           v-if="stream.channel_avatar"
           :src="stream.channel_avatar"
           :alt="stream.channel_name ?? ''"
-          class="w-10 h-10 rounded-full object-cover bg-gray-700 flex-shrink-0"
+          class="w-10 h-10 object-cover bg-gray-700 flex-shrink-0"
+          :style="stream.channel_avatar_shape === 'square'
+            ? 'border-radius: 6px'
+            : 'border-radius: 50%'"
           referrerpolicy="no-referrer"
         />
         <div v-else class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm font-bold flex-shrink-0">
