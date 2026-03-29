@@ -90,8 +90,8 @@ onMounted(() => {
       :is-dark="themeStore.isDark"
       :current-theme-id="themeStore.currentThemeId"
       :themes="themeStore.themes"
-      @toggle-dark="themeStore.toggleDark"
-      @set-theme="themeStore.setTheme"
+      @toggle-dark="() => themeStore.toggleDark()"
+      @set-theme="(id: string) => themeStore.setTheme(id)"
     />
 
     <CollapsibleHeader
