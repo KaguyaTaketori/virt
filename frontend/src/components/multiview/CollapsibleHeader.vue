@@ -187,9 +187,22 @@ function platformColor(p: string) {
     >
       <div
         v-if="isCollapsed"
-        class="absolute top-0 left-0 right-0 h-1 z-30 flex justify-center"
+        class="absolute top-0 left-0 right-0 h-10 z-30 flex items-center justify-between px-2"
       >
-        <div class="w-12 h-1 rounded-full bg-zinc-700/50 cursor-pointer hover:bg-zinc-600/70 transition-colors" />
+        <button
+          @click="emit('toggleDrawer')"
+          class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+          title="菜单"
+        >
+          <Menu class="w-4 h-4" />
+        </button>
+        <button
+          @click="emit('toggleCollapse')"
+          class="flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs transition-colors"
+        >
+          <span>工具栏</span>
+          <ChevronDown class="w-3 h-3" />
+        </button>
       </div>
     </Transition>
   </div>
