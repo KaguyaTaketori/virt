@@ -4,6 +4,7 @@ import { themes, defaultTheme } from '../config/themes'
 
 export const useThemeStore = defineStore('theme', () => {
   const currentThemeId = ref(localStorage.getItem('theme') || defaultTheme.id)
+  const isDark = ref(localStorage.getItem('isDark') !== 'false')
   
   const currentTheme = computed(() => 
     themes.find(t => t.id === currentThemeId.value) || defaultTheme
@@ -32,11 +33,18 @@ export const useThemeStore = defineStore('theme', () => {
     localStorage.setItem('theme', themeId)
   }
   
+  function toggleDark() {
+    isDark.value = !isDark.value
+    localStorage.setItem('isDark', String(isDark.value))
+  }
+  
   return { 
     themes, 
     currentThemeId, 
     currentTheme, 
     naiveThemeOverrides,
-    setTheme 
+    isDark,
+    setTheme,
+    toggleDark
   }
 })

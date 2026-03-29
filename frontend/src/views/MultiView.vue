@@ -46,7 +46,6 @@ const showDanmaku     = ref<boolean>(false)
 const isAddModalOpen  = ref<boolean>(false)
 const isCollapsed     = ref<boolean>(false)
 const isDrawerOpen    = ref<boolean>(false)
-const isDark          = ref<boolean>(localStorage.getItem('theme')?.includes('dark') !== false)
 
 function addChannel(channel: Channel): void {
   if (!channels.value.find(c => c.id === channel.id && c.platform === channel.platform)) {
@@ -58,11 +57,6 @@ function addChannel(channel: Channel): void {
 function removeChannel(idx: number): void {
   channels.value.splice(idx, 1)
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
-}
-
-function toggleDark(): void {
-  isDark.value = !isDark.value
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
 function shareUrl(): void {
@@ -93,10 +87,10 @@ onMounted(() => {
   <div class="h-full w-full flex flex-col overflow-hidden bg-zinc-950 text-white">
     <SidebarDrawer
       v-model="isDrawerOpen"
-      :is-dark="isDark"
+      :is-dark="themeStore.isDark"
       :current-theme-id="themeStore.currentThemeId"
       :themes="themeStore.themes"
-      @toggle-dark="toggleDark"
+      @toggle-dark="themeStore.toggleDark"
       @set-theme="themeStore.setTheme"
     />
 
