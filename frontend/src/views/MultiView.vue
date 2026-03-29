@@ -117,11 +117,29 @@
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowfullscreen
           ></iframe>
+
+          <!-- Canvas：永远 pointer-events: none，只负责绘制 -->
           <canvas
-            v-if="showDanmaku"
-            :ref="el => danmakuCanvases[idx] = el"
-            class="absolute inset-0 w-full h-full pointer-events-none"
+            v-if="showDanmaku && ch.platform === 'youtube'"
+            :ref="el => { if (el) danmakuCanvases[idx] = el }"
+            class="absolute inset-0 w-full h-full"
+            style="pointer-events: none;"
           ></canvas>
+
+          <!--
+            Hit-layer：容器本身 pointer-events: none，
+            由 JS 动态插入的子 div 承载 pointer-events: auto。
+            这样只有弹幕文字包围盒内才会拦截事件，
+            其余区域的所有鼠标操作（进度条拖拽等）直接穿透到 iframe。
+            Bilibili 使用播放器自带弹幕，不需要此层。
+          -->
+          <div
+            v-if="showDanmaku && ch.platform === 'youtube'"
+            :ref="el => { if (el) danmakuHitLayers[idx] = el }"
+            class="absolute inset-0"
+            style="pointer-events: none;"
+          ></div>
+
           <div class="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <span class="px-1.5 py-0.5 bg-black/70 rounded text-[10px] text-gray-300">
               {{ ch.platform === 'youtube' ? 'YouTube' : 'Bilibili' }}
@@ -167,7 +185,14 @@
       <p class="text-xs text-gray-600">Enter YouTube video ID or Bilibili room ID above</p>
     </div>
 
-    <div v-if="hoveredDanmaku.show" class="fixed bg-gray-800 rounded-lg shadow-xl z-50 py-2 min-w-[160px]" :style="getHoveredMenuStyle()">
+    <!-- 弹幕右键菜单：mouseenter 取消隐藏计时器，mouseleave 触发隐藏 -->
+    <div
+      v-if="hoveredDanmaku.show"
+      class="fixed bg-gray-800 rounded-lg shadow-xl z-50 py-2 min-w-[160px]"
+      :style="getHoveredMenuStyle()"
+      @mouseenter="cancelHideMenu"
+      @mouseleave="startHideMenu"
+    >
       <div class="px-3 py-1 text-xs text-gray-400 border-b border-gray-700 mb-1">
         {{ hoveredDanmaku.displayName || hoveredDanmaku.userId }}
       </div>
@@ -300,15 +325,22 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 
-const newChannel = ref({
-  platform: 'youtube',
-  id: ''
-})
-
+const newChannel = ref({ platform: 'youtube', id: '' })
 const channels = ref([])
 const showDanmaku = ref(false)
 const showDanmakuSettings = ref(false)
+
+// Canvas refs（只负责绘制，pointer-events 始终为 none）
 const danmakuCanvases = ref([])
+
+// Hit-layer refs（容器 pointer-events: none，子 div 动态插入并设为 auto）
+// 只对 YouTube 频道创建，Bilibili 使用播放器自带弹幕
+const danmakuHitLayers = ref([])
+
+// 每个频道的 Map<messageId, HTMLDivElement>，用于复用 div 避免每帧重建 DOM
+// 使用普通数组而非 ref，不需要响应式追踪
+const hitLayerDivMaps: Map<string, HTMLDivElement>[] = []
+
 const danmakuContexts = ref([])
 const danmakuTimers = ref([])
 const danmakuQueues = ref([])
@@ -316,6 +348,10 @@ const danmakuQueues = ref([])
 const wsConnections = ref({})
 const reconnectTimers = ref({})
 const stickerImages = ref({})
+
+// 菜单显示/隐藏的延迟计时器
+// 给用户 150ms 的时间从弹幕 div 移动到菜单，防止途中触发 mouseleave 导致菜单消失
+let hideMenuTimer: ReturnType<typeof setTimeout> | null = null
 
 const defaultColors = ['#ffffff', '#ff6b6b', '#ffd700', '#90EE90', '#87CEEB', '#ff69b4']
 
@@ -335,15 +371,14 @@ const defaultDanmakuSettings = {
 const danmakuSettings = ref({ ...defaultDanmakuSettings })
 const newUserRule = ref({ userId: '', action: 'block', color: '#ff6b6b' })
 
-const hoveredDanmaku = ref({ 
-  show: false, 
-  userId: '', 
-  displayName: '', 
+// 悬停状态：改用 menuRect 存储触发位置，由 getBoundingClientRect() 提供精确坐标
+// 不再依赖 Canvas 坐标换算
+const hoveredDanmaku = ref({
+  show: false,
+  userId: '',
+  displayName: '',
   idx: -1,
-  danmakuX: 0,
-  danmakuY: 0,
-  danmakuWidth: 100,
-  danmakuHeight: 28
+  menuRect: null as DOMRect | null,
 })
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
@@ -363,7 +398,7 @@ const selectedLayout = ref('2x2')
 
 const gridStyle = computed(() => {
   const layout = layouts.find(l => l.name === selectedLayout.value) || layouts[2]
-  return { 
+  return {
     gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
     minHeight: 'calc(100vh - 120px)'
   }
@@ -373,6 +408,158 @@ const emptyCellCount = computed(() => {
   const layout = layouts.find(l => l.name === selectedLayout.value) || layouts[2]
   return Math.max(0, layout.cells - channels.value.length)
 })
+
+// ─── 菜单控制 ────────────────────────────────────────────────────────────────
+
+/**
+ * 取消挂起的隐藏计时器。
+ * 在弹幕 hit-div 或菜单本身的 mouseenter 中调用。
+ */
+function cancelHideMenu() {
+  if (hideMenuTimer !== null) {
+    clearTimeout(hideMenuTimer)
+    hideMenuTimer = null
+  }
+}
+
+/**
+ * 启动延迟隐藏。
+ * 在弹幕 hit-div 或菜单本身的 mouseleave 中调用。
+ * 150ms 的缓冲足够用户从弹幕文字移动到菜单，同时短到不影响使用体验。
+ */
+function startHideMenu() {
+  cancelHideMenu()
+  hideMenuTimer = setTimeout(() => {
+    hoveredDanmaku.value.show = false
+    hideMenuTimer = null
+  }, 150)
+}
+
+/**
+ * 根据 menuRect 计算菜单位置。
+ * 使用 getBoundingClientRect 提供的视口坐标，避免 Canvas 坐标换算误差。
+ */
+function getHoveredMenuStyle() {
+  const rect = hoveredDanmaku.value.menuRect
+  if (!rect) return { bottom: '20px', right: '20px' }
+
+  const MENU_HEIGHT = 140
+  const MENU_WIDTH = 160
+  const GAP = 6
+
+  // 优先在弹幕下方展开，空间不足时改为上方
+  const spaceBelow = window.innerHeight - rect.bottom
+  const top = spaceBelow >= MENU_HEIGHT + GAP
+    ? rect.bottom + GAP
+    : rect.top - MENU_HEIGHT - GAP
+
+  // 右侧超出视口时左移
+  let left = rect.left
+  if (left + MENU_WIDTH > window.innerWidth - 10) {
+    left = window.innerWidth - MENU_WIDTH - 10
+  }
+
+  return {
+    top: `${Math.max(10, top)}px`,
+    left: `${Math.max(10, left)}px`,
+  }
+}
+
+// ─── Hit-layer 管理 ───────────────────────────────────────────────────────────
+
+/**
+ * 每帧渲染后同步 hit-layer 中的子 div 位置。
+ *
+ * 策略：
+ * - 以 messageId 为 key 复用 div，避免每帧重建 DOM 节点
+ * - 用 transform: translate 更新位置（不触发 layout reflow）
+ * - 移出屏幕的弹幕从 Map 中删除，对应 div 从 DOM 移除
+ * - sticker 类型不参与 hit 检测（无用户信息）
+ */
+function updateHitLayer(idx: number, queue: any[]) {
+  const hitLayer = danmakuHitLayers.value[idx]
+  if (!hitLayer) return
+
+  if (!hitLayerDivMaps[idx]) {
+    hitLayerDivMaps[idx] = new Map()
+  }
+  const map = hitLayerDivMaps[idx]
+  const { fontSize } = danmakuSettings.value.global
+
+  // 收集当前帧仍存活的 messageId
+  const currentIds = new Set<string>()
+
+  for (const msg of queue) {
+    // sticker 不做 hit 检测；无 messageId 的消息无法稳定追踪
+    if (msg.messageType === 'sticker' || !msg.messageId) continue
+
+    currentIds.add(msg.messageId)
+
+    let div = map.get(msg.messageId)
+
+    if (!div) {
+      // 首次出现：创建 div 并绑定事件
+      div = document.createElement('div')
+      div.style.cssText = [
+        'position: absolute',
+        'top: 0',
+        'left: 0',
+        // 关键：只有这些子 div 有 pointer-events，容器本身为 none
+        'pointer-events: auto',
+        'cursor: pointer',
+        // 透明背景，不遮挡视频画面
+        'background: transparent',
+      ].join(';')
+
+      // 捕获当前 msg 的闭包值（div 创建时已绑定）
+      const capturedMsg = msg
+
+      div.addEventListener('mouseenter', () => {
+        cancelHideMenu()
+        // 使用 getBoundingClientRect 获取视口精确坐标，无需 Canvas 换算
+        hoveredDanmaku.value = {
+          show: true,
+          userId: capturedMsg.userId || '',
+          displayName: capturedMsg.userDisplayName || '',
+          idx,
+          menuRect: div!.getBoundingClientRect(),
+        }
+      })
+
+      div.addEventListener('mouseleave', startHideMenu)
+
+      map.set(msg.messageId, div)
+      hitLayer.appendChild(div)
+    }
+
+    // 每帧只更新 transform 和尺寸，不触发 layout
+    div.style.transform = `translate(${msg.x}px, ${msg.y}px)`
+    div.style.width = `${msg.textWidth || 60}px`
+    div.style.height = `${fontSize + 4}px`
+  }
+
+  // 清理已离屏（被 renderDanmaku 从队列移除）的 div
+  for (const [id, div] of map) {
+    if (!currentIds.has(id)) {
+      div.remove()
+      map.delete(id)
+    }
+  }
+}
+
+/**
+ * 清空指定频道的 hit-layer，释放 DOM 节点。
+ */
+function clearHitLayer(idx: number) {
+  const map = hitLayerDivMaps[idx]
+  if (!map) return
+  for (const div of map.values()) {
+    div.remove()
+  }
+  map.clear()
+}
+
+// ─── 其余原有逻辑（保持不变）────────────────────────────────────────────────
 
 function focusInput() {
   const input = document.querySelector('input[placeholder="Video ID / Room ID"]') as HTMLInputElement
@@ -392,11 +579,8 @@ function parseYouTubeId(input) {
   if (!input) return null
   try {
     const url = new URL(input)
-    if (url.hostname.includes('youtube.com')) {
-      return url.searchParams.get('v')
-    } else if (url.hostname.includes('youtu.be')) {
-      return url.pathname.slice(1)
-    }
+    if (url.hostname.includes('youtube.com')) return url.searchParams.get('v')
+    if (url.hostname.includes('youtu.be')) return url.pathname.slice(1)
   } catch {
     return input
   }
@@ -405,24 +589,25 @@ function parseYouTubeId(input) {
 
 function addChannel() {
   if (!newChannel.value.id) return
-  const id = newChannel.value.platform === 'youtube' 
-    ? parseYouTubeId(newChannel.value.id) 
+  const id = newChannel.value.platform === 'youtube'
+    ? parseYouTubeId(newChannel.value.id)
     : newChannel.value.id
   if (!id) return
   channels.value.push({ platform: newChannel.value.platform, id })
   newChannel.value.id = ''
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
-  
-  if (showDanmaku.value) {
-    initDanmaku()
-  }
+  if (showDanmaku.value) initDanmaku()
 }
 
 function removeChannel(idx) {
   const ch = channels.value[idx]
-  if (ch && ch.platform === 'youtube') {
-    disconnectWs(ch.id)
-  }
+  if (ch && ch.platform === 'youtube') disconnectWs(ch.id)
+
+  // 清理对应频道的 hit-layer
+  clearHitLayer(idx)
+  hitLayerDivMaps.splice(idx, 1)
+  danmakuHitLayers.value.splice(idx, 1)
+
   channels.value.splice(idx, 1)
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
 }
@@ -430,11 +615,8 @@ function removeChannel(idx) {
 function loadDanmakuSettings() {
   const saved = localStorage.getItem('multiview_danmaku_settings')
   if (saved) {
-    try {
-      danmakuSettings.value = { ...defaultDanmakuSettings, ...JSON.parse(saved) }
-    } catch (e) {
-      console.error('Failed to load danmaku settings:', e)
-    }
+    try { danmakuSettings.value = { ...defaultDanmakuSettings, ...JSON.parse(saved) } }
+    catch (e) { console.error('Failed to load danmaku settings:', e) }
   }
 }
 
@@ -450,10 +632,7 @@ function resetDanmakuSettings() {
 function addUserRule() {
   if (!newUserRule.value.userId) return
   const userId = newUserRule.value.userId.trim()
-  if (danmakuSettings.value.userRules[userId]) {
-    alert('该用户规则已存在')
-    return
-  }
+  if (danmakuSettings.value.userRules[userId]) { alert('该用户规则已存在'); return }
   danmakuSettings.value.userRules[userId] = {
     action: newUserRule.value.action,
     color: newUserRule.value.action === 'highlight' ? newUserRule.value.color : null
@@ -468,12 +647,8 @@ function removeUserRule(userId) {
 }
 
 function getUserRule(userId, displayName) {
-  if (danmakuSettings.value.userRules[userId]) {
-    return danmakuSettings.value.userRules[userId]
-  }
-  if (displayName && danmakuSettings.value.userRules[displayName]) {
-    return danmakuSettings.value.userRules[displayName]
-  }
+  if (danmakuSettings.value.userRules[userId]) return danmakuSettings.value.userRules[userId]
+  if (displayName && danmakuSettings.value.userRules[displayName]) return danmakuSettings.value.userRules[displayName]
   return null
 }
 
@@ -481,7 +656,6 @@ function addRuleFromHover(action) {
   const { userId, displayName } = hoveredDanmaku.value
   const targetId = userId || displayName
   if (!targetId) return
-
   if (danmakuSettings.value.userRules[targetId]) {
     alert('该用户规则已存在')
   } else {
@@ -491,115 +665,42 @@ function addRuleFromHover(action) {
     }
     saveDanmakuSettings()
   }
-}
-
-function getHoveredMenuStyle() {
-  const idx = hoveredDanmaku.value.idx
-  const canvas = danmakuCanvases.value[idx]
-  if (!canvas) return { bottom: '20px', right: '20px' }
-
-  const wrapper = canvas.parentElement
-  if (!wrapper) return { bottom: '20px', right: '20px' }
-
-  const rect = wrapper.getBoundingClientRect()
-  const danmakuY = hoveredDanmaku.value.danmakuY || 0
-  const danmakuX = hoveredDanmaku.value.danmakuX || 0
-  const danmakuWidth = hoveredDanmaku.value.danmakuWidth || 100
-  const danmakuHeight = hoveredDanmaku.value.danmakuHeight || 28
-
-  const menuHeight = 140
-
-  const absoluteY = rect.top + danmakuY
-  const absoluteX = rect.left + danmakuX
-
-  const spaceBelow = window.innerHeight - absoluteY - danmakuHeight
-  const spaceAbove = absoluteY - menuHeight
-
-  let top
-
-  if (spaceBelow >= menuHeight + 10 || spaceBelow > spaceAbove) {
-    top = absoluteY + danmakuHeight + 5
-  } else {
-    top = absoluteY - menuHeight - 5
-  }
-
-  let right = window.innerWidth - absoluteX - danmakuWidth - 10
-  if (right < 10) {
-    right = 10
-  }
-
-  return {
-    top: top + 'px',
-    right: right + 'px'
-  }
+  hoveredDanmaku.value.show = false
 }
 
 function shareUrl() {
-  if (channels.value.length === 0) {
-    alert('请先添加频道')
-    return
-  }
-  
-  const channelStr = channels.value
-    .map(ch => `${ch.platform}_${ch.id}`)
-    .join(',')
+  if (channels.value.length === 0) { alert('请先添加频道'); return }
+  const channelStr = channels.value.map(ch => `${ch.platform}_${ch.id}`).join(',')
   const shareCode = btoa(channelStr)
-  
   const url = `${window.location.origin}/multiview?c=${shareCode}`
-  
-  navigator.clipboard.writeText(url).then(() => {
-    alert('分享链接已复制到剪贴板')
-  }).catch(() => {
-    prompt('分享链接：', url)
-  })
+  navigator.clipboard.writeText(url)
+    .then(() => alert('分享链接已复制到剪贴板'))
+    .catch(() => prompt('分享链接：', url))
 }
 
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+
 function connectWs(videoId) {
-  if (wsConnections.value[videoId]) {
-    return
-  }
-  
+  if (wsConnections.value[videoId]) return
   const ws = new WebSocket(`${WS_BASE}/ws/danmaku/${videoId}`)
-  
-  ws.onopen = () => {
-    console.log(`WebSocket connected: ${videoId}`)
-    delete reconnectTimers.value[videoId]
-  }
-  
+  ws.onopen = () => { delete reconnectTimers.value[videoId] }
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      if (data.type === 'danmaku' && data.data) {
-        addDanmakuMessages(videoId, data.data)
-      }
-    } catch (e) {
-      console.error('Failed to parse danmaku message:', e)
-    }
+      if (data.type === 'danmaku' && data.data) addDanmakuMessages(videoId, data.data)
+    } catch (e) { console.error('Failed to parse danmaku message:', e) }
   }
-  
   ws.onclose = () => {
-    console.log(`WebSocket closed: ${videoId}`)
     delete wsConnections.value[videoId]
-    
-    if (showDanmaku.value) {
-      scheduleReconnect(videoId)
-    }
+    if (showDanmaku.value) scheduleReconnect(videoId)
   }
-  
-  ws.onerror = (error) => {
-    console.error(`WebSocket error for ${videoId}:`, error)
-  }
-  
+  ws.onerror = (error) => { console.error(`WebSocket error for ${videoId}:`, error) }
   wsConnections.value[videoId] = ws
 }
 
 function disconnectWs(videoId) {
   const ws = wsConnections.value[videoId]
-  if (ws) {
-    ws.close()
-    delete wsConnections.value[videoId]
-  }
-  
+  if (ws) { ws.close(); delete wsConnections.value[videoId] }
   if (reconnectTimers.value[videoId]) {
     clearTimeout(reconnectTimers.value[videoId])
     delete reconnectTimers.value[videoId]
@@ -607,73 +708,86 @@ function disconnectWs(videoId) {
 }
 
 function scheduleReconnect(videoId) {
-  if (reconnectTimers.value[videoId]) {
-    return
-  }
-  
+  if (reconnectTimers.value[videoId]) return
   reconnectTimers.value[videoId] = setTimeout(() => {
     delete reconnectTimers.value[videoId]
-    if (showDanmaku.value) {
-      connectWs(videoId)
-    }
+    if (showDanmaku.value) connectWs(videoId)
   }, 3000)
 }
 
+// ─── 弹幕队列 ────────────────────────────────────────────────────────────────
+
+/**
+ * 将 WebSocket 推送的消息加入对应频道的渲染队列。
+ * 现在同时存储 userId / userDisplayName / messageId 用于 hit-layer 交互。
+ */
 function addDanmakuMessages(videoId, messages) {
   const idx = channels.value.findIndex(ch => ch.id === videoId)
   if (idx === -1) return
-  
+
   const queue = danmakuQueues.value[idx] || []
-  
+  const rule = (msg) => getUserRule(msg.user_id || '', msg.user_display_name || '')
+
   messages.forEach(msg => {
-    const content = msg.comment || msg.message || ''
-    
+    // sticker
     if (msg.message_type === 'sticker' && msg.sticker_url) {
       queue.push({
-        message_type: 'sticker',
+        messageType: 'sticker',
         sticker_url: msg.sticker_url,
         alt_text: msg.alt_text || 'Sticker',
+        messageId: msg.message_id || '',
         x: 800,
         y: 50 + Math.random() * 300,
-        loaded: false
+        textWidth: 50,
+        loaded: false,
       })
-      
       if (!stickerImages.value[msg.sticker_url]) {
         const img = new Image()
         img.onload = () => {
           stickerImages.value[msg.sticker_url] = img
-          queue.forEach(m => {
-            if (m.sticker_url === msg.sticker_url) {
-              m.loaded = true
-            }
-          })
+          queue.forEach(m => { if (m.sticker_url === msg.sticker_url) m.loaded = true })
         }
-        img.onerror = () => {
-          stickerImages.value[msg.sticker_url] = null
-        }
+        img.onerror = () => { stickerImages.value[msg.sticker_url] = null }
         img.src = msg.sticker_url
       }
       return
     }
-    
+
+    const content = msg.comment || msg.message || ''
     if (!content) return
-    
+
+    const userRule = rule(msg)
+    // 屏蔽规则：直接跳过，不加入队列
+    if (userRule?.action === 'block') return
+
     const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#ffaa00', '#aaff00', '#00aaff']
-    const color = colors[Math.floor(Math.random() * colors.length)]
-    
+    // 高亮规则：使用指定颜色，否则随机
+    const color = userRule?.action === 'highlight' && userRule.color
+      ? userRule.color
+      : colors[Math.floor(Math.random() * colors.length)]
+
     queue.push({
+      messageType: 'text',
       content,
       color,
+      // 用于 hit-layer 悬停菜单
+      userId: msg.user_id || '',
+      userDisplayName: msg.user_display_name || '',
+      messageId: msg.message_id || `dm_${Date.now()}_${Math.random()}`,
       x: 800,
-      y: 50 + Math.random() * 300
+      y: 50 + Math.random() * 300,
+      textWidth: 0, // 在 renderDanmaku 中首次绘制时计算并缓存
     })
   })
-  
+
   danmakuQueues.value[idx] = queue
 }
 
+// ─── Canvas 渲染 ──────────────────────────────────────────────────────────────
+
 onMounted(() => {
   loadDanmakuSettings()
+
   const shareCode = Array.isArray(route.query.c) ? route.query.c[0] : route.query.c
   if (shareCode) {
     try {
@@ -688,18 +802,13 @@ onMounted(() => {
         router.replace({ name: 'MultiView' })
         return
       }
-    } catch (e) {
-      console.error('Failed to parse share code:', e)
-    }
+    } catch (e) { console.error('Failed to parse share code:', e) }
   }
-  
+
   const saved = localStorage.getItem('multiview_channels')
   if (saved) {
-    try {
-      channels.value = JSON.parse(saved)
-    } catch (e) {
-      console.error('Failed to restore channels:', e)
-    }
+    try { channels.value = JSON.parse(saved) }
+    catch (e) { console.error('Failed to restore channels:', e) }
   }
 })
 
@@ -714,38 +823,39 @@ watch(showDanmaku, async (enabled) => {
 
 function initDanmaku() {
   channels.value.forEach((ch, idx) => {
+    // 只对 YouTube 频道初始化 Canvas 弹幕
+    if (ch.platform !== 'youtube') return
+
     const canvas = danmakuCanvases.value[idx]
     if (!canvas) return
-    
+
     const rect = canvas.parentElement.getBoundingClientRect()
     canvas.width = rect.width
     canvas.height = rect.height
-    
+
     const ctx = canvas.getContext('2d')
-    danmakuContexts.value[idx] = { ctx, canvas, tracks: [] }
+    danmakuContexts.value[idx] = { ctx, canvas }
     danmakuQueues.value[idx] = []
-    
-    if (ch.platform === 'youtube') {
-      connectWs(ch.id)
-    }
-    
+
+    // 初始化对应频道的 hit-layer Map
+    if (!hitLayerDivMaps[idx]) hitLayerDivMaps[idx] = new Map()
+
+    connectWs(ch.id)
     startDanmakuLoop(idx)
   })
-  
+
   window.addEventListener('resize', handleResize)
 }
 
 function handleResize() {
   if (!showDanmaku.value) return
-  
   channels.value.forEach((ch, idx) => {
+    if (ch.platform !== 'youtube') return
     const canvas = danmakuCanvases.value[idx]
     if (!canvas) return
-    
     const rect = canvas.parentElement.getBoundingClientRect()
     canvas.width = rect.width
     canvas.height = rect.height
-    
     const ctx = canvas.getContext('2d')
     danmakuContexts.value[idx] = { ...danmakuContexts.value[idx], ctx, canvas }
   })
@@ -756,19 +866,35 @@ function stopDanmaku() {
   danmakuTimers.value = []
   danmakuContexts.value = []
   danmakuQueues.value = []
-  
-  Object.keys(wsConnections.value).forEach(videoId => {
-    disconnectWs(videoId)
+
+  // 清理所有 hit-layer DOM 节点
+  hitLayerDivMaps.forEach((map, idx) => {
+    if (map) {
+      for (const div of map.values()) div.remove()
+      map.clear()
+    }
   })
+  hitLayerDivMaps.length = 0
+  danmakuHitLayers.value = []
+
+  // 取消挂起的菜单隐藏计时器并收起菜单
+  cancelHideMenu()
+  hoveredDanmaku.value.show = false
+
+  Object.keys(wsConnections.value).forEach(videoId => disconnectWs(videoId))
 }
 
 function startDanmakuLoop(idx) {
-  const renderTimer = setInterval(() => {
-    renderDanmaku(idx)
-  }, 30)
-  danmakuTimers.value.push(renderTimer)
+  const timer = setInterval(() => renderDanmaku(idx), 30)
+  danmakuTimers.value.push(timer)
 }
 
+/**
+ * 主渲染函数，每帧：
+ * 1. 清空 Canvas
+ * 2. 绘制所有弹幕，计算并缓存 textWidth
+ * 3. 调用 updateHitLayer 同步 hit-layer 子 div 的位置
+ */
 function renderDanmaku(idx) {
   const ctxData = danmakuContexts.value[idx]
   if (!ctxData) return
@@ -791,15 +917,19 @@ function renderDanmaku(idx) {
     const msg = queue[i]
     msg.x -= speed
 
-    const textWidth = ctx.measureText(msg.content || '').width
-    if (msg.x < -(textWidth + 20)) {
-      queue.splice(i, 1)
+    if (msg.messageType === 'sticker') {
+      if (msg.x < -70) { queue.splice(i, 1); continue }
+      const img = stickerImages.value[msg.sticker_url]
+      if (img) ctx.drawImage(img, msg.x, msg.y, 50, 50)
       continue
     }
 
-    if (msg.message_type === 'sticker') {
-      const img = stickerImages.value[msg.sticker_url]
-      if (img) ctx.drawImage(img, msg.x, msg.y, 50, 50)
+    // 计算文字宽度并缓存到 msg.textWidth，供 updateHitLayer 使用
+    const textWidth = ctx.measureText(msg.content || '').width
+    msg.textWidth = textWidth
+
+    if (msg.x < -(textWidth + 20)) {
+      queue.splice(i, 1)
       continue
     }
 
@@ -814,6 +944,9 @@ function renderDanmaku(idx) {
   }
 
   ctx.globalAlpha = 1
+
+  // 同步 hit-layer：根据当前帧队列状态更新 div 位置
+  updateHitLayer(idx, queue)
 }
 
 onUnmounted(() => {
