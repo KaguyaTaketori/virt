@@ -1,8 +1,6 @@
 <script setup lang="ts">
 /**
- * MultiViewLayout.vue（集成 MultiviewToolbar 的完整版）
- *
- * 放置路径: frontend/src/views/MultiViewLayout.vue
+ * MultiView.vue
  *
  * 溢出修复链路：
  *   AppLayout → RouterView 容器 (flex-1 min-h-0)
@@ -14,7 +12,11 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
 import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
-import MultiviewToolbar from '@/components/multiview/MultiviewToolbar.vue'
+import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
+import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
+import { useThemeStore } from '@/stores/theme'
+
+const themeStore = useThemeStore()
 
 interface Channel {
   platform: 'youtube' | 'bilibili'
@@ -38,16 +40,29 @@ const layouts: Layout[] = [
 const route  = useRoute()
 const router = useRouter()
 
-const channels       = ref<Channel[]>([])
-const selectedLayout = ref<string>('2x2')
-const showDanmaku    = ref<boolean>(false)
-const isAddModalOpen = ref<boolean>(false)
+const channels        = ref<Channel[]>([])
+const selectedLayout  = ref<string>('2x2')
+const showDanmaku     = ref<boolean>(false)
+const isAddModalOpen  = ref<boolean>(false)
+const isCollapsed     = ref<boolean>(false)
+const isDrawerOpen    = ref<boolean>(false)
+const isDark          = ref<boolean>(localStorage.getItem('theme')?.includes('dark') !== false)
 
 function addChannel(channel: Channel): void {
   if (!channels.value.find(c => c.id === channel.id && c.platform === channel.platform)) {
     channels.value.push(channel)
   }
   localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+}
+
+function removeChannel(idx: number): void {
+  channels.value.splice(idx, 1)
+  localStorage.setItem('multiview_channels', JSON.stringify(channels.value))
+}
+
+function toggleDark(): void {
+  isDark.value = !isDark.value
+  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
 function shareUrl(): void {
@@ -75,19 +90,26 @@ onMounted(() => {
 </script>
 
 <template>
-  <!--
-    h-full + flex-col + overflow-hidden：
-    填满 AppLayout 分配的空间，纵向排列，截断溢出。
-    VideoGrid 用 flex-1 min-h-0 自动填满剩余高度。
-  -->
   <div class="h-full w-full flex flex-col overflow-hidden bg-zinc-950 text-white">
+    <SidebarDrawer
+      v-model="isDrawerOpen"
+      :is-dark="isDark"
+      :current-theme-id="themeStore.currentThemeId"
+      :themes="themeStore.themes"
+      @toggle-dark="toggleDark"
+      @set-theme="themeStore.setTheme"
+    />
 
-    <MultiviewToolbar
-      :layouts="layouts"
+    <CollapsibleHeader
+      :is-collapsed="isCollapsed"
+      :channels="channels"
       :selected-layout="selectedLayout"
+      :layouts="layouts"
       :show-danmaku="showDanmaku"
-      :channel-count="channels.length"
+      @toggle-drawer="isDrawerOpen = !isDrawerOpen"
+      @toggle-collapse="isCollapsed = !isCollapsed"
       @open-add-modal="isAddModalOpen = true"
+      @remove-channel="removeChannel"
       @set-layout="selectedLayout = $event"
       @update:show-danmaku="showDanmaku = $event"
       @share="shareUrl"
