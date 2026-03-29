@@ -50,6 +50,13 @@ function platformColor(p: string) {
 
 <template>
   <div class="relative">
+    <!-- ─── Transparent Pull Handle (always visible) ─── -->
+    <div
+      class="absolute top-0 left-0 right-0 h-3 z-40 cursor-pointer"
+      @click="emit('toggleCollapse')"
+      title="展开工具栏"
+    />
+
     <!-- ─── Main Header Bar ─── -->
     <Transition
       enter-active-class="transition-all duration-300 ease-out"
@@ -62,7 +69,7 @@ function platformColor(p: string) {
       <header
         v-if="!isCollapsed"
         class="flex items-center gap-2 px-3 h-12 bg-zinc-950/95 backdrop-blur-md
-               border-b border-zinc-800 z-30 sticky top-0"
+               border-b border-zinc-800 z-30"
       >
         <!-- Left: Hamburger -->
         <button
@@ -169,30 +176,20 @@ function platformColor(p: string) {
       </header>
     </Transition>
 
-    <!-- ─── Floating Handle (when collapsed) ─── -->
+    <!-- ─── Collapsed Indicator (visible when collapsed) ─── -->
     <Transition
       enter-active-class="transition-all duration-300 ease-out"
-      enter-from-class="-translate-y-4 opacity-0"
-      enter-to-class="translate-y-0 opacity-100"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
       leave-active-class="transition-all duration-150 ease-in"
-      leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="-translate-y-4 opacity-0"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
     >
       <div
         v-if="isCollapsed"
-        class="fixed top-0 left-1/2 -translate-x-1/2 z-30"
+        class="absolute top-0 left-0 right-0 h-1 z-30 flex justify-center"
       >
-        <button
-          @click="emit('toggleCollapse')"
-          class="flex items-center gap-1.5 px-4 py-1.5 rounded-b-xl
-                 bg-zinc-900/90 backdrop-blur-sm border border-t-0 border-zinc-700
-                 text-zinc-400 hover:text-white transition-colors text-xs
-                 shadow-lg shadow-black/50"
-          title="展开工具栏"
-        >
-          <ChevronDown class="w-3.5 h-3.5" />
-          <span>工具栏</span>
-        </button>
+        <div class="w-12 h-1 rounded-full bg-zinc-700/50 cursor-pointer hover:bg-zinc-600/70 transition-colors" />
       </div>
     </Transition>
   </div>
