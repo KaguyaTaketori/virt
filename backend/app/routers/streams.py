@@ -41,8 +41,11 @@ def get_live_streams(db: Session = Depends(get_db)):
             viewer_count=stream.viewer_count,
             status=stream.status,
             started_at=stream.started_at,
+            scheduled_at=stream.scheduled_at,
             channel_name=stream.channel.name if stream.channel else None,
-            channel_avatar=stream.channel.avatar_url if stream.channel else None
+            channel_avatar=stream.channel.avatar_url if stream.channel else None,
+            channel_avatar_shape=stream.channel.avatar_shape if stream.channel else None,  # 新增
+            org_id=stream.channel.org_id if stream.channel else None,                       # 新增
         ))
     return result
 

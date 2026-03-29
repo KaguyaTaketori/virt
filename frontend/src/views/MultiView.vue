@@ -45,7 +45,7 @@
         </button>
         
         <button 
-          @click="showDanmakuSettings = true" 
+          @click="showDanmakuSettings = true;" 
           class="p-2 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
           title="弹幕设置"
         >
@@ -293,7 +293,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -770,39 +770,50 @@ function startDanmakuLoop(idx) {
 }
 
 function renderDanmaku(idx) {
-  const { ctx } = danmakuContexts.value[idx] || {}
+  const ctxData = danmakuContexts.value[idx]
+  if (!ctxData) return
+  const { ctx } = ctxData
   const queue = danmakuQueues.value[idx]
   if (!ctx || !queue || queue.length === 0) return
-  
+
   const canvas = danmakuCanvases.value[idx]
   if (!canvas) return
-  
+
+  const { fontSize, speed, opacity, strokeEnabled, strokeColor, strokeWidth } =
+    danmakuSettings.value.global
+
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.font = '20px sans-serif'
+  ctx.font = `${fontSize}px sans-serif`
   ctx.textBaseline = 'top'
-  
+  ctx.globalAlpha = opacity
+
   for (let i = queue.length - 1; i >= 0; i--) {
     const msg = queue[i]
-    msg.x -= 2
-    if (msg.x < -200) {
+    msg.x -= speed
+
+    const textWidth = ctx.measureText(msg.content || '').width
+    if (msg.x < -(textWidth + 20)) {
       queue.splice(i, 1)
       continue
     }
-    
+
     if (msg.message_type === 'sticker') {
       const img = stickerImages.value[msg.sticker_url]
-      if (img) {
-        ctx.drawImage(img, msg.x, msg.y, 50, 50)
-      } else if (msg.loaded === false) {
-        ctx.fillStyle = '#ffcc00'
-        ctx.fillText(msg.alt_text || 'Sticker', msg.x, msg.y)
-      }
+      if (img) ctx.drawImage(img, msg.x, msg.y, 50, 50)
       continue
     }
-    
-    ctx.fillStyle = msg.color || '#ffffff'
-    ctx.fillText(msg.content || msg.message || '', msg.x, msg.y)
+
+    if (strokeEnabled) {
+      ctx.strokeStyle = strokeColor
+      ctx.lineWidth = strokeWidth
+      ctx.strokeText(msg.content || '', msg.x, msg.y)
+    }
+
+    ctx.fillStyle = msg.color || danmakuSettings.value.global.color
+    ctx.fillText(msg.content || '', msg.x, msg.y)
   }
+
+  ctx.globalAlpha = 1
 }
 
 onUnmounted(() => {

@@ -85,6 +85,8 @@ class StreamResponse(StreamBase):
     channel_id: int
     channel_name: Optional[str] = None
     channel_avatar: Optional[str] = None
+    channel_avatar_shape: Optional[str] = None   # 新增
+    org_id: Optional[int] = None                  # 新增
 
     class Config:
         from_attributes = True

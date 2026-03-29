@@ -29,14 +29,13 @@ class StreamStatus(str, enum.Enum):
 
 
 class Organization(Base):
-    """机构/事务所，如 Hololive、Nijisanji、VSPO 等"""
-
     __tablename__ = "organizations"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False)
     name_en = Column(String(100), nullable=True)
     logo_url = Column(String(500), nullable=True)
+    logo_shape = Column(String(10), default="circle")
     website = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -44,8 +43,6 @@ class Organization(Base):
 
 
 class Channel(Base):
-    """主播频道 — 一个主播在一个平台上的身份"""
-
     __tablename__ = "channels"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -55,6 +52,7 @@ class Channel(Base):
     name = Column(String(100), nullable=False)
     name_en = Column(String(100), nullable=True)
     avatar_url = Column(String(500), nullable=True)
+    avatar_shape = Column(String(10), default="circle")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
