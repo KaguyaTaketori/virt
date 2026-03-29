@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { Home, Settings, Sun, Moon, Monitor, Palette } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { Home, Settings, Sun, Moon, Palette } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 interface Props {

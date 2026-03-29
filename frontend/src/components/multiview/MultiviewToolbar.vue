@@ -15,7 +15,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import {
-  Plus, LayoutGrid, Captions, Share2,
+  Plus, Captions, Share2,
   Settings, Pin, PinOff, ChevronDown
 } from 'lucide-vue-next'
 

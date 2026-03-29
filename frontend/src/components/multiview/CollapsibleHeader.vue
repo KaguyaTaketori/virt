@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import {
   Menu, Plus, X, ChevronUp, ChevronDown,
-  LayoutGrid, Grid2X2, Columns2, Share2,
-  Captions, Settings
+  Share2, Captions, Settings
 } from 'lucide-vue-next'
-import { computed } from 'vue'
 
 interface Channel {
   platform: 'youtube' | 'bilibili'
@@ -38,13 +36,6 @@ const emit = defineEmits<{
   (e: 'share'): void
   (e: 'update:showDanmaku', val: boolean): void
 }>()
-
-// Layout icon map (cols → icon component mapping via label)
-const layoutIcons: Record<string, any> = {
-  '1×1': LayoutGrid,
-  '2×1': Columns2,
-  '2×2': Grid2X2,
-}
 
 function platformLabel(p: string) {
   return p === 'youtube' ? 'YT' : 'B'
