@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { 
-  Home, Settings, Sun, Moon, Palette, 
-  Search, SlidersHorizontal, Bell, ChevronDown,
-  LayoutGrid, Captions
+  Home, Settings, Sun, Moon, Palette, ChevronRight,
+  LayoutGrid, Heart, ListMusic, Music2, HelpCircle
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -23,7 +21,6 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const searchQuery = ref('')
 
 function close() {
   emit('update:modelValue', false)
@@ -63,41 +60,25 @@ function navigate(path: string) {
   >
     <aside
       v-if="modelValue"
-      class="fixed top-0 left-0 h-full w-72 z-50 flex flex-col
+      class="fixed top-0 left-0 h-full w-64 z-50 flex flex-col
              bg-zinc-950 border-r border-zinc-800"
     >
-      <!-- Header: Logo + Search -->
-      <div class="border-b border-zinc-800">
-        <!-- Logo -->
-        <div class="flex items-center gap-3 px-4 py-4">
-          <button
-            @click="close"
-            class="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <router-link to="/" class="flex items-center gap-2 group" @click="close">
-            <div class="w-7 h-7 rounded-md bg-rose-600 flex items-center justify-center group-hover:bg-rose-500 transition-colors shrink-0">
-              <span class="text-white text-[11px] font-black tracking-tighter">VL</span>
-            </div>
-            <span class="text-white font-semibold text-sm">VTuber Live</span>
-          </router-link>
-        </div>
-
-        <!-- Search -->
-        <div class="px-4 pb-4">
-          <div class="relative">
-            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="搜索"
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500/30 transition-colors"
-            />
+      <!-- Header: Logo -->
+      <div class="flex items-center gap-3 px-4 py-4 border-b border-zinc-800">
+        <button
+          @click="close"
+          class="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <router-link to="/" class="flex items-center gap-2 group" @click="close">
+          <div class="w-7 h-7 rounded-md bg-rose-600 flex items-center justify-center group-hover:bg-rose-500 transition-colors shrink-0">
+            <span class="text-white text-[11px] font-black tracking-tighter">VL</span>
           </div>
-        </div>
+          <span class="text-white font-semibold text-sm">VTuber Live</span>
+        </router-link>
       </div>
 
       <!-- Nav -->
@@ -108,42 +89,59 @@ function navigate(path: string) {
         >
           <Home class="w-4 h-4" />
           <span>首页</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
         </button>
+        
+        <button
+          @click="navigate('/favorites')"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+        >
+          <Heart class="w-4 h-4" />
+          <span>收藏</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
+        </button>
+        
+        <button
+          @click="navigate('/playlist')"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+        >
+          <ListMusic class="w-4 h-4" />
+          <span>播放列表</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
+        </button>
+        
         <button
           @click="navigate('/multiview')"
           class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
         >
           <LayoutGrid class="w-4 h-4" />
-          <span>多视图</span>
+          <span>多窗播放</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
         </button>
+        
+        <button
+          @click="navigate('/musicdex')"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+        >
+          <Music2 class="w-4 h-4" />
+          <span>Musicdex</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
+        </button>
+        
+        <div class="my-2 border-t border-zinc-800"></div>
+        
         <button
           @click="navigate('/admin/channels')"
           class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
         >
           <Settings class="w-4 h-4" />
-          <span>频道管理</span>
+          <span>频道</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
         </button>
       </nav>
 
       <!-- Bottom: Theme & Settings -->
       <div class="px-3 py-4 border-t border-zinc-800 space-y-4">
-        <!-- Quick Settings -->
-        <div class="flex items-center gap-2 px-1">
-          <button
-            class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            title="筛选"
-          >
-            <SlidersHorizontal class="w-4 h-4" />
-          </button>
-          <button
-            class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors relative"
-            title="通知"
-          >
-            <Bell class="w-4 h-4" />
-            <span class="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full"></span>
-          </button>
-        </div>
-
         <!-- Dark / Light Toggle -->
         <div class="flex items-center justify-between px-1">
           <span class="text-zinc-500 text-xs uppercase tracking-widest">外观</span>
@@ -177,17 +175,21 @@ function navigate(path: string) {
           </div>
         </div>
 
-        <!-- User -->
+        <!-- Help & Settings -->
         <div class="flex items-center gap-2 px-1 pt-2 border-t border-zinc-800">
-          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-violet-600 flex items-center justify-center text-xs font-bold text-white">
-            U
-          </div>
-          <div class="flex-1">
-            <div class="text-sm text-white">用户</div>
-            <div class="text-xs text-zinc-500">VIP</div>
-          </div>
-          <button class="p-1 rounded text-zinc-400 hover:text-white">
-            <ChevronDown class="w-4 h-4" />
+          <button
+            @click="navigate('/help')"
+            class="flex-1 flex items-center gap-2 px-3 py-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+          >
+            <HelpCircle class="w-4 h-4" />
+            <span>帮助</span>
+          </button>
+          <button
+            @click="navigate('/settings')"
+            class="flex-1 flex items-center gap-2 px-3 py-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+          >
+            <Settings class="w-4 h-4" />
+            <span>设置</span>
           </button>
         </div>
       </div>
