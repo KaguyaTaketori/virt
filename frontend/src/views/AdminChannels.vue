@@ -296,7 +296,7 @@ async function submitForm() {
       name: formData.value.name,
       avatar_url: formData.value.avatar_url || null,
       is_active: formData.value.is_active,
-      avatar_shape: formData.value.avatar_shape
+      avatar_shape: formData.value.avatar_shape as 'circle' | 'square'
     }
 
     if (showEditModal.value && editingId.value) {

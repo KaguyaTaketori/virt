@@ -4,6 +4,31 @@ from datetime import datetime
 from app.models.models import Platform, StreamStatus
 
 
+class UserCreate(BaseModel):
+    username: str
+    email: Optional[str] = None
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+
 class OrganizationBase(BaseModel):
     name: str
     name_en: Optional[str] = None
@@ -49,6 +74,10 @@ class ChannelUpdate(BaseModel):
     is_active: Optional[bool] = None
     org_id: Optional[int] = None
     avatar_shape: Optional[str] = None
+    banner_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    youtube_url: Optional[str] = None
+    description: Optional[str] = None
 
 
 class ChannelCreate(ChannelBase):
@@ -58,6 +87,12 @@ class ChannelCreate(ChannelBase):
 class ChannelResponse(ChannelBase):
     id: int
     org_id: Optional[int] = None
+    banner_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    youtube_url: Optional[str] = None
+    description: Optional[str] = None
+    is_liked: Optional[bool] = False
+    is_blocked: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -85,8 +120,26 @@ class StreamResponse(StreamBase):
     channel_id: int
     channel_name: Optional[str] = None
     channel_avatar: Optional[str] = None
-    channel_avatar_shape: Optional[str] = None   # 新增
-    org_id: Optional[int] = None                  # 新增
+    channel_avatar_shape: Optional[str] = None  # 新增
+    org_id: Optional[int] = None  # 新增
 
     class Config:
         from_attributes = True
+
+
+class VideoResponse(BaseModel):
+    id: str
+    title: str
+    thumbnail_url: Optional[str] = None
+    duration: Optional[str] = None
+    view_count: int = 0
+    published_at: Optional[str] = None
+    status: str
+
+
+class PaginatedVideosResponse(BaseModel):
+    videos: list[VideoResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

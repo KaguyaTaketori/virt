@@ -1,7 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.routers import streams, channels, danmaku, admin, websocket, organizations
+from app.routers import (
+    streams,
+    channels,
+    danmaku,
+    admin,
+    websocket,
+    organizations,
+    auth,
+    user_channels,
+)
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
 
@@ -34,6 +43,8 @@ app.include_router(danmaku.router)
 app.include_router(admin.router)
 app.include_router(websocket.router)
 app.include_router(organizations.router)
+app.include_router(auth.router)
+app.include_router(user_channels.router)
 
 
 @app.get("/")
