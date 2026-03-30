@@ -12,6 +12,8 @@ dependencies = [
     "apscheduler>=3.10.4",
     "alembic>=1.13.0",
     "yt-chat-downloader>=0.0.3",
+    "jose>=1.0.0",
+    "yt-dlp>=2024.8.6",
 ]
 
 [project.optional-dependencies]

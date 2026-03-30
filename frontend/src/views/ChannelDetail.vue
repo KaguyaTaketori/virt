@@ -248,7 +248,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination } from 'naive-ui'
-import { Heart, Ban, Youtube, Play } from 'lucide-vue-next'
+import { Heart, Ban, Youtube } from 'lucide-vue-next'
 import { useOrgStore } from '../stores/org'
 import { channelApi, type Channel } from '../api'
 

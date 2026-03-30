@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
 from app.models.models import Video, Channel
+from app.services.youtube_backfill import backfill_channel_videos
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
@@ -564,119 +565,4 @@ async def _update_shorts_via_yt_dlp(
 
 
 async def _full_refresh_videos(db: Session, channel: Channel):
-    """全量刷新视频 - 删除旧数据重新获取"""
-
-    if not settings.youtube_api_key:
-        return
-
-    try:
-        db.query(Video).filter(Video.channel_id == channel.id).delete()
-        db.commit()
-
-        all_video_ids = []
-        total_results = 0
-        next_token = None
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            while len(all_video_ids) < 500:
-                search_params = {
-                    "part": "id,snippet",
-                    "channelId": channel.channel_id,
-                    "type": "video",
-                    "order": "date",
-                    "maxResults": 50,
-                    "key": settings.youtube_api_key,
-                }
-
-                if next_token:
-                    search_params["pageToken"] = next_token
-
-                resp = await client.get(
-                    f"{YOUTUBE_API_BASE}/search", params=search_params
-                )
-
-                if resp.status_code != 200:
-                    break
-
-                data = resp.json()
-                items = data.get("items", [])
-                next_token = data.get("nextPageToken")
-                page_info = data.get("pageInfo", {})
-
-                if total_results == 0:
-                    total_results = page_info.get("totalResults", 0)
-
-                for item in items:
-                    video_id = item.get("id", {}).get("videoId")
-                    if video_id:
-                        all_video_ids.append(item)
-
-                if not next_token:
-                    break
-
-            if not all_video_ids:
-                return
-
-            video_id_to_status = {}
-            for item in all_video_ids:
-                video_id = item.get("id", {}).get("videoId")
-                if video_id:
-                    snippet = item.get("snippet", {})
-                    live_broadcast = snippet.get("liveBroadcastContent", "none")
-                    video_id_to_status[video_id] = _get_status_from_broadcast(
-                        live_broadcast
-                    )
-
-            video_ids_to_fetch = list(video_id_to_status.keys())
-
-            for i in range(0, len(video_ids_to_fetch), 50):
-                batch_ids = video_ids_to_fetch[i : i + 50]
-
-                details_params = {
-                    "part": "contentDetails,statistics,snippet",
-                    "id": ",".join(batch_ids),
-                    "key": settings.youtube_api_key,
-                }
-
-                details_resp = await client.get(
-                    f"{YOUTUBE_API_BASE}/videos", params=details_params
-                )
-
-                if details_resp.status_code == 200:
-                    details_data = details_resp.json()
-                    details_items = details_data.get("items", [])
-
-                    for item in details_items:
-                        snippet = item.get("snippet", {})
-                        content_details = item.get("contentDetails", {})
-                        statistics = item.get("statistics", {})
-
-                        video_id = item.get("id", "")
-                        status = video_id_to_status.get(video_id, "archive")
-
-                        video = Video(
-                            channel_id=channel.id,
-                            platform=channel.platform,
-                            video_id=video_id,
-                            title=snippet.get("title", ""),
-                            thumbnail_url=snippet.get("thumbnails", {})
-                            .get("high", {})
-                            .get("url")
-                            or snippet.get("thumbnails", {})
-                            .get("medium", {})
-                            .get("url"),
-                            duration=_parse_duration(content_details.get("duration")),
-                            view_count=int(statistics.get("viewCount", 0)),
-                            published_at=_parse_datetime(snippet.get("publishedAt")),
-                            status=status,
-                            fetched_at=datetime.now(timezone.utc),
-                        )
-                        db.add(video)
-
-            db.commit()
-
-        channel.videos_last_fetched = datetime.now(timezone.utc)
-        db.commit()
-
-    except Exception as e:
-        print(f"[YouTube Videos] Full refresh error: {e}")
+    await backfill_channel_videos(db, channel, full_refresh=True)

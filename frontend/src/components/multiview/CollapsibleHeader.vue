@@ -46,6 +46,10 @@ function platformColor(p: string) {
     ? 'bg-red-500/20 text-red-400 border-red-500/30'
     : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
 }
+
+function toggleDanmaku() {
+  emit('update:showDanmaku', !props.showDanmaku)
+}
 </script>
 
 <template>
@@ -144,9 +148,9 @@ function platformColor(p: string) {
 
           <!-- Danmaku Toggle -->
           <button
-            @click="emit('update:showDanmaku', !showDanmaku)"
+            @click="toggleDanmaku"
             class="icon-btn"
-            :class="showDanmaku ? 'text-rose-400' : ''"
+            :class="showDanmaku ? 'bg-rose-500/20 text-rose-400' : ''"
             title="弹幕"
           >
             <Captions class="w-4 h-4" />
@@ -189,13 +193,23 @@ function platformColor(p: string) {
         v-if="isCollapsed"
         class="absolute top-0 left-0 right-0 h-10 z-30 flex items-center justify-between px-2"
       >
-        <button
-          @click="emit('toggleDrawer')"
-          class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-          title="菜单"
-        >
-          <Menu class="w-4 h-4" />
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            @click="emit('toggleDrawer')"
+            class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            title="菜单"
+          >
+            <Menu class="w-4 h-4" />
+          </button>
+          <button
+            @click="emit('update:showDanmaku', !showDanmaku)"
+            class="p-2 rounded-md transition-colors"
+            :class="showDanmaku ? 'text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'"
+            title="弹幕"
+          >
+            <Captions class="w-4 h-4" />
+          </button>
+        </div>
         <button
           @click="emit('toggleCollapse')"
           class="flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs transition-colors"

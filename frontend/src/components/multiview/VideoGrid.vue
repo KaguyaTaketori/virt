@@ -15,6 +15,7 @@
  */
 import { computed } from 'vue'
 import { Plus, Youtube, Tv, LayoutGrid } from 'lucide-vue-next'
+import DanmakuOverlay from './DanmakuOverlay.vue'
 
 interface Channel {
   platform: 'youtube' | 'bilibili'
@@ -33,6 +34,15 @@ interface Props {
   selectedLayout: string
   layouts: Layout[]
   showDanmaku: boolean
+  danmakuSettings?: {
+    fontSize: number
+    speed: number
+    opacity: number
+    color: string
+    strokeEnabled: boolean
+    strokeColor: string
+    strokeWidth: number
+  }
 }
 
 const props = defineProps<Props>()
@@ -89,6 +99,13 @@ function getEmbedUrl(ch: Channel): string {
             frameborder="0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowfullscreen
+          />
+          <DanmakuOverlay
+            v-if="showDanmaku && ch.platform === 'youtube'"
+            :video-id="ch.id"
+            :platform="ch.platform"
+            :enabled="showDanmaku"
+            :settings="danmakuSettings"
           />
           <div
             class="absolute bottom-0 left-0 right-0 px-3 py-2
