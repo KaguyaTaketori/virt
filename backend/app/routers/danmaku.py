@@ -4,13 +4,23 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.services.danmaku import get_live_chat_messages
 from app.services.danmaku_bilibili import get_bilibili_danmaku
-from app.services.danmaku_youtube import (
-    download_chat,
-    get_chat_from_file,
-    get_chat_from_db,
-    save_to_db,
-)
 from app.config import settings
+
+try:
+    from app.services.danmaku_youtube import (
+        download_chat,
+        get_chat_from_file,
+        get_chat_from_db,
+        save_to_db,
+    )
+
+    DANMAKU_YT_AVAILABLE = True
+except ImportError:
+    DANMAKU_YT_AVAILABLE = False
+    download_chat = None
+    get_chat_from_file = None
+    get_chat_from_db = None
+    save_to_db = None
 
 router = APIRouter(prefix="/api/danmaku", tags=["danmaku"])
 

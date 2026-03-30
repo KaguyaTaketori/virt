@@ -9,12 +9,12 @@
  * overflow-hidden 配合固定宽度：文字在收缩时被裁剪而非换行，
  * 搭配 opacity transition 实现淡出效果。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Home, Heart, Tv2, ListVideo,
   LayoutGrid, Music, HelpCircle, Settings,
-  SlidersHorizontal
+  SlidersHorizontal, Building2, ChevronDown, ChevronUp
 } from 'lucide-vue-next'
 
 // ── 类型定义 ──────────────────────────────────────────────────────────────────
@@ -39,15 +39,16 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const showAdminMenu = ref(false)
 
-// ── 导航数据 ──────────────────────────────────────────────────────────────────
+// 导航数据
 
 const navSections: NavSection[] = [
   {
     items: [
       { label: '主页',       icon: Home,       to: '/'                   },
       { label: '收藏',       icon: Heart,       to: '/favorites'          },
-      { label: '频道',       icon: Tv2,         to: '/admin/channels'     },
+      { label: '频道',       icon: Tv2,         to: '/channels'          },
       { label: '播放列表',   icon: ListVideo,   to: '/playlists'          },
     ],
   },
@@ -65,6 +66,12 @@ const navSections: NavSection[] = [
       { label: '设置',       icon: Settings,    to: '/settings'           },
     ],
   },
+  {
+    separator: true,
+    items: [
+      { label: '管理',       icon: Settings,    to: ''                    },
+    ],
+  },
 ]
 
 // ── 路由高亮 ──────────────────────────────────────────────────────────────────
@@ -78,7 +85,11 @@ function isActive(to: string): boolean {
 }
 
 function navigate(to: string): void {
-  router.push(to)
+  if (to === '') {
+    showAdminMenu.value = !showAdminMenu.value
+  } else {
+    router.push(to)
+  }
 }
 
 // ── 动态样式 ─────────────────────────────────────────────────────────────────
@@ -123,59 +134,90 @@ const labelClass = computed<string>(() =>
         />
 
         <!-- 导航项 -->
-        <button
-          v-for="item in section.items"
-          :key="item.to"
-          @click="navigate(item.to)"
-          class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
-                 text-sm transition-colors duration-150 relative group"
-          :class="isActive(item.to)
-            ? 'bg-zinc-800 text-white'
-            : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-          :title="isCollapsed ? item.label : undefined"
-        >
-          <!-- 图标（始终可见） -->
-          <component
-            :is="item.icon"
-            class="w-4.5 h-4.5 shrink-0"
-            :class="isActive(item.to) ? 'text-rose-400' : ''"
-            style="width: 1.125rem; height: 1.125rem;"
-          />
-
-          <!--
-            标签文字
-            transition 覆盖 opacity 和 width，实现淡出 + 收缩的双重效果。
-            width 过渡搭配 overflow-hidden 确保文字不会溢出或换行。
-          -->
-          <span
-            class="font-medium leading-none transition-all duration-300 ease-in-out"
-            :class="labelClass"
+        <div v-for="item in section.items" :key="item.to">
+          <button
+            @click="navigate(item.to)"
+            class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
+                   text-sm transition-colors duration-150 relative group"
+            :class="isActive(item.to)
+              ? 'bg-zinc-800 text-white'
+              : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+            :title="isCollapsed ? item.label : undefined"
           >
-            {{ item.label }}
-          </span>
+            <!-- 图标（始终可见） -->
+            <component
+              :is="item.icon"
+              class="w-4.5 h-4.5 shrink-0"
+              :class="isActive(item.to) ? 'text-rose-400' : ''"
+              style="width: 1.125rem; height: 1.125rem;"
+            />
 
-          <!-- 角标 -->
-          <span
-            v-if="item.badge && !isCollapsed"
-            class="ml-auto shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                   bg-rose-600 text-white leading-none"
-          >
-            {{ item.badge }}
-          </span>
+            <!--
+              标签文字
+              transition 覆盖 opacity 和 width，实现淡出 + 收缩的双重效果。
+              width 过渡搭配 overflow-hidden 确保文字不会溢出或换行。
+            -->
+            <span
+              class="font-medium leading-none transition-all duration-300 ease-in-out"
+              :class="labelClass"
+            >
+              {{ item.label }}
+            </span>
 
-          <!-- 收缩时：Tooltip 仿原生悬浮提示（纯 CSS，无 JS 依赖）-->
-          <span
-            v-if="isCollapsed"
-            class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md
-                   bg-zinc-800 border border-zinc-700 text-white text-xs
-                   whitespace-nowrap pointer-events-none z-50
-                   opacity-0 group-hover:opacity-100 translate-x-1
-                   group-hover:translate-x-0 transition-all duration-150
-                   shadow-lg shadow-black/40"
-          >
-            {{ item.label }}
-          </span>
-        </button>
+            <!-- 角标 -->
+            <span
+              v-if="item.badge && !isCollapsed"
+              class="ml-auto shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                     bg-rose-600 text-white leading-none"
+            >
+              {{ item.badge }}
+            </span>
+            <component
+              v-if="item.to === '' && !isCollapsed"
+              :is="showAdminMenu ? ChevronUp : ChevronDown"
+              class="w-3 h-3 ml-auto opacity-50"
+            />
+
+            <!-- 收缩时：Tooltip 仿原生悬浮提示（纯 CSS，无 JS 依赖）-->
+            <span
+              v-if="isCollapsed"
+              class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md
+                     bg-zinc-800 border border-zinc-700 text-white text-xs
+                     whitespace-nowrap pointer-events-none z-50
+                     opacity-0 group-hover:opacity-100 translate-x-1
+                     group-hover:translate-x-0 transition-all duration-150
+                     shadow-lg shadow-black/40"
+            >
+              {{ item.label }}
+            </span>
+          </button>
+
+          <!-- 管理子菜单 -->
+          <div v-if="item.to === '' && showAdminMenu && !isCollapsed" class="ml-4 mt-1 space-y-0.5">
+            <button
+              @click="navigate('/admin/channels')"
+              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
+                     text-sm transition-colors duration-150 relative group"
+              :class="isActive('/admin/channels')
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+            >
+              <Tv2 class="w-4 h-4 shrink-0" style="width: 1.125rem; height: 1.125rem;" />
+              <span class="font-medium">频道管理</span>
+            </button>
+            <button
+              @click="navigate('/admin/organizations')"
+              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
+                     text-sm transition-colors duration-150 relative group"
+              :class="isActive('/admin/organizations')
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+            >
+              <Building2 class="w-4 h-4 shrink-0" style="width: 1.125rem; height: 1.125rem;" />
+              <span class="font-medium">机构管理</span>
+            </button>
+          </div>
+        </div>
 
       </template>
     </div>

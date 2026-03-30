@@ -95,8 +95,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
-import { NButton, NModal, NForm, NFormItem, NSpace, NTag, NDataTable, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
+import { ref, onMounted, h } from 'vue'
+import { NButton, NModal, NForm, NFormItem, NSpace, NDataTable, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
 import { orgApi, type Organization } from '../api'
 
 const organizations = ref<Organization[]>([])
@@ -220,7 +220,7 @@ async function submitForm() {
       name_en: formData.value.name_en || null,
       logo_url: formData.value.logo_url || null,
       website: formData.value.website || null,
-      logo_shape: formData.value.logo_shape
+      logo_shape: formData.value.logo_shape as 'circle' | 'square'
     }
 
     if (showEditModal.value && editingId.value) {

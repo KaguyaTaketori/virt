@@ -18,12 +18,14 @@ from app.services.bilibili_fetcher import (
     get_user_info,
 )
 from app.services.quota_guard import can_spend, spend, status as quota_status
+from app.services.youtube_channel import get_channel_details
 from app.config import settings
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 # ── YouTube ───────────────────────────────────────────────────────────────────
+
 
 async def discover_youtube_streams():
     """
@@ -147,11 +149,16 @@ async def update_youtube_streams():
                     parsed = parse_youtube_stream(item)
                     if parsed and parsed["video_id"] in vid_to_ch_id:
                         _upsert_stream(
-                            db, vid_to_ch_id[parsed["video_id"]], parsed, Platform.YOUTUBE
+                            db,
+                            vid_to_ch_id[parsed["video_id"]],
+                            parsed,
+                            Platform.YOUTUBE,
                         )
 
         db.commit()
-        print(f"[YT Update] 刷新 {len(active)} 条 | 配额剩余 {quota_status()['remaining']}")
+        print(
+            f"[YT Update] 刷新 {len(active)} 条 | 配额剩余 {quota_status()['remaining']}"
+        )
     except Exception as e:
         print(f"[YT Update] Error: {e}")
         db.rollback()
@@ -160,6 +167,7 @@ async def update_youtube_streams():
 
 
 # ── Bilibili ──────────────────────────────────────────────────────────────────
+
 
 async def update_bilibili_streams():
     db = SessionLocal()
@@ -229,6 +237,7 @@ async def sync_bilibili_channels():
 
 # ── 共用 upsert ───────────────────────────────────────────────────────────────
 
+
 def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platform):
     stream = (
         db.query(Stream)
@@ -252,25 +261,114 @@ def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platfor
             stream.peak_viewers = parsed["viewer_count"]
 
 
+# ── 频道详情刷新 ─────────────────────────────────────────────────────────────
+
+
+async def refresh_channel_details():
+    """每天执行，刷新所有频道的 banner/描述/链接"""
+    if not settings.youtube_api_key:
+        return
+
+    db = SessionLocal()
+    try:
+        channels = (
+            db.query(Channel)
+            .filter(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active == True,
+            )
+            .all()
+        )
+
+        if not channels:
+            return
+
+        print(f"[Channel Refresh] 开始刷新 {len(channels)} 个 YouTube 频道")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for ch in channels:
+                try:
+                    details = await get_channel_details(ch.channel_id)
+                    if details:
+                        changed = False
+                        if (
+                            details.get("banner_url")
+                            and ch.banner_url != details["banner_url"]
+                        ):
+                            ch.banner_url = details["banner_url"]
+                            changed = True
+                        if (
+                            details.get("description")
+                            and ch.description != details["description"]
+                        ):
+                            ch.description = details["description"]
+                            changed = True
+                        if (
+                            details.get("twitter_url")
+                            and ch.twitter_url != details["twitter_url"]
+                        ):
+                            ch.twitter_url = details["twitter_url"]
+                            changed = True
+                        if (
+                            details.get("youtube_url")
+                            and ch.youtube_url != details["youtube_url"]
+                        ):
+                            ch.youtube_url = details["youtube_url"]
+                            changed = True
+                        if changed:
+                            ch.updated_at = datetime.now(timezone.utc)
+                except Exception as e:
+                    print(f"[Channel Refresh] {ch.name}: {e}")
+
+        db.commit()
+        print(f"[Channel Refresh] 完成")
+    except Exception as e:
+        print(f"[Channel Refresh] Error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 # ── 调度器启动 ────────────────────────────────────────────────────────────────
+
 
 def start_scheduler():
     now = datetime.now(timezone.utc)
     scheduler.add_job(
-        discover_youtube_streams, "interval",
-        hours=6, id="yt_discover", next_run_time=now,
+        discover_youtube_streams,
+        "interval",
+        hours=6,
+        id="yt_discover",
+        next_run_time=now,
     )
     scheduler.add_job(
-        update_youtube_streams, "interval",
-        seconds=60, id="yt_update",
+        update_youtube_streams,
+        "interval",
+        seconds=60,
+        id="yt_update",
     )
     scheduler.add_job(
-        update_bilibili_streams, "interval",
-        minutes=2, id="bili_update", next_run_time=now,
+        update_bilibili_streams,
+        "interval",
+        minutes=2,
+        id="bili_update",
+        next_run_time=now,
     )
     scheduler.add_job(
-        sync_bilibili_channels, "interval",
-        hours=24, id="bili_sync_ch", next_run_time=now,
+        sync_bilibili_channels,
+        "interval",
+        hours=24,
+        id="bili_sync_ch",
+        next_run_time=now,
+    )
+    scheduler.add_job(
+        refresh_channel_details,
+        "interval",
+        hours=24,
+        id="channel_refresh",
+        next_run_time=now,
     )
     scheduler.start()
-    print("[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h")
+    print(
+        "[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h | channel_refresh=24h"
+    )

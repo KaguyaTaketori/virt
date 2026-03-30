@@ -142,3 +142,95 @@ async def get_channel_info_from_page(input_str: str, channel_id: str) -> dict | 
         pass  # 静默
 
     return None
+
+
+async def get_channel_details(channel_id: str) -> dict | None:
+    """通过 YouTube Data API 获取频道详细信息: banner, description, externalLinks"""
+    if not settings.youtube_api_key:
+        return await get_channel_details_from_page(channel_id)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{YOUTUBE_API_BASE}/channels",
+                params={
+                    "part": "brandingSettings,snippet",
+                    "id": channel_id,
+                    "key": settings.youtube_api_key,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", [])
+                if items:
+                    item = items[0]
+                    branding = item.get("brandingSettings", {})
+                    channel_branding = branding.get("channel", {})
+                    image_branding = branding.get("image", {})
+
+                    banner_url = image_branding.get(
+                        "bannerExternalUrl"
+                    ) or image_branding.get("bannerImageUrl")
+
+                    description = channel_branding.get("description")
+
+                    external_links = channel_branding.get("externalLinks", {})
+                    twitter_url = None
+                    for link in external_links.get("links", []):
+                        if link.get("title", "").lower() == "twitter":
+                            twitter_url = link.get("url")
+                            break
+
+                    youtube_url = f"https://www.youtube.com/channel/{channel_id}"
+
+                    return {
+                        "banner_url": banner_url,
+                        "description": description,
+                        "twitter_url": twitter_url,
+                        "youtube_url": youtube_url,
+                    }
+    except Exception:
+        pass
+
+    return await get_channel_details_from_page(channel_id)
+
+
+async def get_channel_details_from_page(channel_id: str) -> dict | None:
+    """从 YouTube 频道页面获取详细信息（备用方法）"""
+    url = f"https://www.youtube.com/channel/{channel_id}"
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+
+            banner_match = re.search(r'"banner":{"thumbnails":\[{"url":"([^"]+)"', html)
+            banner_url = banner_match.group(1) if banner_match else None
+
+            desc_match = re.search(r'"description":"([^"]+)"', html)
+            description = desc_match.group(1) if desc_match else None
+            if description:
+                description = description.replace("\\n", "\n")
+
+            twitter_match = re.search(r"twitter\.com/([a-zA-Z0-9_]+)", html)
+            twitter_url = (
+                f"https://twitter.com/{twitter_match.group(1)}"
+                if twitter_match
+                else None
+            )
+
+            youtube_url = f"https://www.youtube.com/channel/{channel_id}"
+
+            return {
+                "banner_url": banner_url,
+                "description": description,
+                "twitter_url": twitter_url,
+                "youtube_url": youtube_url,
+            }
+    except Exception:
+        pass
+
+    return None

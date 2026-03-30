@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { 
   Home, Settings, Sun, Moon, Palette, ChevronRight,
-  LayoutGrid, Heart, ListMusic, Music2, HelpCircle
+  LayoutGrid, Heart, ListMusic, Music2, HelpCircle,
+  ChevronDown, ChevronUp, Tv2, Building2
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -21,6 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const showAdminMenu = ref(false)
 
 function close() {
   emit('update:modelValue', false)
@@ -29,6 +32,10 @@ function close() {
 function navigate(path: string) {
   router.push(path)
   close()
+}
+
+function toggleAdminMenu() {
+  showAdminMenu.value = !showAdminMenu.value
 }
 </script>
 
@@ -102,6 +109,15 @@ function navigate(path: string) {
         </button>
         
         <button
+          @click="navigate('/channels')"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+        >
+          <Tv2 class="w-4 h-4" />
+          <span>频道</span>
+          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
+        </button>
+        
+        <button
           @click="navigate('/playlist')"
           class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
         >
@@ -131,13 +147,31 @@ function navigate(path: string) {
         <div class="my-2 border-t border-zinc-800"></div>
         
         <button
-          @click="navigate('/admin/channels')"
+          @click="toggleAdminMenu"
           class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
         >
           <Settings class="w-4 h-4" />
-          <span>频道</span>
-          <ChevronRight class="w-3 h-3 ml-auto opacity-50" />
+          <span class="flex-1">管理</span>
+          <ChevronDown v-if="!showAdminMenu" class="w-3 h-3 opacity-50" />
+          <ChevronUp v-else class="w-3 h-3 opacity-50" />
         </button>
+        
+        <div v-if="showAdminMenu" class="ml-4 mt-1 space-y-1">
+          <button
+            @click="navigate('/admin/channels')"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+          >
+            <Tv2 class="w-4 h-4" />
+            <span>频道管理</span>
+          </button>
+          <button
+            @click="navigate('/admin/organizations')"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm"
+          >
+            <Building2 class="w-4 h-4" />
+            <span>机构管理</span>
+          </button>
+        </div>
       </nav>
 
       <!-- Bottom: Theme & Settings -->
