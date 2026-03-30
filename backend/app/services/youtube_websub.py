@@ -1,0 +1,498 @@
+"""
+youtube_websub.py
+─────────────────
+YouTube WebSub（PubSubHubbub）订阅与推送接收模块。
+
+协议流程：
+  1. 向 Hub 发送订阅请求（POST）
+  2. Hub 回调验证端点（GET /api/websub/youtube?hub.mode=subscribe&hub.challenge=...）
+  3. 验证通过后，Hub 在频道有新内容时推送 Atom XML（POST /api/websub/youtube）
+  4. 解析 XML → 提取 video_id → 交给 BackgroundTasks 拉取详情 → 立刻 200 OK
+
+设计要点：
+  - 推送接收端点必须在 200ms 内返回 200，否则 Hub 认为失败并重试（最多数次）。
+  - 视频详情拉取放入 FastAPI BackgroundTasks，不阻塞 HTTP 响应。
+  - HMAC-SHA1 签名验证（可选但推荐开启，防伪造推送）。
+  - 订阅有效期通常为 10 天，到期前需续订（由调度器定期执行）。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database_async import get_async_session, AsyncSessionFactory
+from app.models.models import Channel, WebSubSubscription
+from app.services.youtube_sync import fetch_and_upsert_single_video
+
+# ── 常量 ──────────────────────────────────────────────────────────────────────
+_HUB_URL    = "https://pubsubhubbub.appspot.com/"
+_TOPIC_BASE = "https://www.youtube.com/xml/feeds/videos.xml?channel_id="
+_LEASE_DAYS = 9   # 订阅期限（天）。YouTube Hub 最长支持 10 天，留 1 天安全余量
+
+# 从环境变量读取 API Key 和 WebSub 签名密钥
+_YT_API_KEY    : str = os.getenv("YOUTUBE_API_KEY", "")
+_WEBSUB_SECRET : str = os.getenv("WEBSUB_SECRET", "")   # 空字符串 = 不验证签名
+
+# Atom Feed 命名空间
+_NS = {
+    "atom": "http://www.w3.org/2005/Atom",
+    "yt":   "http://www.youtube.com/xml/schemas/2015",
+}
+
+router = APIRouter(prefix="/api/websub", tags=["websub"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 订阅发送函数
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def subscribe_channel(
+    channel_youtube_id: str,
+    callback_url: str,
+    *,
+    mode: str = "subscribe",
+    lease_seconds: int = _LEASE_DAYS * 86400,
+    secret: str = _WEBSUB_SECRET,
+) -> bool:
+    """
+    向 YouTube PubSubHubbub Hub 发送（或取消）订阅请求。
+
+    参数：
+        channel_youtube_id — YouTube 频道 ID（UCxxx 格式）
+        callback_url        — Hub 将回调的公网可访问 URL，即本模块的端点
+        mode                — 'subscribe' 或 'unsubscribe'
+        lease_seconds       — 订阅有效期（秒），最大 864000（10天）
+        secret              — HMAC 签名密钥，为空则不签名
+
+    返回：
+        True = Hub 接受请求（202 Accepted），False = 失败
+
+    注意：
+        Hub 收到请求后会异步回调 callback_url 进行验证（GET 请求带 hub.challenge）。
+        本函数返回时，订阅尚未正式生效，验证通过后才生效。
+    """
+    topic_url = f"{_TOPIC_BASE}{channel_youtube_id}"
+
+    payload: dict[str, str] = {
+        "hub.callback":      callback_url,
+        "hub.mode":          mode,
+        "hub.topic":         topic_url,
+        "hub.lease_seconds": str(lease_seconds),
+        "hub.verify":        "async",
+    }
+    if secret:
+        payload["hub.secret"] = secret
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(_HUB_URL, data=payload)
+
+        if resp.status_code == 202:
+            print(
+                f"[WebSub] {mode} 请求已被 Hub 接受 | "
+                f"channel={channel_youtube_id} | lease={lease_seconds}s"
+            )
+            return True
+        else:
+            print(
+                f"[WebSub] Hub 拒绝 {mode} 请求 | "
+                f"channel={channel_youtube_id} | "
+                f"status={resp.status_code} | body={resp.text[:200]}"
+            )
+            return False
+
+    except httpx.RequestError as e:
+        print(f"[WebSub] 网络错误，{mode} 失败: {e}")
+        return False
+
+
+async def subscribe_all_active_channels(callback_url: str) -> None:
+    """
+    批量订阅数据库中所有激活的 YouTube 频道。
+    建议在应用启动时和每日定时任务中调用（续订即将到期的订阅）。
+    """
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(Channel).where(
+                Channel.platform == "youtube",
+                Channel.is_active.is_(True),
+            )
+        )
+        channels = result.scalars().all()
+
+    print(f"[WebSub] 开始批量订阅 {len(channels)} 个频道...")
+    success_count = 0
+
+    for ch in channels:
+        ok = await subscribe_channel(ch.channel_id, callback_url)
+        if ok:
+            success_count += 1
+            # 更新数据库中的预期过期时间
+            async with AsyncSessionFactory() as session:
+                sub = await session.scalar(
+                    select(WebSubSubscription).where(
+                        WebSubSubscription.channel_id == ch.id
+                    )
+                )
+                if not sub:
+                    sub = WebSubSubscription(
+                        channel_id=ch.id,
+                        topic_url=f"{_TOPIC_BASE}{ch.channel_id}",
+                        hub_url=_HUB_URL,
+                        secret=_WEBSUB_SECRET or None,
+                    )
+                    session.add(sub)
+                sub.subscribed_at = datetime.now(timezone.utc)
+                sub.expires_at = datetime.now(timezone.utc) + timedelta(days=_LEASE_DAYS)
+                await session.commit()
+
+        # 避免对 Hub 请求过于密集（礼貌性限速）
+        import asyncio
+        await asyncio.sleep(0.3)
+
+    print(f"[WebSub] 批量订阅完成 | 成功 {success_count}/{len(channels)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HMAC 签名验证辅助
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _verify_hmac_signature(body: bytes, signature_header: Optional[str], secret: str) -> bool:
+    """
+    验证 Hub 推送的 HMAC-SHA1 签名。
+
+    Hub 在 HTTP Header 'X-Hub-Signature' 中携带：
+        sha1=<hex_digest>
+
+    如果系统未配置 WEBSUB_SECRET，跳过验证（返回 True）。
+    """
+    if not secret:
+        return True   # 未配置密钥，不验签
+
+    if not signature_header:
+        print("[WebSub] 警告：期望签名但 Header 缺失，拒绝推送")
+        return False
+
+    algo, _, sig_hex = signature_header.partition("=")
+    if algo != "sha1":
+        print(f"[WebSub] 不支持的签名算法: {algo}")
+        return False
+
+    expected = hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
+    return hmac.compare_digest(expected, sig_hex)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XML 解析辅助
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_atom_feed(xml_body: bytes) -> list[dict]:
+    """
+    解析 YouTube Hub 推送的 Atom Feed XML，提取 video_id 和 channel_id。
+
+    YouTube 推送示例（简化版）：
+        <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+              xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <yt:videoId>dQw4w9WgXcQ</yt:videoId>
+            <yt:channelId>UCuAXFkgsw1L7xaCfnd5JJOw</yt:channelId>
+            <title>Never Gonna Give You Up</title>
+            <published>2009-10-25T06:57:33+00:00</published>
+            ...
+          </entry>
+        </feed>
+
+    返回：[{"video_id": ..., "channel_id": ..., "title": ...}, ...]
+    """
+    if not xml_body:
+        return []
+
+    try:
+        root = ET.fromstring(xml_body)
+    except ET.ParseError as e:
+        print(f"[WebSub] XML 解析失败: {e} | body={xml_body[:200]}")
+        return []
+
+    entries = []
+    for entry in root.findall("atom:entry", _NS):
+        video_id_el   = entry.find("yt:videoId",   _NS)
+        channel_id_el = entry.find("yt:channelId", _NS)
+        title_el      = entry.find("atom:title",   _NS)
+
+        if video_id_el is None or channel_id_el is None:
+            continue  # 不完整的 entry，跳过
+
+        entries.append({
+            "video_id":   video_id_el.text.strip(),
+            "channel_id": channel_id_el.text.strip(),
+            "title":      title_el.text.strip() if title_el is not None else None,
+        })
+
+    return entries
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 后台任务：拉取视频详情并 Upsert
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
+    """
+    WebSub 推送触发的后台任务。
+
+    流程：
+      1. 用 yt_channel_id 查找数据库中的 Channel 记录
+      2. 调用 fetch_and_upsert_single_video 拉取详情并入库
+      3. 更新 WebSubSubscription 的推送统计
+    """
+    if not _YT_API_KEY:
+        print(f"[WebSub BG] YOUTUBE_API_KEY 未配置，无法处理 video_id={video_id!r}")
+        return
+
+    async with AsyncSessionFactory() as session:
+        # 查找对应的 Channel 记录
+        channel = await session.scalar(
+            select(Channel).where(
+                Channel.channel_id == yt_channel_id,
+                Channel.platform == "youtube",
+            )
+        )
+        if not channel:
+            print(
+                f"[WebSub BG] 收到未知频道推送 | "
+                f"yt_channel_id={yt_channel_id!r}，跳过"
+            )
+            return
+
+        # 拉取并 Upsert 视频详情
+        try:
+            video = await fetch_and_upsert_single_video(
+                session, channel, video_id, _YT_API_KEY
+            )
+            if video:
+                print(
+                    f"[WebSub BG] ✓ video_id={video_id!r} "
+                    f"title={video.get('title')!r} status={video.get('status')}"
+                )
+        except Exception as e:
+            print(f"[WebSub BG] ✗ 处理 video_id={video_id!r} 异常: {e}")
+            return
+
+        # 更新订阅记录的推送统计
+        sub = await session.scalar(
+            select(WebSubSubscription).where(
+                WebSubSubscription.channel_id == channel.id
+            )
+        )
+        if sub:
+            sub.last_push_at = datetime.now(timezone.utc)
+            sub.push_count = (sub.push_count or 0) + 1
+            await session.commit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI Router
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/youtube",
+    response_class=PlainTextResponse,
+    summary="WebSub 订阅验证回调（Hub → 服务端）",
+    description=(
+        "YouTube PubSubHubbub Hub 在收到订阅请求后，会向此端点发送 GET 请求进行验证。\n"
+        "服务端必须原样返回 `hub.challenge` 参数（纯文本），Hub 才会确认订阅生效。"
+    ),
+)
+async def websub_verify(
+    hub_mode      : str = Query(..., alias="hub.mode"),
+    hub_topic     : str = Query(..., alias="hub.topic"),
+    hub_challenge : str = Query(..., alias="hub.challenge"),
+    hub_lease_seconds: Optional[int] = Query(None, alias="hub.lease_seconds"),
+) -> PlainTextResponse:
+    """
+    处理 Hub 的订阅验证请求（subscribe / unsubscribe）。
+
+    验证逻辑：
+      - 检查 hub.mode 是否为合法值
+      - 检查 hub.topic 是否以 YouTube Feed URL 开头
+      - 通过后原样返回 hub.challenge
+
+    任何验证失败应返回 404，Hub 会认为订阅失败。
+    """
+    if hub_mode not in ("subscribe", "unsubscribe"):
+        raise HTTPException(status_code=404, detail="不支持的 hub.mode")
+
+    if not hub_topic.startswith(_TOPIC_BASE):
+        raise HTTPException(status_code=404, detail="不认识的 hub.topic")
+
+    print(
+        f"[WebSub] 验证通过 | mode={hub_mode} | "
+        f"channel={hub_topic.split('=')[-1]} | lease={hub_lease_seconds}s"
+    )
+
+    # 原样回显 challenge，Hub 收到后确认订阅生效
+    return PlainTextResponse(hub_challenge, status_code=200)
+
+
+@router.post(
+    "/youtube",
+    status_code=200,
+    summary="接收 YouTube Hub 推送的 Atom Feed",
+    description=(
+        "YouTube 有新视频/直播时，Hub 向此端点 POST Atom XML Feed。\n"
+        "端点必须在 < 200ms 内返回 200，视频详情拉取交由 BackgroundTasks 异步处理，\n"
+        "避免 Hub 因超时判定失败而进行重试风暴。"
+    ),
+)
+async def websub_receive(
+    request        : Request,
+    background_tasks: BackgroundTasks,
+    x_hub_signature: Optional[str] = Header(None, alias="X-Hub-Signature"),
+) -> dict:
+    """
+    接收并处理 YouTube Hub 推送的 Atom XML。
+
+    处理流程（关键：立刻返回 200，不等待视频详情拉取）：
+      1. 读取原始 body（bytes，用于 HMAC 验证）
+      2. 验证 HMAC 签名（若已配置 WEBSUB_SECRET）
+      3. 解析 Atom XML，提取 entry 列表
+      4. 为每个 entry 注册 BackgroundTask（异步拉取详情）
+      5. 立刻返回 {"ok": True}
+    """
+    # ── 读取原始 body ──────────────────────────────────────────────────────────
+    raw_body: bytes = await request.body()
+
+    # ── HMAC 签名验证（防伪造推送）────────────────────────────────────────────
+    if not _verify_hmac_signature(raw_body, x_hub_signature, _WEBSUB_SECRET):
+        print(f"[WebSub] HMAC 验证失败，拒绝推送 | sig={x_hub_signature!r}")
+        raise HTTPException(status_code=403, detail="签名验证失败")
+
+    # ── XML 解析 ──────────────────────────────────────────────────────────────
+    entries = _parse_atom_feed(raw_body)
+
+    if not entries:
+        # 空推送（订阅/退订确认时可能发生）直接返回
+        return {"ok": True, "processed": 0}
+
+    # ── 注册后台任务（立刻返回，不阻塞响应）────────────────────────────────────
+    count = 0
+    for entry in entries:
+        video_id   = entry["video_id"]
+        channel_id = entry["channel_id"]
+
+        print(
+            f"[WebSub] 收到推送 | channel={channel_id} | "
+            f"video_id={video_id!r} | title={entry.get('title')!r}"
+        )
+
+        # 将拉取任务加入后台队列，此处不 await，确保立刻返回
+        background_tasks.add_task(_bg_fetch_video, channel_id, video_id)
+        count += 1
+
+    # ── 立刻 200 OK（Hub 不会重试）────────────────────────────────────────────
+    return {"ok": True, "processed": count}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 管理端点（触发订阅 / 续订）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/youtube/subscribe/{channel_db_id}",
+    summary="手动订阅指定频道的 WebSub 推送",
+)
+async def manual_subscribe(
+    channel_db_id : int,
+    callback_url  : str = Query(..., description="本服务的公网回调 URL，如 https://example.com/api/websub/youtube"),
+) -> dict:
+    """
+    对数据库中指定 Channel（通过主键 ID）发起 WebSub 订阅请求。
+    适合在后台管理面板手动触发或通过定时任务批量续订。
+    """
+    async with AsyncSessionFactory() as session:
+        channel = await session.get(Channel, channel_db_id)
+        if not channel or channel.platform != "youtube":
+            raise HTTPException(status_code=404, detail="频道不存在或不是 YouTube 平台")
+
+        ok = await subscribe_channel(channel.channel_id, callback_url)
+        if not ok:
+            raise HTTPException(status_code=502, detail="Hub 拒绝了订阅请求")
+
+        # 更新订阅记录
+        sub = await session.scalar(
+            select(WebSubSubscription).where(
+                WebSubSubscription.channel_id == channel.id
+            )
+        )
+        if not sub:
+            sub = WebSubSubscription(
+                channel_id=channel.id,
+                topic_url=f"{_TOPIC_BASE}{channel.channel_id}",
+                hub_url=_HUB_URL,
+                secret=_WEBSUB_SECRET or None,
+            )
+            session.add(sub)
+        sub.subscribed_at = datetime.now(timezone.utc)
+        sub.expires_at    = datetime.now(timezone.utc) + timedelta(days=_LEASE_DAYS)
+        await session.commit()
+
+    return {
+        "ok":         True,
+        "channel":    channel.name,
+        "expires_at": sub.expires_at.isoformat(),
+    }
+
+
+@router.post(
+    "/youtube/subscribe-all",
+    summary="批量订阅所有激活的 YouTube 频道",
+)
+async def bulk_subscribe(
+    callback_url: str = Query(..., description="本服务的公网回调 URL"),
+) -> dict:
+    """
+    批量订阅数据库中所有 is_active=True 的 YouTube 频道。
+    适合在应用首次部署时或每日续订定时任务中调用。
+    """
+    await subscribe_all_active_channels(callback_url)
+    return {"ok": True, "message": "批量订阅任务已触发，请查看日志了解详情"}
+
+
+@router.get(
+    "/youtube/subscriptions",
+    summary="查询所有 WebSub 订阅状态",
+)
+async def list_subscriptions() -> list[dict]:
+    """列出数据库中记录的全部 WebSub 订阅状态，用于运维监控。"""
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(WebSubSubscription, Channel)
+            .join(Channel, WebSubSubscription.channel_id == Channel.id)
+        )
+        rows = result.all()
+
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "channel_id":    sub.channel_id,
+            "channel_name":  ch.name,
+            "youtube_id":    ch.channel_id,
+            "verified":      sub.verified,
+            "subscribed_at": sub.subscribed_at.isoformat() if sub.subscribed_at else None,
+            "expires_at":    sub.expires_at.isoformat() if sub.expires_at else None,
+            "is_expired":    (sub.expires_at < now) if sub.expires_at else True,
+            "last_push_at":  sub.last_push_at.isoformat() if sub.last_push_at else None,
+            "push_count":    sub.push_count,
+        }
+        for sub, ch in rows
+    ]

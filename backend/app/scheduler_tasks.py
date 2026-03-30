@@ -1,6 +1,7 @@
 # backend/app/scheduler_tasks.py
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import httpx
+import sys
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
@@ -20,12 +21,58 @@ from app.services.bilibili_fetcher import (
 from app.services.quota_guard import can_spend, spend, status as quota_status
 from app.services.youtube_channel import get_channel_details
 from app.config import settings
+from app.services.youtube_websub import subscribe_all_active_channels
+from app.services.youtube_sync import sync_channel_videos
+from app.database_async import AsyncSessionFactory
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
+# Windows 控制台默认编码可能是 cp932，遇到中文 print 时会触发 UnicodeEncodeError。
+# 这里尽量把输出编码改成 UTF-8，避免定时任务运行到打印处直接崩溃。
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 
 # ── YouTube ───────────────────────────────────────────────────────────────────
+async def _daily_backfill_sync():
+    """
+    每日兜底对账：用 PlaylistItems(UUxxx) 增量同步每个频道的最新50条。
+    配额消耗极低：每频道约 2 配额，100频道 ≈ 200 配额/天。
+    补漏 WebSub 可能遗漏的视频。
+    """
+    api_key = settings.youtube_api_key
+    if not api_key:
+        return
 
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select
+        from app.models.models import Channel, Platform
+        result = await session.execute(
+            select(Channel).where(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active == True,
+            )
+        )
+        channels = result.scalars().all()
+
+    for ch in channels:
+        async with AsyncSessionFactory() as session:
+            ch_obj = await session.get(Channel, ch.id)
+            if ch_obj:
+                await sync_channel_videos(
+                    session, ch_obj, api_key, full_refresh=False
+                )
+
+
+async def _renew_websub():
+    """每 8 天续订所有频道的 WebSub 订阅，避免 10 天后过期失效。"""
+    callback_url = os.getenv(
+        "WEBSUB_CALLBACK_URL",
+        "https://your-domain.com/api/websub/youtube"
+    )
+    await subscribe_all_active_channels(callback_url)
 
 async def discover_youtube_streams():
     """
@@ -333,6 +380,10 @@ async def refresh_channel_details():
 
 
 def start_scheduler():
+    # 允许重复调用（例如 uvicorn --reload 会触发 lifespan），避免重复 start/add_job。
+    if getattr(scheduler, "running", False):
+        return
+
     now = datetime.now(timezone.utc)
     scheduler.add_job(
         discover_youtube_streams,
@@ -340,12 +391,14 @@ def start_scheduler():
         hours=6,
         id="yt_discover",
         next_run_time=now,
+        replace_existing=True,
     )
     scheduler.add_job(
         update_youtube_streams,
         "interval",
         seconds=60,
         id="yt_update",
+        replace_existing=True,
     )
     scheduler.add_job(
         update_bilibili_streams,
@@ -353,6 +406,7 @@ def start_scheduler():
         minutes=2,
         id="bili_update",
         next_run_time=now,
+        replace_existing=True,
     )
     scheduler.add_job(
         sync_bilibili_channels,
@@ -360,6 +414,7 @@ def start_scheduler():
         hours=24,
         id="bili_sync_ch",
         next_run_time=now,
+        replace_existing=True,
     )
     scheduler.add_job(
         refresh_channel_details,
@@ -367,8 +422,30 @@ def start_scheduler():
         hours=24,
         id="channel_refresh",
         next_run_time=now,
+        replace_existing=True,
     )
-    scheduler.start()
     print(
         "[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min | bili_sync_ch=24h | channel_refresh=24h"
+    )
+
+    scheduler.add_job(
+        _daily_backfill_sync,
+        "cron",
+        hour=4, minute=0,     # UTC 04:00
+        id="daily_backfill",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _renew_websub,
+        "interval",
+        days=8,
+        id="websub_renew",
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    print(
+        "[Scheduler] yt_discover=6h | yt_update=60s | bili_update=2min"
+        " | bili_sync_ch=24h | channel_refresh=24h"
+        " | daily_backfill=04:00 | websub_renew=每8天"
     )

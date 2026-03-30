@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "add_users_and_channel_fields"
-down_revision = None
+down_revision = "c8b4874c0bce"
 branch_labels = None
 depends_on = None
 

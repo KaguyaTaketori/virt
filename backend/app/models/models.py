@@ -149,6 +149,12 @@ class Video(Base):
     published_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="archive")
     fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    duration_secs   = Column(Integer,  nullable=True)          # 秒数，便于 Shorts 判断
+    like_count      = Column(BigInteger, nullable=True)
+    live_chat_id    = Column(String(100), nullable=True)
+    scheduled_at    = Column(DateTime, nullable=True)
+    live_started_at = Column(DateTime, nullable=True)
+    live_ended_at   = Column(DateTime, nullable=True)
 
     channel = relationship("Channel", back_populates="videos")
 
@@ -171,3 +177,24 @@ class Danmaku(Base):
     downloaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     stream = relationship("Stream", backref="danmakus")
+
+
+# backend/app/models/models.py 末尾追加
+
+class WebSubSubscription(Base):
+    """记录每个 YouTube 频道的 WebSub/PubSubHubbub 订阅状态。"""
+    __tablename__ = "websub_subscriptions"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    channel_id     = Column(Integer, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False, unique=True)
+    topic_url      = Column(String(300), nullable=False)
+    hub_url        = Column(String(300), nullable=False)
+    secret         = Column(String(100), nullable=True)
+    verified       = Column(Boolean, default=False)
+    expires_at     = Column(DateTime, nullable=True)
+    subscribed_at  = Column(DateTime, nullable=True)
+    last_push_at   = Column(DateTime, nullable=True)
+    push_count     = Column(Integer, default=0)
+
+    channel = relationship("Channel")
+

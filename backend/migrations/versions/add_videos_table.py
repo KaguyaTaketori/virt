@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "add_videos_table"
-down_revision = "c8b4874c0bce"
+down_revision = "add_users_and_channel_fields"
 branch_labels = None
 depends_on = None
 

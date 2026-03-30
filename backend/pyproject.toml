@@ -12,8 +12,11 @@ dependencies = [
     "apscheduler>=3.10.4",
     "alembic>=1.13.0",
     "yt-chat-downloader>=0.0.3",
-    "jose>=1.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",
     "yt-dlp>=2024.8.6",
+    "aiosqlite>=0.22.1",
 ]
 
 [project.optional-dependencies]

@@ -11,6 +11,7 @@ from app.routers import (
     auth,
     user_channels,
 )
+from app.services.youtube_websub import router as youtube_websub_router
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
 
@@ -45,6 +46,7 @@ app.include_router(websocket.router)
 app.include_router(organizations.router)
 app.include_router(auth.router)
 app.include_router(user_channels.router)
+app.include_router(youtube_websub_router)
 
 
 @app.get("/")

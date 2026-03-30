@@ -143,35 +143,7 @@ async def get_channel_videos(
 
 
 async def _incrementally_update_videos(db: Session, channel: Channel):
-    """增量更新视频 - 只获取新视频，优先使用YouTube API，失败则用yt-dlp"""
-
-    existing_video_ids = set(
-        v[0]
-        for v in db.query(Video.video_id).filter(Video.channel_id == channel.id).all()
-    )
-
-    api_quota_exceeded = False
-
-    if settings.youtube_api_key:
-        try:
-            api_quota_exceeded = await _update_videos_via_api(
-                db, channel, existing_video_ids
-            )
-        except Exception as e:
-            print(f"[YouTube Videos] API error: {e}")
-            api_quota_exceeded = True
-
-    if api_quota_exceeded or not settings.youtube_api_key:
-        print("[YouTube Videos] Using yt-dlp fallback...")
-        try:
-            await _update_videos_via_yt_dlp(db, channel, existing_video_ids)
-            await _update_live_via_yt_dlp(db, channel, existing_video_ids)
-            await _update_shorts_via_yt_dlp(db, channel, existing_video_ids)
-        except Exception as e:
-            print(f"[YouTube Videos] yt-dlp error: {e}")
-
-    channel.videos_last_fetched = datetime.now(timezone.utc)
-    db.commit()
+    await backfill_channel_videos(db, channel, full_refresh=False)
 
 
 async def _update_videos_via_api(

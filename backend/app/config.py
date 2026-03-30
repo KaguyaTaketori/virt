@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///./streams.db"
     enable_danmaku: bool = False
     danmaku_storage_path: str = "./danmaku_data"
+    # WebSub 回调与签名配置（来自 .env）
+    websub_callback_url: str = ""
+    websub_secret: str = ""
     admin_secret_key: str = ""
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
