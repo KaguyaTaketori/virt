@@ -8,8 +8,6 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.models import Channel, Stream, StreamStatus, Platform
 from app.services.youtube_fetcher import (
-    get_channel_live_video_ids,
-    get_channel_upcoming_video_ids,
     get_videos_details,
     parse_youtube_stream,
 )
@@ -76,80 +74,13 @@ async def _renew_websub():
 
 async def discover_youtube_streams():
     """
-    用 search.list（100配额/次）发现新直播。
-    只扫当前没有 LIVE/UPCOMING 记录的频道，且受配额守卫严格限制。
+    Search-based stream discovery 已禁用。
+
+    现在的策略：
+    - 更新已知活跃流：用 videos.list（update_youtube_streams）
+    - 查询“正在直播”：在 API 层按需用 youtube_sync 增量拉取
     """
-    if not settings.youtube_api_key:
-        return
-
-    db = SessionLocal()
-    try:
-        busy_channel_ids = {
-            s.channel_id
-            for s in db.query(Stream.channel_id)
-            .filter(
-                Stream.platform == Platform.YOUTUBE,
-                Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
-            )
-            .all()
-        }
-        channels = (
-            db.query(Channel)
-            .filter(
-                Channel.platform == Platform.YOUTUBE,
-                Channel.is_active == True,
-                ~Channel.id.in_(busy_channel_ids),
-            )
-            .all()
-        )
-
-        if not channels:
-            return
-
-        q = quota_status()
-        print(f"[YT Discover] 待扫描 {len(channels)} 频道 | 配额剩余 {q['remaining']}")
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for ch in channels:
-                # 每次 search.list = 100 配额，提前检查
-                if not can_spend("search.list", 1):
-                    print(f"[YT Discover] 配额不足，提前终止（已处理到 {ch.name}）")
-                    break
-
-                try:
-                    # 查 live
-                    live_ids = await get_channel_live_video_ids(client, ch.channel_id)
-                    spend("search.list", 1)
-
-                    # 查 upcoming（再消耗 100）
-                    upcoming_ids = []
-                    if can_spend("search.list", 1):
-                        upcoming_ids = await get_channel_upcoming_video_ids(
-                            client, ch.channel_id
-                        )
-                        spend("search.list", 1)
-
-                    all_ids = list(set(live_ids + upcoming_ids))
-                    if not all_ids:
-                        continue
-
-                    # videos.list = 1 配额（50条以内）
-                    if can_spend("videos.list", 1):
-                        items = await get_videos_details(client, all_ids)
-                        spend("videos.list", 1)
-                        for item in items:
-                            parsed = parse_youtube_stream(item)
-                            if parsed:
-                                _upsert_stream(db, ch.id, parsed, Platform.YOUTUBE)
-                        db.commit()
-
-                except Exception as e:
-                    print(f"[YT Discover] {ch.name}: {e}")
-                    db.rollback()
-
-        print(f"[YT Discover] 完成 | 配额剩余 {quota_status()['remaining']}")
-    finally:
-        db.close()
+    return
 
 
 async def update_youtube_streams():
@@ -385,14 +316,6 @@ def start_scheduler():
         return
 
     now = datetime.now(timezone.utc)
-    scheduler.add_job(
-        discover_youtube_streams,
-        "interval",
-        hours=6,
-        id="yt_discover",
-        next_run_time=now,
-        replace_existing=True,
-    )
     scheduler.add_job(
         update_youtube_streams,
         "interval",

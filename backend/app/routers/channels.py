@@ -13,6 +13,9 @@ from app.models.models import Channel, Platform, User, UserChannel
 from app.services.youtube_channel import get_youtube_channel_info, get_channel_details
 from app.services.youtube_videos import get_channel_videos as fetch_channel_videos
 from app.auth import get_current_user_optional, get_db
+from app.config import settings
+from app.database_async import AsyncSessionFactory
+from app.services.youtube_sync import sync_channel_videos
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -157,6 +160,18 @@ async def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
     db.add(db_channel)
     db.commit()
     db.refresh(db_channel)
+
+    # 新增 YouTube 频道后：直接全量 backfill（避免后续依赖 Search/发现逻辑）。
+    if db_channel.platform == Platform.YOUTUBE:
+        async with AsyncSessionFactory() as session:
+            ch_obj = await session.get(Channel, db_channel.id)
+            if ch_obj:
+                await sync_channel_videos(
+                    session,
+                    ch_obj,
+                    settings.youtube_api_key,
+                    full_refresh=True,
+                )
     return db_channel
 
 
@@ -179,13 +194,22 @@ def update_channel(
 
 @router.delete("/{channel_id}")
 def delete_channel(channel_id: int, db: Session = Depends(get_db)):
-    from app.models.models import Stream, Danmaku
+    from app.models.models import Stream, Danmaku, Video, UserChannel
 
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    # 先删除相关的 streams 和 danmakus
+    # 先显式删除关联 videos / user_channels，
+    # 避免在删除 Channel 时外键被置 NULL，从而触发 NOT NULL 约束。
+    db.query(Video).filter(Video.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
+    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
+
+    # 再删除相关的 streams 和 danmakus
     db.query(Danmaku).filter(
         Danmaku.stream_id.in_(
             db.query(Stream.id).filter(Stream.channel_id == channel_id)

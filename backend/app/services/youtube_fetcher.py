@@ -25,21 +25,7 @@ async def get_channel_live_video_ids(
     用 search.list 查频道当前的 live/upcoming videoId。
     消耗 100 配额/次，只在发现 job 里调用。
     """
-    resp = await client.get(
-        f"{YOUTUBE_API_BASE}/search",
-        params={
-            "key": settings.youtube_api_key,
-            "channelId": channel_id,
-            "part": "id",
-            "eventType": "live",
-            "type": "video",
-            "maxResults": 5,
-        },
-        timeout=15.0,
-    )
-    resp.raise_for_status()
-    items = resp.json().get("items", [])
-    return [item["id"]["videoId"] for item in items]
+    raise RuntimeError("Search API disabled: use youtube_sync incrementals instead.")
 
 
 async def get_channel_upcoming_video_ids(
@@ -47,21 +33,7 @@ async def get_channel_upcoming_video_ids(
     channel_id: str,
 ) -> list[str]:
     """查 upcoming（预告）流，和 live 分开调用节省配额。"""
-    resp = await client.get(
-        f"{YOUTUBE_API_BASE}/search",
-        params={
-            "key": settings.youtube_api_key,
-            "channelId": channel_id,
-            "part": "id",
-            "eventType": "upcoming",
-            "type": "video",
-            "maxResults": 5,
-        },
-        timeout=15.0,
-    )
-    resp.raise_for_status()
-    items = resp.json().get("items", [])
-    return [item["id"]["videoId"] for item in items]
+    raise RuntimeError("Search API disabled: use youtube_sync incrementals instead.")
 
 
 async def get_videos_details(

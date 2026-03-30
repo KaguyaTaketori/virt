@@ -113,43 +113,53 @@
       <div class="py-6">
         <!-- 直播 Tab -->
         <div v-if="activeTab === 'live'">
-          <div v-if="liveVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            <div
-              v-for="video in liveVideos"
-              :key="video.id"
-              class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
-              @click="addToMultiview(video)"
-            >
-              <div class="aspect-video relative">
-                <img 
-                  :src="video.thumbnail_url || '/placeholder.png'" 
-                  class="w-full h-full object-cover"
-                  referrerpolicy="no-referrer"
-                />
-                <span 
-                  v-if="video.status === 'live'"
-                  class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1"
-                >
-                  <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
-                  直播中
-                </span>
-                <span 
-                  v-else-if="video.status === 'upcoming'"
-                  class="absolute top-2 left-2 bg-yellow-600 text-white text-xs px-2 py-0.5 rounded"
-                >
-                  预约
-                </span>
-                <span 
-                  v-if="video.duration"
-                  class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded"
-                >
-                  {{ video.duration }}
-                </span>
+          <div v-if="liveVideos.length > 0">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div
+                v-for="video in liveVideos"
+                :key="video.id"
+                class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
+                @click="addToMultiview(video)"
+              >
+                <div class="aspect-video relative">
+                  <img 
+                    :src="video.thumbnail_url || '/placeholder.png'" 
+                    class="w-full h-full object-cover"
+                    referrerpolicy="no-referrer"
+                  />
+                  <span 
+                    v-if="video.status === 'live'"
+                    class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1"
+                  >
+                    <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
+                    直播中
+                  </span>
+                  <span 
+                    v-else-if="video.status === 'upcoming'"
+                    class="absolute top-2 left-2 bg-yellow-600 text-white text-xs px-2 py-0.5 rounded"
+                  >
+                    预约
+                  </span>
+                  <span 
+                    v-if="video.duration"
+                    class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded"
+                  >
+                    {{ video.duration }}
+                  </span>
+                </div>
+                <div class="p-3">
+                  <h4 class="text-sm text-white line-clamp-2">{{ video.title }}</h4>
+                  <p class="text-xs text-gray-500 mt-1">{{ video.view_count }} views · {{ video.published_at }}</p>
+                </div>
               </div>
-              <div class="p-3">
-                <h4 class="text-sm text-white line-clamp-2">{{ video.title }}</h4>
-                <p class="text-xs text-gray-500 mt-1">{{ video.view_count }} views · {{ video.published_at }}</p>
-              </div>
+            </div>
+
+            <div v-if="liveTotalPages > 1" class="flex justify-center mt-6">
+              <n-pagination
+                v-model:page="liveCurrentPage"
+                :page-count="liveTotalPages"
+                @update:page="fetchLiveVideos(Number(route.params.id))"
+              />
             </div>
           </div>
           <div v-else class="text-center py-12 text-gray-500">
@@ -276,6 +286,9 @@ const shortsVideos = ref<Video[]>([])
 const currentPage = ref(1)
 const totalPages = ref(0)
 const totalVideos = ref(0)
+const liveCurrentPage = ref(1)
+const liveTotalPages = ref(0)
+const liveTotalVideos = ref(0)
 
 const tabs = [
   { value: 'live', label: '直播' },
@@ -322,6 +335,8 @@ async function fetchChannel(id: number) {
   try {
     const { data } = await channelApi.get(id)
     channel.value = data
+    currentPage.value = 1
+    liveCurrentPage.value = 1
     await fetchVideos(id)
     await fetchLiveVideos(id)
     await fetchShortsVideos(id)
@@ -345,8 +360,10 @@ async function fetchVideos(channelId: number) {
 
 async function fetchLiveVideos(channelId: number) {
   try {
-    const { data } = await channelApi.getVideos(channelId, 1, 50, 'live')
+    const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'live')
     liveVideos.value = data.videos
+    liveTotalPages.value = data.total_pages
+    liveTotalVideos.value = data.total
   } catch (err) {
     console.error('Failed to fetch live videos:', err)
   }

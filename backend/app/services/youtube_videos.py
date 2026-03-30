@@ -11,6 +11,8 @@ from app.database import SessionLocal
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
 from app.models.models import Video, Channel
 from app.services.youtube_backfill import backfill_channel_videos
+from app.database_async import AsyncSessionFactory
+from app.services.youtube_sync import sync_channel_videos
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
@@ -75,9 +77,12 @@ def _get_videos_from_db(
     query = db.query(Video).filter(Video.channel_id == channel_id)
 
     if status_filter == "live":
-        query = query.filter(Video.status == "stream")  # 直播Tab：显示直播/录播
+        # 直播 Tab：展示“直播中 / 预约 / 已结束存档”
+        # 对应的状态值：live / upcoming / archive
+        query = query.filter(Video.status.in_(["live", "upcoming", "archive"]))
     elif status_filter == "upload":
-        query = query.filter(Video.status == "upload")  # 视频Tab：显示自制视频
+        # 视频 Tab：只展示自制上传视频（upload）
+        query = query.filter(Video.status == "upload")
     elif status_filter == "short":
         query = query.filter(Video.status == "short")  # Shorts Tab：显示Shorts
     elif status_filter:
@@ -134,7 +139,11 @@ async def get_channel_videos(
         existing_count = db.query(Video).filter(Video.channel_id == channel_id).count()
 
         if _needs_update(channel):
-            await _incrementally_update_videos(db, channel)
+            # “正在直播”场景：使用 youtube_sync 的增量更新
+            if status_filter == "live":
+                await _incrementally_update_live_videos_via_youtube_sync(channel)
+            else:
+                await _incrementally_update_videos(db, channel)
 
         return _get_videos_from_db(db, channel_id, page, page_size, status_filter)
 
@@ -146,10 +155,24 @@ async def _incrementally_update_videos(db: Session, channel: Channel):
     await backfill_channel_videos(db, channel, full_refresh=False)
 
 
+async def _incrementally_update_live_videos_via_youtube_sync(channel: Channel) -> None:
+    async with AsyncSessionFactory() as session:
+        ch_obj = await session.get(Channel, channel.id)
+        if ch_obj:
+            await sync_channel_videos(
+                session,
+                ch_obj,
+                settings.youtube_api_key,
+                full_refresh=False,
+            )
+
+
 async def _update_videos_via_api(
     db: Session, channel: Channel, existing_video_ids: set
 ) -> bool:
     """通过YouTube API更新视频，返回是否配额超限"""
+    # Search-based video discovery 已禁用：全量/增量更新改用 youtube_sync/youtube_backfill。
+    raise RuntimeError("Search API disabled. Use youtube_sync/youtube_backfill instead.")
 
     if not settings.youtube_api_key:
         return True
