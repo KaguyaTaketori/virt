@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import httpx
 from app.database import SessionLocal
 from app.schemas.schemas import (
     ChannelCreate,
@@ -12,10 +13,10 @@ from app.schemas.schemas import (
 from app.models.models import Channel, Platform, User, UserChannel
 from app.services.youtube_channel import get_youtube_channel_info, get_channel_details
 from app.services.youtube_videos import get_channel_videos as fetch_channel_videos
-from app.auth import get_current_user_optional, get_db
-from app.config import settings
-from app.database_async import AsyncSessionFactory
 from app.services.youtube_sync import sync_channel_videos
+from app.services.youtube_websub import subscribe_channel
+from app.services.bilibili_fetcher import get_user_info as fetch_bilibili_user_info
+from app.auth import get_current_user_optional, get_db
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -82,7 +83,7 @@ def _add_user_status_to_channel(channel: Channel, db: Session, user_id: int = No
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
-def get_channel(
+async def get_channel(
     channel_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_optional),
@@ -91,8 +92,35 @@ def get_channel(
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
+    response = ChannelResponse.model_validate(channel)
+
+    if channel.platform == Platform.BILIBILI:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            user_info = await fetch_bilibili_user_info(client, channel.channel_id)
+            if user_info:
+                response.bilibili_sign = user_info.get("sign")
+                response.bilibili_fans = user_info.get("follower")
+                response.bilibili_archive_count = user_info.get("archive_count")
+                if not response.avatar_url:
+                    response.avatar_url = user_info.get("avatar_url")
+                if not response.name:
+                    response.name = user_info.get("name")
+
     user_id = current_user.id if current_user else None
-    return _add_user_status_to_channel(channel, db, user_id)
+    if user_id:
+        user_channel = (
+            db.query(UserChannel)
+            .filter(
+                UserChannel.user_id == user_id,
+                UserChannel.channel_id == channel_id,
+            )
+            .first()
+        )
+        if user_channel:
+            response.is_liked = user_channel.status == "liked"
+            response.is_blocked = user_channel.status == "blocked"
+
+    return response
 
 
 @router.get("/{channel_id}/videos", response_model=PaginatedVideosResponse)
@@ -117,7 +145,11 @@ async def get_channel_videos(
 
 
 @router.post("", response_model=ChannelResponse)
-async def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
+async def create_channel(
+    channel: ChannelCreate,
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
+):
     resolved_channel_id = None
     channel_details = None
 
@@ -161,17 +193,36 @@ async def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_channel)
 
-    # 新增 YouTube 频道后：直接全量 backfill（避免后续依赖 Search/发现逻辑）。
-    if db_channel.platform == Platform.YOUTUBE:
-        async with AsyncSessionFactory() as session:
-            ch_obj = await session.get(Channel, db_channel.id)
-            if ch_obj:
-                await sync_channel_videos(
-                    session,
-                    ch_obj,
-                    settings.youtube_api_key,
-                    full_refresh=True,
-                )
+    # 新增 YouTube 频道后：使用 BackgroundTasks 异步 backfill，避免阻塞请求
+    if background_tasks and db_channel.platform == Platform.YOUTUBE:
+        channel_id = db_channel.id
+        api_key = settings.youtube_api_key
+        callback_url = settings.websub_callback_url
+
+        async def _bg_sync_and_subscribe():
+            async with AsyncSessionFactory() as session:
+                ch_obj = await session.get(Channel, channel_id)
+                if ch_obj:
+                    await sync_channel_videos(
+                        session, ch_obj, api_key, full_refresh=True
+                    )
+                    # 订阅 WebSub
+                    if (
+                        callback_url
+                        and callback_url != "https://your-domain.com/api/websub/youtube"
+                        and api_key
+                    ):
+                        secret = (
+                            settings.websub_secret if settings.websub_secret else None
+                        )
+                        await subscribe_channel(
+                            ch_obj.channel_id,
+                            callback_url,
+                            secret=secret,
+                        )
+
+        background_tasks.add_task(_bg_sync_and_subscribe)
+
     return db_channel
 
 

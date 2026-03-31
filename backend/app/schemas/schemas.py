@@ -93,6 +93,9 @@ class ChannelResponse(ChannelBase):
     description: Optional[str] = None
     is_liked: Optional[bool] = False
     is_blocked: Optional[bool] = False
+    bilibili_sign: Optional[str] = None
+    bilibili_fans: Optional[int] = None
+    bilibili_archive_count: Optional[int] = None
 
     class Config:
         from_attributes = True

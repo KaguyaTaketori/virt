@@ -34,6 +34,9 @@ export interface Channel {
   description: string | null
   is_liked: boolean
   is_blocked: boolean
+  bilibili_sign: string | null
+  bilibili_fans: number | null
+  bilibili_archive_count: number | null
 }
 
 export interface Organization {
@@ -97,6 +100,29 @@ export const orgApi = {
   create: (data: Partial<Organization>) => api.post('/api/organizations', data),
   update: (id: number, data: Partial<Organization>) => api.put(`/api/organizations/${id}`, data),
   delete: (id: number) => api.delete(`/api/organizations/${id}`),
+}
+
+export const adminVideosApi = {
+  getVideos: (params: {
+    channel_id: number
+    status?: string | null
+    duration_min?: number | null
+    duration_max?: number | null
+    page?: number
+    page_size?: number
+  }) =>
+    api.get('/api/admin/videos', {
+      params: {
+        channel_id: params.channel_id,
+        status: params.status ?? undefined,
+        duration_min: params.duration_min ?? undefined,
+        duration_max: params.duration_max ?? undefined,
+        page: params.page ?? undefined,
+        page_size: params.page_size ?? undefined,
+      },
+    }),
+  batchUpdateStatus: (payload: { video_ids: string[]; new_status: string }) =>
+    api.post('/api/admin/videos/batch-update-status', payload),
 }
 
 export default api

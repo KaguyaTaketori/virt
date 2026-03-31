@@ -27,7 +27,7 @@
         <!-- 名称和机构 -->
         <div class="flex-1 pb-2">
           <h1 class="text-2xl md:text-3xl font-bold text-white">{{ channel.name }}</h1>
-          <div class="flex items-center gap-2 mt-1">
+          <div class="flex items-center gap-2 mt-1 flex-wrap">
             <span 
               v-if="channel.platform === 'youtube'"
               class="px-2 py-0.5 bg-red-600 text-white text-xs rounded-full"
@@ -41,6 +41,16 @@
               Bilibili
             </span>
             <span class="text-gray-400 text-sm">{{ getOrgName(channel.org_id) }}</span>
+          </div>
+          <!-- Bilibili 额外信息 -->
+          <div v-if="channel.platform === 'bilibili'" class="mt-2 text-sm text-gray-400">
+            <span v-if="channel.bilibili_fans" class="mr-4">
+              粉丝: {{ channel.bilibili_fans.toLocaleString() }}
+            </span>
+            <span v-if="channel.bilibili_archive_count" class="mr-4">
+              稿件: {{ channel.bilibili_archive_count }}
+            </span>
+            <p v-if="channel.bilibili_sign" class="mt-1 text-gray-500 line-clamp-2">{{ channel.bilibili_sign }}</p>
           </div>
         </div>
 
@@ -255,7 +265,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
@@ -382,5 +392,21 @@ onMounted(async () => {
   await orgStore.fetchOrganizations()
   const channelId = Number(route.params.id)
   await fetchChannel(channelId)
+})
+
+// 避免你在后端改完逻辑但当前页面没重新加载时，
+// 切换 Tab 仍然展示旧的缓存数据：Tab 切换时按需重新拉取。
+watch(activeTab, async (tab) => {
+  if (!channel.value) return
+  const channelId = Number(route.params.id)
+  if (tab === 'videos') {
+    currentPage.value = 1
+    await fetchVideos(channelId)
+  } else if (tab === 'live') {
+    liveCurrentPage.value = 1
+    await fetchLiveVideos(channelId)
+  } else if (tab === 'shorts') {
+    await fetchShortsVideos(channelId)
+  }
 })
 </script>

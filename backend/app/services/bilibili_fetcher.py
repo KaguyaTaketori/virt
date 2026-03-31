@@ -27,13 +27,13 @@ BASE_HEADERS = {
     "sec-fetch-dest": "empty",
 }
 
-_BACKOFF_INIT   = 60
-_BACKOFF_MAX    = 600
+_BACKOFF_INIT = 60
+_BACKOFF_MAX = 600
 _BACKOFF_FACTOR = 2
-_MAX_RETRIES    = 3
-_BATCH_SIZE     = 15      # 每批最多 15 个 uid
-_BATCH_SLEEP    = (3.0, 5.0)   # 批次间随机冷却秒数
-_REQ_SLEEP      = (1.0, 2.2)   # 单请求间随机间隔
+_MAX_RETRIES = 3
+_BATCH_SIZE = 15  # 每批最多 15 个 uid
+_BATCH_SLEEP = (3.0, 5.0)  # 批次间随机冷却秒数
+_REQ_SLEEP = (1.0, 2.2)  # 单请求间随机间隔
 
 
 async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
@@ -51,8 +51,21 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
             return None
         card = data.get("data", {}).get("card", {})
         return {
-            "name":       card.get("name"),
+            "name": card.get("name"),
             "avatar_url": card.get("face"),
+            "sex": card.get("sex"),
+            "sign": card.get("sign"),
+            "fans": card.get("fans"),
+            "attention": card.get("attention"),
+            "archive_count": data.get("archive_count"),
+            "article_count": data.get("article_count"),
+            "follower": data.get("follower"),
+            "like_num": data.get("like_num"),
+            "level": card.get("level_info", {}).get("current_level"),
+            "official_title": card.get("Official", {}).get("title"),
+            "official_type": card.get("Official", {}).get("type"),
+            "vip_type": card.get("vip", {}).get("type"),
+            "vip_status": card.get("vip", {}).get("status"),
         }
     except Exception as e:
         print(f"[Bilibili] get_user_info uid={uid} error: {e}")
@@ -62,7 +75,7 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
 async def _fetch_single_room(
     client: httpx.AsyncClient,
     uid: str,
-    current_backoff: list,   # 用 list 包裹以便跨 await 修改
+    current_backoff: list,  # 用 list 包裹以便跨 await 修改
 ) -> Optional[dict]:
     """
     拉单个 uid 的直播间信息，带退避重试。
@@ -77,7 +90,7 @@ async def _fetch_single_room(
                 timeout=15.0,
             )
         except httpx.TimeoutException:
-            print(f"[Bilibili] 超时 uid={uid} attempt={attempt+1}")
+            print(f"[Bilibili] 超时 uid={uid} attempt={attempt + 1}")
             await asyncio.sleep(5)
             continue
         except httpx.RequestError as e:
@@ -86,7 +99,9 @@ async def _fetch_single_room(
 
         if resp.status_code == 412:
             wait = current_backoff[0]
-            print(f"[Bilibili] 风控 412 uid={uid}，退避 {wait}s (attempt {attempt+1})")
+            print(
+                f"[Bilibili] 风控 412 uid={uid}，退避 {wait}s (attempt {attempt + 1})"
+            )
             await asyncio.sleep(wait)
             current_backoff[0] = min(wait * _BACKOFF_FACTOR, _BACKOFF_MAX)
             continue
@@ -107,12 +122,12 @@ async def _fetch_single_room(
                 # 成功后重置退避
                 current_backoff[0] = _BACKOFF_INIT
                 return {
-                    "room_id":    room.get("roomid"),
-                    "title":      room.get("title"),
+                    "room_id": room.get("roomid"),
+                    "title": room.get("title"),
                     "user_cover": room.get("cover"),
                     "live_status": room.get("liveStatus"),
-                    "online":     room.get("online"),
-                    "live_time":  room.get("live_time"),
+                    "online": room.get("online"),
+                    "live_time": room.get("live_time"),
                 }
 
         current_backoff[0] = _BACKOFF_INIT
@@ -131,9 +146,9 @@ async def get_rooms_by_uids(
     返回 {uid_str: room_data_dict}。
     """
     results: dict[str, dict] = {}
-    backoff = [_BACKOFF_INIT]   # 共享退避状态
+    backoff = [_BACKOFF_INIT]  # 共享退避状态
 
-    batches = [uids[i:i+_BATCH_SIZE] for i in range(0, len(uids), _BATCH_SIZE)]
+    batches = [uids[i : i + _BATCH_SIZE] for i in range(0, len(uids), _BATCH_SIZE)]
     print(f"[Bilibili] 共 {len(uids)} 个 uid，分 {len(batches)} 批处理")
 
     for batch_idx, batch in enumerate(batches):
@@ -146,7 +161,9 @@ async def get_rooms_by_uids(
         # 批次间冷却（最后一批不用等）
         if batch_idx < len(batches) - 1:
             sleep_time = random.uniform(*_BATCH_SLEEP)
-            print(f"[Bilibili] 批次 {batch_idx+1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s")
+            print(
+                f"[Bilibili] 批次 {batch_idx + 1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s"
+            )
             await asyncio.sleep(sleep_time)
 
     return results
@@ -165,10 +182,10 @@ def parse_bilibili_room(room: dict) -> dict:
             pass
 
     return {
-        "video_id":      str(room.get("room_id", "")),
-        "title":         room.get("title"),
+        "video_id": str(room.get("room_id", "")),
+        "title": room.get("title"),
         "thumbnail_url": room.get("user_cover") or room.get("keyframe"),
-        "status":        status_map.get(live_status, "offline"),
-        "viewer_count":  room.get("online", 0),
-        "started_at":    started_at,
+        "status": status_map.get(live_status, "offline"),
+        "viewer_count": room.get("online", 0),
+        "started_at": started_at,
     }
