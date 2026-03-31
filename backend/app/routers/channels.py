@@ -145,7 +145,10 @@ async def get_channel_videos(
         result = await fetch_channel_videos(channel.id, page, page_size, status)
         return result
     elif channel.platform == Platform.BILIBILI:
-        await sync_bilibili_channel_videos(db, channel_id, channel.channel_id)
+        existing_count = db.query(Video).filter(Video.channel_id == channel_id).count()
+
+        if existing_count == 0:
+            await sync_bilibili_channel_videos(db, channel_id, channel.channel_id)
 
         query = db.query(Video).filter(Video.channel_id == channel_id)
         if status:

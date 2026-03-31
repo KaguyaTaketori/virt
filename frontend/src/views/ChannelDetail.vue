@@ -359,7 +359,9 @@ async function fetchChannel(id: number) {
 
 async function fetchVideos(channelId: number) {
   try {
-    const { data } = await channelApi.getVideos(channelId, currentPage.value, 24, 'upload')
+    const platform = channel.value?.platform
+    const status = platform === 'youtube' ? 'upload' : undefined
+    const { data } = await channelApi.getVideos(channelId, currentPage.value, 24, status)
     videos.value = data.videos
     totalPages.value = data.total_pages
     totalVideos.value = data.total
@@ -370,7 +372,9 @@ async function fetchVideos(channelId: number) {
 
 async function fetchLiveVideos(channelId: number) {
   try {
-    const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'live')
+    const platform = channel.value?.platform
+    const status = platform === 'youtube' ? 'live' : undefined
+    const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, status)
     liveVideos.value = data.videos
     liveTotalPages.value = data.total_pages
     liveTotalVideos.value = data.total
@@ -381,7 +385,9 @@ async function fetchLiveVideos(channelId: number) {
 
 async function fetchShortsVideos(channelId: number) {
   try {
-    const { data } = await channelApi.getVideos(channelId, 1, 50, 'short')
+    const platform = channel.value?.platform
+    const status = platform === 'youtube' ? 'short' : undefined
+    const { data } = await channelApi.getVideos(channelId, 1, 50, status)
     shortsVideos.value = data.videos
   } catch (err) {
     console.error('Failed to fetch shorts videos:', err)
