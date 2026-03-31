@@ -15,6 +15,7 @@ from app.services.bilibili_fetcher import (
     get_rooms_by_uids,
     parse_bilibili_room,
     get_user_info,
+    sync_bilibili_channel_videos,
 )
 from app.services.quota_guard import can_spend, spend, status as quota_status
 from app.services.youtube_channel import get_channel_details
@@ -47,6 +48,7 @@ async def _daily_backfill_sync():
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
         from app.models.models import Channel, Platform
+
         result = await session.execute(
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
@@ -59,18 +61,16 @@ async def _daily_backfill_sync():
         async with AsyncSessionFactory() as session:
             ch_obj = await session.get(Channel, ch.id)
             if ch_obj:
-                await sync_channel_videos(
-                    session, ch_obj, api_key, full_refresh=False
-                )
+                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
 
 
 async def _renew_websub():
     """每 8 天续订所有频道的 WebSub 订阅，避免 10 天后过期失效。"""
     callback_url = os.getenv(
-        "WEBSUB_CALLBACK_URL",
-        "https://your-domain.com/api/websub/youtube"
+        "WEBSUB_CALLBACK_URL", "https://your-domain.com/api/websub/youtube"
     )
     await subscribe_all_active_channels(callback_url)
+
 
 async def discover_youtube_streams():
     """
@@ -189,7 +189,7 @@ async def sync_bilibili_channels():
         if not channels:
             return
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             for ch in channels:
                 info = await get_user_info(client, ch.channel_id)
                 if not info:
@@ -203,6 +203,12 @@ async def sync_bilibili_channels():
                     changed = True
                 if changed:
                     ch.updated_at = datetime.now(timezone.utc)
+
+                total_synced = await sync_bilibili_channel_videos(
+                    db, ch.id, ch.channel_id
+                )
+                if total_synced > 0:
+                    print(f"[Bilibili] {ch.name}: 同步了 {total_synced} 个视频")
 
         db.commit()
         print(f"[Bilibili] 同步 {len(channels)} 个频道信息")
@@ -354,7 +360,8 @@ def start_scheduler():
     scheduler.add_job(
         _daily_backfill_sync,
         "cron",
-        hour=4, minute=0,     # UTC 04:00
+        hour=4,
+        minute=0,  # UTC 04:00
         id="daily_backfill",
         replace_existing=True,
     )
