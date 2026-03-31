@@ -14,17 +14,11 @@ BASE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
+        "Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://live.bilibili.com/",
-    "Origin": "https://live.bilibili.com",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Accept": "application/json, text/plain, */*",
-    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24"',
-    "sec-ch-ua-platform": '"Windows"',
-    "sec-fetch-site": "same-site",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-dest": "empty",
+    "Accept": "application/json",
+    "Referer": "https://www.bilibili.com/",
+    "Origin": "https://www.bilibili.com",
 }
 
 _BACKOFF_INIT = 60
@@ -53,7 +47,8 @@ async def get_user_videos(
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Accept": "application/json",
-                    "Referer": "https://space.bilibili.com/",
+                    "Referer": "https://www.bilibili.com/",
+                    "Origin": "https://www.bilibili.com",
                 },
                 timeout=15.0,
             )
