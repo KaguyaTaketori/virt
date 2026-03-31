@@ -36,6 +36,115 @@ _BATCH_SLEEP = (3.0, 5.0)  # 批次间随机冷却秒数
 _REQ_SLEEP = (1.0, 2.2)  # 单请求间随机间隔
 
 
+async def get_user_videos(
+    client: httpx.AsyncClient, uid: str, pn: int = 1, ps: int = 30
+) -> Optional[dict]:
+    """
+    获取用户的视频投稿列表
+    需要延迟避免风控，pn=页码，ps=每页数量
+    """
+    backoff = 3.0
+    for attempt in range(3):
+        await asyncio.sleep(backoff)
+        try:
+            resp = await client.get(
+                f"{BILIBILI_API}/x/space/arc/search",
+                params={"mid": uid, "pn": pn, "ps": ps},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json",
+                    "Referer": "https://space.bilibili.com/",
+                },
+                timeout=15.0,
+            )
+            if resp.status_code == 412:
+                print(f"[Bilibili] get_user_videos 412, backoff {backoff}s uid={uid}")
+                backoff = min(backoff * 2, 60)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                print(f"[Bilibili] get_user_videos code={data.get('code')} uid={uid}")
+                return None
+            return data.get("data", {})
+        except Exception as e:
+            print(f"[Bilibili] get_user_videos uid={uid} error: {e}")
+            backoff = min(backoff * 2, 60)
+    return None
+
+
+async def sync_bilibili_channel_videos(db, channel_id: int, channel_id_str: str) -> int:
+    """同步bilibili频道视频到数据库"""
+    import asyncio
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        total_synced = 0
+        page = 1
+        page_size = 30
+
+        while True:
+            data = await get_user_videos(client, channel_id_str, page, page_size)
+            if not data:
+                break
+
+            vlist = data.get("list", {}).get("vlist", [])
+            if not vlist:
+                break
+
+            for v in vlist:
+                bvid = v.get("bvid", "")
+                if not bvid:
+                    continue
+
+                from app.models.models import Video, Platform
+                from datetime import datetime
+
+                existing = (
+                    db.query(Video)
+                    .filter(Video.channel_id == channel_id, Video.video_id == bvid)
+                    .first()
+                )
+
+                published = None
+                if v.get("created"):
+                    try:
+                        published = datetime.fromtimestamp(v.get("created"))
+                    except:
+                        pass
+
+                if existing:
+                    existing.title = v.get("title")
+                    existing.thumbnail_url = v.get("pic", "")
+                    existing.view_count = v.get("play", 0)
+                    existing.duration = v.get("length", "")
+                    existing.published_at = published
+                else:
+                    video = Video(
+                        channel_id=channel_id,
+                        platform=Platform.BILIBILI,
+                        video_id=bvid,
+                        title=v.get("title", ""),
+                        thumbnail_url=v.get("pic", ""),
+                        duration=v.get("length", ""),
+                        view_count=v.get("play", 0),
+                        published_at=published,
+                        status="archive",
+                    )
+                    db.add(video)
+                total_synced += 1
+
+            db.commit()
+
+            page_info = data.get("page", {})
+            count = page_info.get("count", 0)
+            if page * page_size >= count:
+                break
+            page += 1
+            await asyncio.sleep(2)
+
+        return total_synced
+
+
 async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
     await asyncio.sleep(random.uniform(0.8, 1.8))
     try:

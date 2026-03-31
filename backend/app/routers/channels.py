@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 import httpx
 from app.database import SessionLocal
 from app.schemas.schemas import (
@@ -15,8 +16,13 @@ from app.services.youtube_channel import get_youtube_channel_info, get_channel_d
 from app.services.youtube_videos import get_channel_videos as fetch_channel_videos
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_channel
-from app.services.bilibili_fetcher import get_user_info as fetch_bilibili_user_info
+from app.services.bilibili_fetcher import (
+    get_user_info as fetch_bilibili_user_info,
+    get_user_videos as fetch_bilibili_user_videos,
+    sync_bilibili_channel_videos,
+)
 from app.auth import get_current_user_optional, get_db
+from app.models.models import Video
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -138,6 +144,46 @@ async def get_channel_videos(
     if channel.platform == Platform.YOUTUBE:
         result = await fetch_channel_videos(channel.id, page, page_size, status)
         return result
+    elif channel.platform == Platform.BILIBILI:
+        await sync_bilibili_channel_videos(db, channel_id, channel.channel_id)
+
+        query = db.query(Video).filter(Video.channel_id == channel_id)
+        if status:
+            query = query.filter(Video.status == status)
+
+        total = query.count()
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+
+        videos_db = (
+            query.order_by(Video.published_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        videos = []
+        for v in videos_db:
+            videos.append(
+                {
+                    "id": v.video_id,
+                    "title": v.title or "",
+                    "thumbnail_url": v.thumbnail_url or "",
+                    "duration": v.duration or "",
+                    "view_count": v.view_count or 0,
+                    "published_at": v.published_at.strftime("%Y-%m-%d")
+                    if v.published_at
+                    else None,
+                    "status": v.status or "archive",
+                }
+            )
+
+        return PaginatedVideosResponse(
+            videos=videos,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
     else:
         return PaginatedVideosResponse(
             videos=[], total=0, page=page, page_size=page_size, total_pages=0
