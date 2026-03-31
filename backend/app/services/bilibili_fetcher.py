@@ -153,7 +153,8 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
         data = resp.json()
         if data.get("code") != 0:
             return None
-        card = data.get("data", {}).get("card", {})
+        data_body = data.get("data", {})
+        card = data_body.get("card", {})
         return {
             "name": card.get("name"),
             "avatar_url": card.get("face"),
@@ -161,10 +162,10 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
             "sign": card.get("sign"),
             "fans": card.get("fans"),
             "attention": card.get("attention"),
-            "archive_count": data.get("archive_count"),
-            "article_count": data.get("article_count"),
-            "follower": data.get("follower"),
-            "like_num": data.get("like_num"),
+            "archive_count": data_body.get("archive_count"),
+            "article_count": data_body.get("article_count"),
+            "follower": data_body.get("follower"),
+            "like_num": data_body.get("like_num"),
             "level": card.get("level_info", {}).get("current_level"),
             "official_title": card.get("Official", {}).get("title"),
             "official_type": card.get("Official", {}).get("type"),
