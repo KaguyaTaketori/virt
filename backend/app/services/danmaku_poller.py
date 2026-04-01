@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import threading
 import time
 from typing import Dict, Optional, Set
 from yt_chat_downloader import YouTubeChatDownloader
 from app.services.connection_manager import manager
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 
 class DanmakuPoller:
@@ -72,11 +75,11 @@ class VideoPoller:
                 self.continuation = self.downloader.find_continuation(yid)
 
             self._initialized = True
-            print(
+            log.info(
                 f"Initialized poller for {self.video_id}: live={self.is_live_stream}, continuation={bool(self.continuation)}"
             )
         except Exception as e:
-            print(f"Failed to initialize poller for {self.video_id}: {e}")
+            log.error(f"Failed to initialize poller for {self.video_id}: {e}")
 
     def start(self):
         """启动轮询线程"""
@@ -111,7 +114,7 @@ class VideoPoller:
 
                 time.sleep(1.0)
             except Exception as e:
-                print(f"Polling error for {self.video_id}: {e}")
+                log.error(f"Polling error for {self.video_id}: {e}")
                 time.sleep(5)
 
     def _fetch_new_messages(self):
@@ -138,7 +141,7 @@ class VideoPoller:
 
             return messages
         except Exception as e:
-            print(f"Error fetching messages: {e}")
+            log.error(f"Error fetching messages: {e}")
             return []
 
     def _parse_sticker_messages(self, chat_data: dict) -> list:
@@ -184,7 +187,7 @@ class VideoPoller:
                         messages.append(sticker_msg)
 
         except Exception as e:
-            print(f"Error parsing sticker messages: {e}")
+            log.error(f"Error parsing sticker messages: {e}")
 
         return messages
 
@@ -233,7 +236,7 @@ class VideoPoller:
                 "rank_badge_color": None,
             }
         except Exception as e:
-            print(f"Error extracting sticker: {e}")
+            log.error(f"Error extracting sticker: {e}")
             return None
 
     def _fetch_replay_once(self):
@@ -257,7 +260,7 @@ class VideoPoller:
                 if new_messages:
                     asyncio.run(self._send_messages(new_messages))
         except Exception as e:
-            print(f"Error fetching replay: {e}")
+            log.error(f"Error fetching replay: {e}")
 
     def _filter_new_messages(self, messages):
         """过滤出新消息"""

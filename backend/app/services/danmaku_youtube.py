@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from typing import List, Optional
 from pathlib import Path
@@ -7,6 +8,8 @@ from yt_chat_downloader import YouTubeChatDownloader
 from app.config import settings
 from app.models.models import Danmaku
 from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
 
 
 def get_danmaku_file_path(video_id: str) -> Path:
@@ -33,7 +36,7 @@ def download_chat(video_id: str, chat_type: str = "live") -> Optional[List[dict]
             return messages
         return None
     except Exception as e:
-        print(f"Failed to download chat for {video_id}: {e}")
+        log.error(f"Failed to download chat for {video_id}: {e}")
         return None
 
 
@@ -47,7 +50,7 @@ def get_chat_from_file(video_id: str) -> List[dict]:
         with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"Failed to read chat file for {video_id}: {e}")
+        log.error(f"Failed to read chat file for {video_id}: {e}")
         return []
 
 

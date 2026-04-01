@@ -1,6 +1,9 @@
 # backend/seed_data.py  ← 完整替换
+import logging
 from app.database import SessionLocal, engine, Base
 from app.models.models import Channel, Platform
+
+log = logging.getLogger(__name__)
 
 
 def seed_data():
@@ -54,28 +57,28 @@ def seed_data():
             bilibili_channels = [
                 {
                     "platform": Platform.BILIBILI,
-                    "channel_id": "1203217682",   # 泽音Melody — 活跃的 VTuber
+                    "channel_id": "1203217682",  # 泽音Melody — 活跃的 VTuber
                     "name": "泽音Melody",
                     "avatar_url": "",
                     "is_active": True,
                 },
                 {
                     "platform": Platform.BILIBILI,
-                    "channel_id": "672328094",    # 嘉然今天吃什么（大势 VTuber）
+                    "channel_id": "672328094",  # 嘉然今天吃什么（大势 VTuber）
                     "name": "嘉然今天吃什么",
                     "avatar_url": "",
                     "is_active": True,
                 },
                 {
                     "platform": Platform.BILIBILI,
-                    "channel_id": "672346917",    # 向晚大魔王
+                    "channel_id": "672346917",  # 向晚大魔王
                     "name": "向晚大魔王",
                     "avatar_url": "",
                     "is_active": True,
                 },
                 {
                     "platform": Platform.BILIBILI,
-                    "channel_id": "351609538",    # 珈乐Carol
+                    "channel_id": "351609538",  # 珈乐Carol
                     "name": "珈乐Carol",
                     "avatar_url": "",
                     "is_active": True,
@@ -86,13 +89,13 @@ def seed_data():
                     continue
                 db.add(Channel(**ch))
             db.commit()
-            print(f"[Seed] Inserted {len(youtube_channels+bilibili_channels)} channels")
+            log.info(f"Inserted {len(youtube_channels + bilibili_channels)} channels")
         else:
-            print("[Seed] Channels already exist, skipping channel seed")
+            log.info("Channels already exist, skipping channel seed")
 
     except Exception as e:
         db.rollback()
-        print(f"[Seed] Error: {e}")
+        log.error(f"Error: {e}")
         raise
     finally:
         db.close()

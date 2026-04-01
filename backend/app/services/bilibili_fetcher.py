@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
+
+log = logging.getLogger(__name__)
 
 BILIBILI_LIVE_API = "https://api.live.bilibili.com"
 BILIBILI_API = "https://api.bilibili.com"
@@ -53,17 +56,17 @@ async def get_user_videos(
                 timeout=15.0,
             )
             if resp.status_code == 412:
-                print(f"[Bilibili] get_user_videos 412, backoff {backoff}s uid={uid}")
+                log.warning(f"get_user_videos 412, backoff {backoff}s uid={uid}")
                 backoff = min(backoff * 2, 60)
                 continue
             resp.raise_for_status()
             data = resp.json()
             if data.get("code") != 0:
-                print(f"[Bilibili] get_user_videos code={data.get('code')} uid={uid}")
+                log.warning(f"get_user_videos code={data.get('code')} uid={uid}")
                 return None
             return data.get("data", {})
         except Exception as e:
-            print(f"[Bilibili] get_user_videos uid={uid} error: {e}")
+            log.error(f"get_user_videos uid={uid} error: {e}")
             backoff = min(backoff * 2, 60)
     return None
 
@@ -173,7 +176,7 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
             "vip_status": card.get("vip", {}).get("status"),
         }
     except Exception as e:
-        print(f"[Bilibili] get_user_info uid={uid} error: {e}")
+        log.error(f"get_user_info uid={uid} error: {e}")
         return None
 
 
@@ -195,30 +198,28 @@ async def _fetch_single_room(
                 timeout=15.0,
             )
         except httpx.TimeoutException:
-            print(f"[Bilibili] 超时 uid={uid} attempt={attempt + 1}")
+            log.warning(f"超时 uid={uid} attempt={attempt + 1}")
             await asyncio.sleep(5)
             continue
         except httpx.RequestError as e:
-            print(f"[Bilibili] 网络错误 uid={uid}: {e}")
+            log.error(f"网络错误 uid={uid}: {e}")
             return None
 
         if resp.status_code == 412:
             wait = current_backoff[0]
-            print(
-                f"[Bilibili] 风控 412 uid={uid}，退避 {wait}s (attempt {attempt + 1})"
-            )
+            log.warning(f"风控 412 uid={uid}，退避 {wait}s (attempt {attempt + 1})")
             await asyncio.sleep(wait)
             current_backoff[0] = min(wait * _BACKOFF_FACTOR, _BACKOFF_MAX)
             continue
 
         if resp.status_code != 200:
-            print(f"[Bilibili] 非预期状态 {resp.status_code} uid={uid}")
+            log.warning(f"非预期状态 {resp.status_code} uid={uid}")
             return None
 
         try:
             data = resp.json()
         except Exception:
-            print(f"[Bilibili] JSON 解析失败 uid={uid}")
+            log.error(f"JSON 解析失败 uid={uid}")
             return None
 
         if data.get("code") == 0:
@@ -238,7 +239,7 @@ async def _fetch_single_room(
         current_backoff[0] = _BACKOFF_INIT
         return None  # code != 0，认为该 uid 无直播间
 
-    print(f"[Bilibili] uid={uid} 重试耗尽，跳过")
+    log.warning(f"uid={uid} 重试耗尽，跳过")
     return None
 
 
@@ -254,7 +255,7 @@ async def get_rooms_by_uids(
     backoff = [_BACKOFF_INIT]  # 共享退避状态
 
     batches = [uids[i : i + _BATCH_SIZE] for i in range(0, len(uids), _BATCH_SIZE)]
-    print(f"[Bilibili] 共 {len(uids)} 个 uid，分 {len(batches)} 批处理")
+    log.info(f"共 {len(uids)} 个 uid，分 {len(batches)} 批处理")
 
     for batch_idx, batch in enumerate(batches):
         for uid in batch:
@@ -266,8 +267,8 @@ async def get_rooms_by_uids(
         # 批次间冷却（最后一批不用等）
         if batch_idx < len(batches) - 1:
             sleep_time = random.uniform(*_BATCH_SLEEP)
-            print(
-                f"[Bilibili] 批次 {batch_idx + 1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s"
+            log.info(
+                f"批次 {batch_idx + 1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s"
             )
             await asyncio.sleep(sleep_time)
 

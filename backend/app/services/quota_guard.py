@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import date
 from pathlib import Path
 from typing import Literal
+
+log = logging.getLogger(__name__)
 
 QUOTA_FILE = Path("./quota_state.json")
 DAILY_LIMIT = 9_500
 DISCOVER_RESERVE = 2_000
 
 COSTS: dict[str, int] = {
-    "search.list":        100,
-    "videos.list":        1,
-    "channels.list":      1,
+    "search.list": 100,
+    "videos.list": 1,
+    "channels.list": 1,
     "playlistItems.list": 1,
 }
 
@@ -21,6 +24,7 @@ _lock = threading.Lock()
 
 
 # ── 内部 I/O ──────────────────────────────────────────────────────────────────
+
 
 def _load() -> dict:
     """读取配额状态，如果不是今天的数据则重置。"""
@@ -40,17 +44,18 @@ def _save(data: dict) -> None:
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────
 
+
 def status() -> dict:
     """返回当日配额状态，供 /api/admin/quota 端点使用。"""
     with _lock:
         data = _load()
         used = data["used"]
         return {
-            "date":      data["date"],
-            "used":      used,
-            "limit":     DAILY_LIMIT,
+            "date": data["date"],
+            "used": used,
+            "limit": DAILY_LIMIT,
             "remaining": max(0, DAILY_LIMIT - used),
-            "ops":       data.get("ops", {}),
+            "ops": data.get("ops", {}),
         }
 
 
@@ -66,17 +71,18 @@ def can_spend(op: str, count: int = 1) -> bool:
         remaining = DAILY_LIMIT - data["used"]
 
         if remaining < cost:
-            print(f"[QuotaGuard] 拒绝 {op}×{count}（需要 {cost}，剩余 {remaining}）")
+            log.warning(f"拒绝 {op}×{count}（需要 {cost}，剩余 {remaining}）")
             return False
 
         if op == "search.list" and (remaining - cost) < DISCOVER_RESERVE:
-            print(
-                f"[QuotaGuard] search.list 被储备保护拦截"
+            log.warning(
+                f"search.list 被储备保护拦截"
                 f"（剩余 {remaining}，扣后 {remaining - cost} < 储备 {DISCOVER_RESERVE}）"
             )
             return False
 
         return True
+
 
 def spend(op: str, count: int = 1) -> int:
     """
@@ -90,7 +96,9 @@ def spend(op: str, count: int = 1) -> int:
         data["ops"][op] = data["ops"].get(op, 0) + count
         _save(data)
         remaining = max(0, DAILY_LIMIT - data["used"])
-        print(f"[QuotaGuard] {op}×{count} -{cost} | 今日已用 {data['used']}/{DAILY_LIMIT}（剩余 {remaining}）")
+        log.info(
+            f"{op}×{count} -{cost} | 今日已用 {data['used']}/{DAILY_LIMIT}（剩余 {remaining}）"
+        )
         return remaining
 
 

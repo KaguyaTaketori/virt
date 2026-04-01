@@ -1,11 +1,12 @@
 import httpx
+import logging
 import math
 import subprocess
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, and_, or_
 from app.config import settings
 from app.database import SessionLocal
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
@@ -14,8 +15,11 @@ from app.services.youtube_backfill import backfill_channel_videos
 from app.database_async import AsyncSessionFactory
 from app.services.youtube_sync import sync_channel_videos
 
+log = logging.getLogger(__name__)
+
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
+LIVE_ARCHIVE_DURATION_THRESHOLD_MINUTES = 30  # 以“视频总时长”为归类依据
 
 
 def _parse_duration(duration_str: Optional[str]) -> Optional[str]:
@@ -78,10 +82,28 @@ def _get_videos_from_db(
 
     if status_filter == "live":
         # 直播 Tab：展示“直播中 / 预约 / 已结束存档”
-        # 对应的状态值：live / upcoming / archive
-        query = query.filter(Video.status.in_(["live", "upcoming", "archive"]))
+        # 但 ended 的 archive 在 YouTube 通常会在“很短时间（约半小时）”内归位到 Videos Tab，
+        # 但你希望以“视频总时长”作为归类依据：
+        # - archive 的 duration_secs <= 30 分钟：更偏向进入 Videos tab（Live tab 不展示）
+        # - archive 的 duration_secs >  30 分钟：仍保留在 Live tab（作为长时直播回放归档）
+        duration_cutoff_secs = LIVE_ARCHIVE_DURATION_THRESHOLD_MINUTES * 60
+
+        query = query.filter(
+            or_(
+                Video.status.in_(["live", "upcoming"]),
+                and_(
+                    Video.status == "archive",
+                    Video.live_ended_at.isnot(None),
+                    Video.duration_secs.isnot(None),
+                    Video.duration_secs > duration_cutoff_secs,
+                ),
+            )
+        )
+    elif status_filter == "videos":
+        # 视频 Tab：移除 archive，专注展示上传视频（upload）
+        query = query.filter(Video.status == "upload")
     elif status_filter == "upload":
-        # 视频 Tab：只展示自制上传视频（upload）
+        # 仅展示自制上传视频（upload）
         query = query.filter(Video.status == "upload")
     elif status_filter == "short":
         query = query.filter(Video.status == "short")  # Shorts Tab：显示Shorts
@@ -172,7 +194,9 @@ async def _update_videos_via_api(
 ) -> bool:
     """通过YouTube API更新视频，返回是否配额超限"""
     # Search-based video discovery 已禁用：全量/增量更新改用 youtube_sync/youtube_backfill。
-    raise RuntimeError("Search API disabled. Use youtube_sync/youtube_backfill instead.")
+    raise RuntimeError(
+        "Search API disabled. Use youtube_sync/youtube_backfill instead."
+    )
 
     if not settings.youtube_api_key:
         return True
@@ -282,7 +306,7 @@ async def _update_videos_via_api(
         return False
 
     except Exception as e:
-        print(f"[YouTube Videos] API update error: {e}")
+        log.error(f"API update error: {e}")
         return True
 
 
@@ -309,7 +333,7 @@ async def _update_videos_via_yt_dlp(
         )
 
         if result.returncode != 0:
-            print(f"[YouTube Videos] yt-dlp videos error: {result.stderr}")
+            log.error(f"yt-dlp videos error: {result.stderr}")
             return
 
         for line in result.stdout.strip().split("\n"):
@@ -370,12 +394,12 @@ async def _update_videos_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        print(f"[YouTube Videos] yt-dlp added uploaded videos")
+        log.info("yt-dlp added uploaded videos")
 
     except subprocess.TimeoutExpired:
-        print("[YouTube Videos] yt-dlp videos timeout")
+        log.warning("yt-dlp videos timeout")
     except Exception as e:
-        print(f"[YouTube Videos] yt-dlp videos error: {e}")
+        log.error(f"yt-dlp videos error: {e}")
 
 
 async def _update_live_via_yt_dlp(
@@ -464,12 +488,12 @@ async def _update_live_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        print(f"[YouTube Videos] yt-dlp added live streams")
+        log.info("yt-dlp added live streams")
 
     except subprocess.TimeoutExpired:
-        print("[YouTube Videos] yt-dlp streams timeout")
+        log.warning("yt-dlp streams timeout")
     except Exception as e:
-        print(f"[YouTube Videos] yt-dlp streams error: {e}")
+        log.error(f"yt-dlp streams error: {e}")
 
 
 async def _update_shorts_via_yt_dlp(
@@ -551,12 +575,12 @@ async def _update_shorts_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        print(f"[YouTube Videos] yt-dlp added shorts")
+        log.info("yt-dlp added shorts")
 
     except subprocess.TimeoutExpired:
-        print("[YouTube Videos] yt-dlp shorts timeout")
+        log.warning("yt-dlp shorts timeout")
     except Exception as e:
-        print(f"[YouTube Videos] yt-dlp shorts error: {e}")
+        log.error(f"yt-dlp shorts error: {e}")
 
 
 async def _full_refresh_videos(db: Session, channel: Channel):

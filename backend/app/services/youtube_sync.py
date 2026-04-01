@@ -17,6 +17,7 @@ YouTube 视频元数据低消耗同步模块。
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,22 +29,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import Channel, Video
 from enum import Enum
 
+log = logging.getLogger(__name__)
+
+
 class VideoStatusEnum(str, Enum):
-    LIVE     = "live"
+    LIVE = "live"
     UPCOMING = "upcoming"
-    ARCHIVE  = "archive"
-    UPLOAD   = "upload"
-    SHORT    = "short"
+    ARCHIVE = "archive"
+    UPLOAD = "upload"
+    SHORT = "short"
+
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
-_YT_API_BASE  = "https://www.googleapis.com/youtube/v3"
-_BATCH_SIZE   = 50   # Videos.list / PlaylistItems.list 每次最多 50 条
+_YT_API_BASE = "https://www.googleapis.com/youtube/v3"
+_BATCH_SIZE = 50  # Videos.list / PlaylistItems.list 每次最多 50 条
 _HTTP_TIMEOUT = 20.0  # 秒
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 工具函数
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _uc_to_uu(channel_id: str) -> Optional[str]:
     """
@@ -86,8 +92,8 @@ def _parse_duration(iso_duration: Optional[str]) -> tuple[Optional[str], int]:
     if not match:
         return None, 0
 
-    days    = int(match.group(1) or 0)
-    hours   = int(match.group(2) or 0) + days * 24
+    days = int(match.group(1) or 0)
+    hours = int(match.group(2) or 0) + days * 24
     minutes = int(match.group(3) or 0)
     seconds = int(match.group(4) or 0)
 
@@ -144,6 +150,7 @@ def _extract_thumbnail(snippet: dict) -> Optional[str]:
 # 通用 Upsert 辅助（Python 层，跨库兼容）
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def _load_existing_video_map(
     session: AsyncSession, channel_id: int
 ) -> dict[str, Video]:
@@ -154,10 +161,9 @@ async def _load_existing_video_map(
       避免在循环中对每个 video_id 单独 SELECT，减少 N+1 查询。
       此映射表在同一次 sync 调用内共享，内存开销极小（~几千条记录）。
     """
-    result = await session.execute(
-        select(Video).where(Video.channel_id == channel_id)
-    )
+    result = await session.execute(select(Video).where(Video.channel_id == channel_id))
     return {v.video_id: v for v in result.scalars().all()}
+
 
 async def _get_table_columns(session: AsyncSession, table_name: str) -> set[str]:
     """读取数据库真实存在的列名（避免模型/库 schema 漂移导致 SQL 报错）。"""
@@ -194,9 +200,7 @@ async def _upsert_video(
     now = datetime.now(timezone.utc)
 
     # 过滤到“数据库里真实存在”的列
-    filtered_video_data = {
-        k: v for k, v in video_data.items() if k in db_video_columns
-    }
+    filtered_video_data = {k: v for k, v in video_data.items() if k in db_video_columns}
 
     # fetched_at 在现有表里通常存在；若不存在则不写
     if "fetched_at" in db_video_columns:
@@ -230,6 +234,7 @@ async def _upsert_video(
 # YouTube API 调用层
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def _fetch_playlist_page(
     client: httpx.AsyncClient,
     api_key: str,
@@ -242,8 +247,8 @@ async def _fetch_playlist_page(
     消耗：1 配额/次。
     """
     params: dict = {
-        "key":        api_key,
-        "part":       "snippet",
+        "key": api_key,
+        "part": "snippet",
         "playlistId": playlist_id,
         "maxResults": _BATCH_SIZE,
     }
@@ -258,12 +263,12 @@ async def _fetch_playlist_page(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        print(
-            f"[YT Sync] PlaylistItems.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
+        log.error(
+            f"PlaylistItems.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
         )
         return [], None
     except httpx.RequestError as e:
-        print(f"[YT Sync] PlaylistItems.list network error: {e}")
+        log.error(f"PlaylistItems.list network error: {e}")
         return [], None
 
     data = resp.json()
@@ -290,9 +295,9 @@ async def _fetch_video_details_batch(
         return []
 
     params: dict = {
-        "key":  api_key,
+        "key": api_key,
         "part": "snippet,contentDetails,statistics,liveStreamingDetails",
-        "id":   ",".join(video_ids),
+        "id": ",".join(video_ids),
     }
 
     try:
@@ -303,12 +308,12 @@ async def _fetch_video_details_batch(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        print(
-            f"[YT Sync] Videos.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
+        log.error(
+            f"Videos.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
         )
         return []
     except httpx.RequestError as e:
-        print(f"[YT Sync] Videos.list network error: {e}")
+        log.error(f"Videos.list network error: {e}")
         return []
 
     return resp.json().get("items", [])
@@ -318,35 +323,36 @@ def _parse_video_item(channel: Channel, item: dict) -> dict:
     """
     将 YouTube API 的 video item dict 解析为可直接用于 Upsert 的字段字典。
     """
-    video_id: str     = item["id"]
-    snippet: dict     = item.get("snippet", {})
-    content: dict     = item.get("contentDetails", {})
-    stats: dict       = item.get("statistics", {})
-    live: dict        = item.get("liveStreamingDetails") or {}
+    video_id: str = item["id"]
+    snippet: dict = item.get("snippet", {})
+    content: dict = item.get("contentDetails", {})
+    stats: dict = item.get("statistics", {})
+    live: dict = item.get("liveStreamingDetails") or {}
 
     duration_fmt, total_secs = _parse_duration(content.get("duration"))
     status = _determine_status(item, total_secs)
 
     return {
-        "video_id":       video_id,
-        "title":          snippet.get("title"),
-        "thumbnail_url":  _extract_thumbnail(snippet),
-        "duration":       duration_fmt,
-        "duration_secs":  total_secs if total_secs > 0 else None,
-        "view_count":     int(stats.get("viewCount", 0)),
-        "like_count":     int(stats["likeCount"]) if stats.get("likeCount") else None,
-        "status":         status.value,
-        "published_at":   _parse_dt(snippet.get("publishedAt")),
-        "scheduled_at":   _parse_dt(live.get("scheduledStartTime")),
-        "live_started_at":_parse_dt(live.get("actualStartTime")),
-        "live_ended_at":  _parse_dt(live.get("actualEndTime")),
-        "live_chat_id":   live.get("activeLiveChatId"),
+        "video_id": video_id,
+        "title": snippet.get("title"),
+        "thumbnail_url": _extract_thumbnail(snippet),
+        "duration": duration_fmt,
+        "duration_secs": total_secs if total_secs > 0 else None,
+        "view_count": int(stats.get("viewCount", 0)),
+        "like_count": int(stats["likeCount"]) if stats.get("likeCount") else None,
+        "status": status.value,
+        "published_at": _parse_dt(snippet.get("publishedAt")),
+        "scheduled_at": _parse_dt(live.get("scheduledStartTime")),
+        "live_started_at": _parse_dt(live.get("actualStartTime")),
+        "live_ended_at": _parse_dt(live.get("actualEndTime")),
+        "live_chat_id": live.get("activeLiveChatId"),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 公开核心函数：频道级同步
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def sync_channel_videos(
     session: AsyncSession,
@@ -380,8 +386,8 @@ async def sync_channel_videos(
     """
     playlist_id = _uc_to_uu(channel.channel_id)
     if not playlist_id:
-        print(
-            f"[YT Sync] Cannot convert channel_id={channel.channel_id} to playlist_id, skipping"
+        log.warning(
+            f"Cannot convert channel_id={channel.channel_id} to playlist_id, skipping"
         )
         return 0
 
@@ -429,8 +435,8 @@ async def sync_channel_videos(
     channel.videos_last_fetched = datetime.now(timezone.utc)
     await session.commit()
 
-    print(
-        f"[YT Sync] Channel {channel.name!r} sync complete | "
+    log.info(
+        f"Channel {channel.name!r} sync complete | "
         f"full_refresh={full_refresh} | processed={total_processed}"
     )
     return total_processed
@@ -439,6 +445,7 @@ async def sync_channel_videos(
 # ─────────────────────────────────────────────────────────────────────────────
 # 公开核心函数：单条视频更新（供 WebSub 后台任务调用）
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def fetch_and_upsert_single_video(
     session: AsyncSession,
@@ -456,7 +463,7 @@ async def fetch_and_upsert_single_video(
         items = await _fetch_video_details_batch(client, api_key, [video_id])
 
     if not items:
-        print(f"[YT Sync] Single update: video_id={video_id!r} no data, skipping")
+        log.warning(f"Single update: video_id={video_id!r} no data, skipping")
         return None
 
     video_data = _parse_video_item(channel, items[0])
@@ -471,8 +478,8 @@ async def fetch_and_upsert_single_video(
     )
 
     await session.commit()
-    print(
-        f"[YT Sync] Single upsert complete | video_id={video_id!r} "
+    log.info(
+        f"Single upsert complete | video_id={video_id!r} "
         f"title={video_data.get('title')!r} status={video_data.get('status')}"
     )
     return video_data

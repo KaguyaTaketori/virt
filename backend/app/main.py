@@ -1,3 +1,6 @@
+import os
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -14,12 +17,48 @@ from app.routers import (
 from app.services.youtube_websub import router as youtube_websub_router
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
+from app.config import settings
+
+log = logging.getLogger(__name__)
+
+
+async def _initial_websub_subscription():
+    """首次启动时自动订阅所有活跃的 YouTube 频道"""
+    callback_url = settings.websub_callback_url
+    if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
+        log.info("未配置回调 URL，跳过首次订阅")
+        return
+
+    from app.database_async import AsyncSessionFactory
+    from sqlalchemy import select, func
+    from app.models.models import WebSubSubscription
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(func.count(WebSubSubscription.id)))
+        has_subscriptions = result.scalar() > 0
+
+    if has_subscriptions:
+        log.info("已有订阅记录，跳过首次订阅")
+        return
+
+    from app.services.youtube_websub import subscribe_all_active_channels
+
+    log.info("首次启动，开始自动订阅...")
+    try:
+        await subscribe_all_active_channels(callback_url)
+    except Exception as e:
+        log.error(f"首次订阅失败: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     Base.metadata.create_all(bind=engine)
     start_scheduler()
+    await _initial_websub_subscription()
     yield
 
 
