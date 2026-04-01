@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     from app.models.models import WebSubSubscription
     from app.config import settings
 
+    Base.metadata.create_all(bind=engine)
+
     callback_url = settings.websub_callback_url
     if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
         logger.info("未配置回调 URL，跳过首次订阅")
@@ -41,7 +43,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error("首次订阅失败: {}", e)
 
-    Base.metadata.create_all(bind=engine)
     start_scheduler()
     yield
 
