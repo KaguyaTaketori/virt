@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+import time
+
+from app.loguru_config import logger 
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.routers import (
@@ -14,7 +18,6 @@ from app.routers import (
 from app.services.youtube_websub import router as youtube_websub_router
 from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
-from app.loguru_config import logger
 
 
 @asynccontextmanager
@@ -61,6 +64,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+    formatted_process_time = f"{process_time:.2f}ms"
+    logger.info(
+        f"Request: {request.method} {request.url.path} | "
+        f"Status: {response.status_code} | "
+        f"Time: {formatted_process_time}"
+    )
+    return response
 
 app.include_router(streams.router)
 app.include_router(channels.router)
