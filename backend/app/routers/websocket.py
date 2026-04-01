@@ -1,7 +1,7 @@
 # backend/app/routers/websocket.py
 import asyncio
 import json
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.connection_manager import manager
 from app.services.danmaku_poller import poller

@@ -1,5 +1,5 @@
 import asyncio
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import threading
 import time
 from typing import Dict, Optional, Set

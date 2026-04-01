@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import random
 from datetime import datetime, timezone
 from typing import Optional

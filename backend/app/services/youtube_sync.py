@@ -17,7 +17,7 @@ YouTube 视频元数据低消耗同步模块。
 from __future__ import annotations
 
 import asyncio
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import re
 from datetime import datetime, timezone
 from typing import Optional

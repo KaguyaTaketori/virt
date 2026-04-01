@@ -1,5 +1,5 @@
 import json
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import os
 from typing import List, Optional
 from pathlib import Path

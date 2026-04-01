@@ -1,5 +1,5 @@
 import httpx
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import re
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session

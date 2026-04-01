@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import threading
 from datetime import date
 from pathlib import Path

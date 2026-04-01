@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone

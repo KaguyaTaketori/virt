@@ -1,7 +1,7 @@
 # backend/app/scheduler_tasks.py
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import httpx
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import os
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session

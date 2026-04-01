@@ -1,5 +1,5 @@
 import httpx
-from app.loggeruru_config import loggerger
+from app.loguru_config import logger
 import math
 import subprocess
 import json
