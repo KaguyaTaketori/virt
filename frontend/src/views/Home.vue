@@ -1,4 +1,3 @@
-<!-- frontend/src/views/Home.vue -->
 <template>
   <div class="container mx-auto px-4 py-8">
     <div class="mb-6">
@@ -34,7 +33,7 @@
           referrerpolicy="no-referrer"
         />
         <span>{{ org.name }}</span>
-        <span class="opacity-60 text-xs">({{ getOrgCount(org.id) }})</span>
+        <span class="opacity-60 text-xs">({{ orgCountMap[org.id] ?? 0 }})</span>
       </button>
     </div>
 
@@ -50,7 +49,7 @@
           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'"
       >
         {{ s.label }}
-        <span class="ml-1 opacity-70">({{ getStatusCount(s.value) }})</span>
+        <span class="ml-1 opacity-70">({{ statusCountMap[s.value] }})</span>
       </button>
     </div>
 
@@ -61,7 +60,7 @@
 
     <div v-else-if="store.error" class="text-center py-12 text-red-400">
       <p>加载失败：{{ store.error }}</p>
-      <button @click="store.fetchStreams(true)" class="mt-4 px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 text-sm">
+      <button @click="store.fetchStreams()" class="mt-4 px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 text-sm">
         重试
       </button>
     </div>
@@ -85,9 +84,9 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useStreamStore, type StreamStatus, type Stream } from '../stores/stream'
-import { useOrgStore } from '../stores/org'
-import StreamCard from '../components/StreamCard.vue'
+import { useStreamStore, type StreamStatus, type Stream } from '@/stores/stream'
+import { useOrgStore } from '@/stores/org'
+import StreamCard from '@/components/StreamCard.vue'
 
 const store    = useStreamStore()
 const orgStore = useOrgStore()
@@ -100,38 +99,40 @@ const statuses: { value: StreamStatus; label: string }[] = [
   { value: 'offline',  label: '离线'   },
 ]
 
-const emptyDesc = computed(() => {
-  const orgName = store.currentOrgId
-    ? orgStore.organizations.find(o => o.id === store.currentOrgId)?.name ?? ''
-    : ''
-  const suffix = orgName ? `（${orgName}）` : ''
-  switch (store.currentStatus) {
-    case 'live':     return `等待主播开播${suffix}...`
-    case 'upcoming': return `暂无预约直播${suffix}`
-    case 'archive':  return `暂无录播${suffix}`
-    case 'offline':  return `主播当前离线${suffix}`
-    default:         return ''
+const statusCountMap = computed<Record<StreamStatus, number>>(() => {
+  const orgId = store.currentOrgId
+  const byOrg = (s: Stream) => orgId === null || (s as any).org_id === orgId
+ 
+  return {
+    live:     store.liveStreams.filter(byOrg).length,
+    upcoming: store.upcomingStreams.filter(byOrg).length,
+    archive:  store.archiveStreams.filter(byOrg).length,
+    offline:  store.offlineStreams.filter(byOrg).length,
   }
 })
-
-// 带 org 过滤的各 status 计数
-function getStatusCount(status: StreamStatus): number {
-  const orgId = store.currentOrgId
-  const filter = (s: Stream) => orgId === null || (s as any).org_id === orgId
-  switch (status) {
-    case 'live':     return store.liveStreams.filter(filter).length
-    case 'upcoming': return store.upcomingStreams.filter(filter).length
-    case 'archive':  return store.archiveStreams.filter(filter).length
-    case 'offline':  return store.offlineStreams.filter(filter).length
-    default:         return 0
+ 
+const orgCountMap = computed<Record<number, number>>(() => {
+  const base = store.streams.filter((s) => s.status === store.currentStatus)
+  const result: Record<number, number> = {}
+  for (const org of orgStore.organizations) {
+    result[org.id] = base.filter((s) => (s as any).org_id === org.id).length
   }
-}
+  return result
+})
 
-// 各机构在当前 status tab 下的直播数
-function getOrgCount(orgId: number): number {
-  const base = store.streams.filter(s => s.status === store.currentStatus)
-  return base.filter(s => (s as any).org_id === orgId).length
-}
+const emptyDesc = computed(() => {
+  const orgName = store.currentOrgId
+    ? orgStore.organizations.find((o) => o.id === store.currentOrgId)?.name ?? ''
+    : ''
+  const suffix = orgName ? `（${orgName}）` : ''
+  const map: Record<StreamStatus, string> = {
+    live:     `等待主播开播${suffix}...`,
+    upcoming: `暂无预约直播${suffix}`,
+    archive:  `暂无录播${suffix}`,
+    offline:  `主播当前离线${suffix}`,
+  }
+  return map[store.currentStatus] ?? ''
+})
 
 onMounted(async () => {
   await store.fetchStreams()
