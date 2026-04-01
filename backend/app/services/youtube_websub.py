@@ -289,12 +289,12 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
                 session, channel, video_id, _YT_API_KEY
             )
             if video:
-            logger.info(
-                "✓ video_id={} title={} status={}",
-                video_id,
-                video.get('title'),
-                video.get('status')
-            )
+                logger.info(
+                    "✓ video_id={} title={} status={}",
+                    video_id,
+                    video.get("title"),
+                    video.get("status"),
+                )
         except Exception as e:
             logger.error("✗ 处理 video_id={} 异常: {}", video_id, e)
             return
