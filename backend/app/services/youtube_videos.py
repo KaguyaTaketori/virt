@@ -1,5 +1,5 @@
 import httpx
-import logging
+from app.loggeruru_config import loggerger
 import math
 import subprocess
 import json
@@ -14,8 +14,6 @@ from app.models.models import Video, Channel
 from app.services.youtube_backfill import backfill_channel_videos
 from app.database_async import AsyncSessionFactory
 from app.services.youtube_sync import sync_channel_videos
-
-log = logging.getLogger(__name__)
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
@@ -306,7 +304,7 @@ async def _update_videos_via_api(
         return False
 
     except Exception as e:
-        log.error(f"API update error: {e}")
+        logger.error("API update error: {}", e)
         return True
 
 
@@ -333,7 +331,7 @@ async def _update_videos_via_yt_dlp(
         )
 
         if result.returncode != 0:
-            log.error(f"yt-dlp videos error: {result.stderr}")
+            logger.error("yt-dlp videos error: {}", result.stderr)
             return
 
         for line in result.stdout.strip().split("\n"):
@@ -394,12 +392,12 @@ async def _update_videos_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        log.info("yt-dlp added uploaded videos")
+        logger.info("yt-dlp added uploaded videos")
 
     except subprocess.TimeoutExpired:
-        log.warning("yt-dlp videos timeout")
+        logger.warning("yt-dlp videos timeout")
     except Exception as e:
-        log.error(f"yt-dlp videos error: {e}")
+        logger.error("yt-dlp videos error: {}", e)
 
 
 async def _update_live_via_yt_dlp(
@@ -488,12 +486,12 @@ async def _update_live_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        log.info("yt-dlp added live streams")
+        logger.info("yt-dlp added live streams")
 
     except subprocess.TimeoutExpired:
-        log.warning("yt-dlp streams timeout")
+        logger.warning("yt-dlp streams timeout")
     except Exception as e:
-        log.error(f"yt-dlp streams error: {e}")
+        logger.error("yt-dlp streams error: {}", e)
 
 
 async def _update_shorts_via_yt_dlp(
@@ -575,12 +573,12 @@ async def _update_shorts_via_yt_dlp(
             db.add(video)
 
         db.commit()
-        log.info("yt-dlp added shorts")
+        logger.info("yt-dlp added shorts")
 
     except subprocess.TimeoutExpired:
-        log.warning("yt-dlp shorts timeout")
+        logger.warning("yt-dlp shorts timeout")
     except Exception as e:
-        log.error(f"yt-dlp shorts error: {e}")
+        logger.error("yt-dlp shorts error: {}", e)
 
 
 async def _full_refresh_videos(db: Session, channel: Channel):

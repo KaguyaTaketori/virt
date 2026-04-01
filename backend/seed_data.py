@@ -1,9 +1,7 @@
 # backend/seed_data.py  ← 完整替换
-import logging
+from app.loggeruru_config import loggerger
 from app.database import SessionLocal, engine, Base
 from app.models.models import Channel, Platform
-
-log = logging.getLogger(__name__)
 
 
 def seed_data():
@@ -89,13 +87,15 @@ def seed_data():
                     continue
                 db.add(Channel(**ch))
             db.commit()
-            log.info(f"Inserted {len(youtube_channels + bilibili_channels)} channels")
+            logger.info(
+                "Inserted {} channels", len(youtube_channels + bilibili_channels)
+            )
         else:
-            log.info("Channels already exist, skipping channel seed")
+            logger.info("Channels already exist, skipping channel seed")
 
     except Exception as e:
         db.rollback()
-        log.error(f"Error: {e}")
+        logger.error("Error: {}", e)
         raise
     finally:
         db.close()

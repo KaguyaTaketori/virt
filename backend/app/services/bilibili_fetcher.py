@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from app.loggeruru_config import loggerger
 import random
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
-
-log = logging.getLogger(__name__)
 
 BILIBILI_LIVE_API = "https://api.live.bilibili.com"
 BILIBILI_API = "https://api.bilibili.com"
@@ -56,17 +54,17 @@ async def get_user_videos(
                 timeout=15.0,
             )
             if resp.status_code == 412:
-                log.warning(f"get_user_videos 412, backoff {backoff}s uid={uid}")
+                logger.warning("get_user_videos 412, backoff {}s uid={}", backoff, uid)
                 backoff = min(backoff * 2, 60)
                 continue
             resp.raise_for_status()
             data = resp.json()
             if data.get("code") != 0:
-                log.warning(f"get_user_videos code={data.get('code')} uid={uid}")
+                logger.warning("get_user_videos code={} uid={}", data.get("code"), uid)
                 return None
             return data.get("data", {})
         except Exception as e:
-            log.error(f"get_user_videos uid={uid} error: {e}")
+            logger.error("get_user_videos uid={} error: {}", uid, e)
             backoff = min(backoff * 2, 60)
     return None
 
@@ -176,7 +174,7 @@ async def get_user_info(client: httpx.AsyncClient, uid: str) -> Optional[dict]:
             "vip_status": card.get("vip", {}).get("status"),
         }
     except Exception as e:
-        log.error(f"get_user_info uid={uid} error: {e}")
+        logger.error("get_user_info uid={} error: {}", uid, e)
         return None
 
 
@@ -198,28 +196,30 @@ async def _fetch_single_room(
                 timeout=15.0,
             )
         except httpx.TimeoutException:
-            log.warning(f"超时 uid={uid} attempt={attempt + 1}")
+            logger.warning("超时 uid={} attempt={}", uid, attempt + 1)
             await asyncio.sleep(5)
             continue
         except httpx.RequestError as e:
-            log.error(f"网络错误 uid={uid}: {e}")
+            logger.error("网络错误 uid={}: {}", uid, e)
             return None
 
         if resp.status_code == 412:
             wait = current_backoff[0]
-            log.warning(f"风控 412 uid={uid}，退避 {wait}s (attempt {attempt + 1})")
+            logger.warning(
+                "风控 412 uid={}，退避 {}s (attempt {})", uid, wait, attempt + 1
+            )
             await asyncio.sleep(wait)
             current_backoff[0] = min(wait * _BACKOFF_FACTOR, _BACKOFF_MAX)
             continue
 
         if resp.status_code != 200:
-            log.warning(f"非预期状态 {resp.status_code} uid={uid}")
+            logger.warning("非预期状态 {} uid={}", resp.status_code, uid)
             return None
 
         try:
             data = resp.json()
         except Exception:
-            log.error(f"JSON 解析失败 uid={uid}")
+            logger.error("JSON 解析失败 uid={}", uid)
             return None
 
         if data.get("code") == 0:
@@ -239,7 +239,7 @@ async def _fetch_single_room(
         current_backoff[0] = _BACKOFF_INIT
         return None  # code != 0，认为该 uid 无直播间
 
-    log.warning(f"uid={uid} 重试耗尽，跳过")
+    logger.warning("uid={} 重试耗尽，跳过", uid)
     return None
 
 
@@ -255,7 +255,7 @@ async def get_rooms_by_uids(
     backoff = [_BACKOFF_INIT]  # 共享退避状态
 
     batches = [uids[i : i + _BATCH_SIZE] for i in range(0, len(uids), _BATCH_SIZE)]
-    log.info(f"共 {len(uids)} 个 uid，分 {len(batches)} 批处理")
+    logger.info("共 {} 个 uid，分 {} 批处理", len(uids), len(batches))
 
     for batch_idx, batch in enumerate(batches):
         for uid in batch:
@@ -267,7 +267,7 @@ async def get_rooms_by_uids(
         # 批次间冷却（最后一批不用等）
         if batch_idx < len(batches) - 1:
             sleep_time = random.uniform(*_BATCH_SLEEP)
-            log.info(
+            logger.info(
                 f"批次 {batch_idx + 1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s"
             )
             await asyncio.sleep(sleep_time)

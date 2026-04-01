@@ -17,7 +17,7 @@ YouTube 视频元数据低消耗同步模块。
 from __future__ import annotations
 
 import asyncio
-import logging
+from app.loggeruru_config import loggerger
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,8 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Channel, Video
 from enum import Enum
-
-log = logging.getLogger(__name__)
 
 
 class VideoStatusEnum(str, Enum):
@@ -263,12 +261,12 @@ async def _fetch_playlist_page(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        log.error(
+        logger.error(
             f"PlaylistItems.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
         )
         return [], None
     except httpx.RequestError as e:
-        log.error(f"PlaylistItems.list network error: {e}")
+        logger.error("PlaylistItems.list network error: {}", e)
         return [], None
 
     data = resp.json()
@@ -308,12 +306,12 @@ async def _fetch_video_details_batch(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        log.error(
+        logger.error(
             f"Videos.list HTTP error {e.response.status_code}: {e.response.text[:200]}"
         )
         return []
     except httpx.RequestError as e:
-        log.error(f"Videos.list network error: {e}")
+        logger.error("Videos.list network error: {}", e)
         return []
 
     return resp.json().get("items", [])
@@ -386,7 +384,7 @@ async def sync_channel_videos(
     """
     playlist_id = _uc_to_uu(channel.channel_id)
     if not playlist_id:
-        log.warning(
+        logger.warning(
             f"Cannot convert channel_id={channel.channel_id} to playlist_id, skipping"
         )
         return 0
@@ -435,7 +433,7 @@ async def sync_channel_videos(
     channel.videos_last_fetched = datetime.now(timezone.utc)
     await session.commit()
 
-    log.info(
+    logger.info(
         f"Channel {channel.name!r} sync complete | "
         f"full_refresh={full_refresh} | processed={total_processed}"
     )
@@ -463,7 +461,7 @@ async def fetch_and_upsert_single_video(
         items = await _fetch_video_details_batch(client, api_key, [video_id])
 
     if not items:
-        log.warning(f"Single update: video_id={video_id!r} no data, skipping")
+        logger.warning("Single update: video_id={} no data, skipping", video_id)
         return None
 
     video_data = _parse_video_item(channel, items[0])
@@ -478,7 +476,7 @@ async def fetch_and_upsert_single_video(
     )
 
     await session.commit()
-    log.info(
+    logger.info(
         f"Single upsert complete | video_id={video_id!r} "
         f"title={video_data.get('title')!r} status={video_data.get('status')}"
     )

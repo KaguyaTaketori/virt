@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import json
-import logging
+from app.loggeruru_config import loggerger
 import threading
 from datetime import date
 from pathlib import Path
 from typing import Literal
-
-log = logging.getLogger(__name__)
 
 QUOTA_FILE = Path("./quota_state.json")
 DAILY_LIMIT = 9_500
@@ -71,11 +69,11 @@ def can_spend(op: str, count: int = 1) -> bool:
         remaining = DAILY_LIMIT - data["used"]
 
         if remaining < cost:
-            log.warning(f"拒绝 {op}×{count}（需要 {cost}，剩余 {remaining}）")
+            logger.warning("拒绝 {}×{}（需要 {}，剩余 {}）", op, count, cost, remaining)
             return False
 
         if op == "search.list" and (remaining - cost) < DISCOVER_RESERVE:
-            log.warning(
+            logger.warning(
                 f"search.list 被储备保护拦截"
                 f"（剩余 {remaining}，扣后 {remaining - cost} < 储备 {DISCOVER_RESERVE}）"
             )
@@ -96,7 +94,7 @@ def spend(op: str, count: int = 1) -> int:
         data["ops"][op] = data["ops"].get(op, 0) + count
         _save(data)
         remaining = max(0, DAILY_LIMIT - data["used"])
-        log.info(
+        logger.info(
             f"{op}×{count} -{cost} | 今日已用 {data['used']}/{DAILY_LIMIT}（剩余 {remaining}）"
         )
         return remaining

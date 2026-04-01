@@ -1,7 +1,7 @@
 # backend/app/scheduler_tasks.py
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import httpx
-import logging
+from app.loggeruru_config import loggerger
 import os
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -24,8 +24,6 @@ from app.config import settings
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.youtube_sync import sync_channel_videos
 from app.database_async import AsyncSessionFactory
-
-log = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -89,7 +87,7 @@ async def update_youtube_streams():
 
     # update 是高优先级，只要还有配额就执行（不设 discover_reserve 限制）
     if not can_spend("videos.list", 1):
-        log.info("配额耗尽，跳过")
+        logger.info("配额耗尽，跳过")
         return
 
     db = SessionLocal()
@@ -115,7 +113,7 @@ async def update_youtube_streams():
             for i in range(0, len(video_ids), 50):
                 chunk = video_ids[i : i + 50]
                 if not can_spend("videos.list", 1):
-                    log.info("配额耗尽，停止当前批次")
+                    logger.info("配额耗尽，停止当前批次")
                     break
                 items = await get_videos_details(client, chunk)
                 spend("videos.list", 1)
@@ -130,9 +128,11 @@ async def update_youtube_streams():
                         )
 
         db.commit()
-        log.info(f"刷新 {len(active)} 条 | 配额剩余 {quota_status()['remaining']}")
+        logger.info(
+            "刷新 {} 条 | 配额剩余 {}", len(active), quota_status()["remaining"]
+        )
     except Exception as e:
-        log.error(f"Error: {e}")
+        logger.error("Error: {}", e)
         db.rollback()
     finally:
         db.close()
@@ -164,9 +164,9 @@ async def update_bilibili_streams():
                 _upsert_stream(db, uid_to_ch_id[uid], parsed, Platform.BILIBILI)
 
         db.commit()
-        log.info(f"更新 {len(rooms_data)} 个房间")
+        logger.info("更新 {} 个房间", len(rooms_data))
     except Exception as e:
-        log.error(f"Error: {e}")
+        logger.error("Error: {}", e)
         db.rollback()
     finally:
         db.close()
@@ -202,12 +202,12 @@ async def sync_bilibili_channels():
                     db, ch.id, ch.channel_id
                 )
                 if total_synced > 0:
-                    log.info(f"{ch.name}: 同步了 {total_synced} 个视频")
+                    logger.info("{}: 同步了 {} 个视频", ch.name, total_synced)
 
         db.commit()
-        log.info(f"同步 {len(channels)} 个频道信息")
+        logger.info("同步 {} 个频道信息", len(channels))
     except Exception as e:
-        log.error(f"sync_bilibili_channels error: {e}")
+        logger.error("sync_bilibili_channels error: {}", e)
         db.rollback()
     finally:
         db.close()
@@ -261,7 +261,7 @@ async def refresh_channel_details():
         if not channels:
             return
 
-        log.info(f"开始刷新 {len(channels)} 个 YouTube 频道")
+        logger.info("开始刷新 {} 个 YouTube 频道", len(channels))
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             for ch in channels:
@@ -296,12 +296,12 @@ async def refresh_channel_details():
                         if changed:
                             ch.updated_at = datetime.now(timezone.utc)
                 except Exception as e:
-                    log.warning(f"{ch.name}: {e}")
+                    logger.warning("{}: {}", ch.name, e)
 
         db.commit()
-        log.info("完成")
+        logger.info("完成")
     except Exception as e:
-        log.error(f"Error: {e}")
+        logger.error("Error: {}", e)
         db.rollback()
     finally:
         db.close()
@@ -347,7 +347,7 @@ def start_scheduler():
         next_run_time=now,
         replace_existing=True,
     )
-    log.info("yt_discover=已禁用 | yt_update=5min | bili_update=2min")
+    logger.info("yt_discover=已禁用 | yt_update=5min | bili_update=2min")
 
     scheduler.add_job(
         _daily_backfill_sync,
@@ -366,7 +366,7 @@ def start_scheduler():
     )
 
     scheduler.start()
-    log.info(
+    logger.info(
         "yt_update=5min | bili_update=2min"
         " | bili_sync_ch=24h | channel_refresh=24h"
         " | daily_backfill=04:00 | websub_renew=每8天"

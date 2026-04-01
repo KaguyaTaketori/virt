@@ -1,5 +1,5 @@
 import httpx
-import logging
+from app.loggeruru_config import loggerger
 import re
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -8,8 +8,6 @@ from typing import Optional, Tuple
 
 from app.config import settings
 from app.models.models import Video, Channel
-
-log = logging.getLogger(__name__)
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
@@ -85,12 +83,12 @@ async def backfill_channel_videos(
     返回: 成功处理的视频数量
     """
     if not settings.youtube_api_key:
-        log.warning("缺少 YouTube API Key")
+        logger.warning("缺少 YouTube API Key")
         return 0
 
     uploads_playlist_id = _convert_to_uploads_playlist(channel.channel_id)
     if not uploads_playlist_id:
-        log.warning(f"无法转换频道ID为播放列表: {channel.channel_id}")
+        logger.warning("无法转换频道ID为播放列表: {}", channel.channel_id)
         return 0
 
     total_processed = 0
@@ -119,7 +117,7 @@ async def backfill_channel_videos(
             )
 
             if pl_resp.status_code != 200:
-                log.error(f"获取播放列表失败: {pl_resp.text}")
+                logger.error("获取播放列表失败: {}", pl_resp.text)
                 break
 
             pl_data = pl_resp.json()
@@ -222,5 +220,7 @@ async def backfill_channel_videos(
     channel.videos_last_fetched = datetime.now(timezone.utc)
     db.commit()
 
-    log.info(f"频道 {channel.name} 视频拉取完成，共处理 {total_processed} 个视频。")
+    logger.info(
+        "频道 {} 视频拉取完成，共处理 {} 个视频。", channel.name, total_processed
+    )
     return total_processed

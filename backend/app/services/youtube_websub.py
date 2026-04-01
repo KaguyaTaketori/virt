@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import logging
+from app.loggeruru_config import loggerger
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -35,8 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database_async import get_async_session, AsyncSessionFactory
 from app.models.models import Channel, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
-
-log = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
@@ -103,13 +101,13 @@ async def subscribe_channel(
             resp = await client.post(_HUB_URL, data=payload)
 
         if resp.status_code == 202:
-            log.info(
+            logger.info(
                 f"{mode} 请求已被 Hub 接受 | "
                 f"channel={channel_youtube_id} | lease={lease_seconds}s"
             )
             return True
         else:
-            log.warning(
+            logger.warning(
                 f"Hub 拒绝 {mode} 请求 | "
                 f"channel={channel_youtube_id} | "
                 f"status={resp.status_code} | body={resp.text[:200]}"
@@ -117,7 +115,7 @@ async def subscribe_channel(
             return False
 
     except httpx.RequestError as e:
-        log.error(f"网络错误，{mode} 失败: {e}")
+        logger.error("网络错误，{} 失败: {}", mode, e)
         return False
 
 
@@ -135,7 +133,7 @@ async def subscribe_all_active_channels(callback_url: str) -> None:
         )
         channels = result.scalars().all()
 
-    log.info(f"开始批量订阅 {len(channels)} 个频道...")
+    logger.info("开始批量订阅 {} 个频道...", len(channels))
     success_count = 0
 
     for ch in channels:
@@ -168,7 +166,7 @@ async def subscribe_all_active_channels(callback_url: str) -> None:
 
         await asyncio.sleep(0.3)
 
-    log.info(f"批量订阅完成 | 成功 {success_count}/{len(channels)}")
+    logger.info("批量订阅完成 | 成功 {}/{}", success_count, len(channels))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,12 +189,12 @@ def _verify_hmac_signature(
         return True  # 未配置密钥，不验签
 
     if not signature_header:
-        log.warning("期望签名但 Header 缺失，拒绝推送")
+        logger.warning("期望签名但 Header 缺失，拒绝推送")
         return False
 
     algo, _, sig_hex = signature_header.partition("=")
     if algo != "sha1":
-        log.warning(f"不支持的签名算法: {algo}")
+        logger.warning("不支持的签名算法: {}", algo)
         return False
 
     expected = hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
@@ -232,7 +230,7 @@ def _parse_atom_feed(xml_body: bytes) -> list[dict]:
     try:
         root = ET.fromstring(xml_body)
     except ET.ParseError as e:
-        log.error(f"XML 解析失败: {e} | body={xml_body[:200]}")
+        logger.error("XML 解析失败: {} | body={}", e, xml_body[:200])
         return []
 
     entries = []
@@ -270,7 +268,7 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
       3. 更新 WebSubSubscription 的推送统计
     """
     if not _YT_API_KEY:
-        log.warning(f"YOUTUBE_API_KEY 未配置，无法处理 video_id={video_id!r}")
+        logger.warning("YOUTUBE_API_KEY 未配置，无法处理 video_id={}", video_id)
         return
 
     async with AsyncSessionFactory() as session:
@@ -282,7 +280,7 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
             )
         )
         if not channel:
-            log.warning(f"收到未知频道推送 | yt_channel_id={yt_channel_id!r}，跳过")
+            logger.warning("收到未知频道推送 | yt_channel_id={}，跳过", yt_channel_id)
             return
 
         # 拉取并 Upsert 视频详情
@@ -291,12 +289,14 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
                 session, channel, video_id, _YT_API_KEY
             )
             if video:
-                log.info(
-                    f"✓ video_id={video_id!r} "
-                    f"title={video.get('title')!r} status={video.get('status')}"
-                )
+            logger.info(
+                "✓ video_id={} title={} status={}",
+                video_id,
+                video.get('title'),
+                video.get('status')
+            )
         except Exception as e:
-            log.error(f"✗ 处理 video_id={video_id!r} 异常: {e}")
+            logger.error("✗ 处理 video_id={} 异常: {}", video_id, e)
             return
 
         # 更新订阅记录的推送统计
@@ -347,7 +347,7 @@ async def websub_verify(
     if not hub_topic.startswith(_TOPIC_BASE):
         raise HTTPException(status_code=404, detail="不认识的 hub.topic")
 
-    log.info(
+    logger.info(
         f"验证通过 | mode={hub_mode} | "
         f"channel={hub_topic.split('=')[-1]} | lease={hub_lease_seconds}s"
     )
@@ -386,7 +386,7 @@ async def websub_receive(
 
     # ── HMAC 签名验证（防伪造推送）────────────────────────────────────────────
     if not _verify_hmac_signature(raw_body, x_hub_signature, _WEBSUB_SECRET):
-        log.warning(f"HMAC 验证失败，拒绝推送 | sig={x_hub_signature!r}")
+        logger.warning("HMAC 验证失败，拒绝推送 | sig={}", x_hub_signature)
         raise HTTPException(status_code=403, detail="签名验证失败")
 
     # ── XML 解析 ──────────────────────────────────────────────────────────────
@@ -402,7 +402,7 @@ async def websub_receive(
         video_id = entry["video_id"]
         channel_id = entry["channel_id"]
 
-        log.info(
+        logger.info(
             f"收到推送 | channel={channel_id} | "
             f"video_id={video_id!r} | title={entry.get('title')!r}"
         )

@@ -1,12 +1,10 @@
 # backend/app/routers/websocket.py
 import asyncio
 import json
-import logging
+from app.loggeruru_config import loggerger
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.connection_manager import manager
 from app.services.danmaku_poller import poller
-
-log = logging.getLogger(__name__)
 
 try:
     from app.services.danmaku_youtube import get_chat_from_file
@@ -92,10 +90,10 @@ async def danmaku_websocket(websocket: WebSocket, video_id: str):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        log.error(f"danmaku/{video_id} 异常断连: {e}")
+        logger.error("danmaku/{} 异常断连: {}", video_id, e)
     finally:
         manager.disconnect(video_id, websocket)
         active = manager.active_connections.get(video_id, [])
         if not active:
             poller.stop_polling(video_id)
-            log.info(f"danmaku/{video_id} 无订阅者，停止轮询")
+            logger.info("danmaku/{} 无订阅者，停止轮询", video_id)
