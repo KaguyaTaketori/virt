@@ -12,6 +12,11 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+
+# YouTube chat JSON dumps (local; do not commit)
+**/youtube_chat_*.json
+**/quota_state.json
+
 *.sqlite
 *.sqlite3
 *.bak
