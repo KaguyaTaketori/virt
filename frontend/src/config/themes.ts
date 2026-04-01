@@ -20,7 +20,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'matsuri',
-    name: 'Hololive祭',
+    name: '夏色祭',
     colors: {
       primary: '#faa749',
       primaryHover: '#fbbf24',
@@ -29,7 +29,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'pekora',
-    name: '兔',
+    name: '兔田ぺこら',
     colors: {
       primary: '#DC8C2C',
       primaryHover: '#e8a23d',
@@ -38,7 +38,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'korone',
-    name: '神楽坂绫乃',
+    name: '戌神沁音',
     colors: {
       primary: '#B07975',
       primaryHover: '#c9908a',
@@ -56,7 +56,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'rushia',
-    name: '润羽润',
+    name: '潤羽るしあ',
     colors: {
       primary: '#22C4AC',
       primaryHover: '#2ed4bc',
@@ -65,7 +65,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'suisei',
-    name: '星街',
+    name: '星街すいせい',
     colors: {
       primary: '#a8d6fc',
       primaryHover: '#c0e2fd',
@@ -74,7 +74,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'coco',
-    name: 'Coco',
+    name: '桐生ここ',
     colors: {
       primary: '#D3B633',
       primaryHover: '#e0c449',
@@ -83,7 +83,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'okayu',
-    name: '湊阿库娅',
+    name: '猫又おかゆ',
     colors: {
       primary: '#cda4d5',
       primaryHover: '#dbb5e0',
@@ -92,7 +92,7 @@ export const themes: Theme[] = [
   },
   {
     id: 'lamy',
-    name: '湊阿库娅',
+    name: '雪花ラミィ',
     colors: {
       primary: '#338bcc',
       primaryHover: '#449dd4',

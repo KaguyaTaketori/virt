@@ -1,9 +1,10 @@
+// frontend/src/api/index.ts
 import axios from 'axios'
-import type { AxiosInstance } from 'axios'
+import type { AxiosInstance, AxiosError } from 'axios'
 
 const api: AxiosInstance = axios.create({
   baseURL: '',
-  timeout: 10000
+  timeout: 15000,
 })
 
 api.interceptors.request.use((config) => {
@@ -14,9 +15,49 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-export const streamApi = {
-  getLiveStreams: () => api.get('/api/streams/live'),
-  getAllStreams: (params?: Record<string, any>) => api.get('/api/streams', { params })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    const status = error.response?.status
+
+    if (status === 401) {
+      // Token 过期或未登录，清除本地状态
+      localStorage.removeItem('token')
+      // 若需要跳转登录页，在此处理：
+      // window.location.href = '/login'
+      console.warn('[API] 401 未授权，Token 已清除')
+    } else if (status === 403) {
+      console.error('[API] 403 权限不足')
+    } else if (status && status >= 500) {
+      const detail = (error.response?.data as any)?.detail ?? '服务器内部错误'
+      console.error(`[API] ${status} 服务器错误:`, detail)
+    } else if (!error.response) {
+      // 网络超时 / 断网
+      console.error('[API] 网络连接失败，请检查网络或稍后重试')
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+// ── 类型定义 ──────────────────────────────────────────────────────────────────
+
+export interface Stream {
+  id: number
+  channel_id: number
+  platform: 'youtube' | 'bilibili'
+  video_id: string | null
+  title: string | null
+  thumbnail_url: string | null
+  viewer_count: number
+  status: 'live' | 'upcoming' | 'archive' | 'offline'
+  started_at: string | null
+  scheduled_at: string | null
+  channel_name: string | null
+  channel_avatar: string | null
+  channel_avatar_shape?: 'circle' | 'square'
+  org_id?: number | null
 }
 
 export interface Channel {
@@ -66,40 +107,78 @@ export interface PaginatedVideos {
   total_pages: number
 }
 
+// ── API 方法 ──────────────────────────────────────────────────────────────────
+
+export const streamApi = {
+  getLiveStreams: () => api.get<Stream[]>('/api/streams/live'),
+  getAllStreams:   (params?: Record<string, unknown>) =>
+    api.get<Stream[]>('/api/streams', { params }),
+}
+
 export const channelApi = {
-  getAll: (params?: Record<string, any>) => api.get('/api/channels', { params }),
-  get: (id: number) => api.get(`/api/channels/${id}`),
-  getVideos: (id: number, page?: number, pageSize?: number, status?: string) => 
-    api.get(`/api/channels/${id}/videos`, { params: { page, page_size: pageSize, status } }),
-  create: (data: Partial<Channel>) => api.post('/api/channels', data),
-  update: (id: number, data: Partial<Channel>) => api.put(`/api/channels/${id}`, data),
-  delete: (id: number) => api.delete(`/api/channels/${id}`),
+  getAll:    (params?: Record<string, unknown>) =>
+    api.get<Channel[]>('/api/channels', { params }),
+
+  get:       (id: number) =>
+    api.get<Channel>(`/api/channels/${id}`),
+
+  // 明确返回 PaginatedVideos，消除隐式 any
+  getVideos: (id: number, page?: number, pageSize?: number, status?: string) =>
+    api.get<PaginatedVideos>(`/api/channels/${id}/videos`, {
+      params: { page, page_size: pageSize, status },
+    }),
+
+  create:    (data: Partial<Channel>) =>
+    api.post<Channel>('/api/channels', data),
+
+  update:    (id: number, data: Partial<Channel>) =>
+    api.put<Channel>(`/api/channels/${id}`, data),
+
+  delete:    (id: number) =>
+    api.delete(`/api/channels/${id}`),
+}
+
+export const orgApi = {
+  getAll:  () =>
+    api.get<Organization[]>('/api/organizations'),
+
+  get:     (id: number) =>
+    api.get<Organization>(`/api/organizations/${id}`),
+
+  create:  (data: Partial<Organization>) =>
+    api.post<Organization>('/api/organizations', data),
+
+  update:  (id: number, data: Partial<Organization>) =>
+    api.put<Organization>(`/api/organizations/${id}`, data),
+
+  delete:  (id: number) =>
+    api.delete(`/api/organizations/${id}`),
 }
 
 export const authApi = {
-  login: (username: string, password: string) => 
-    api.post('/api/auth/login', new URLSearchParams({ username, password }), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    }),
-  register: (data: { username: string; email?: string; password: string }) => 
+  login: (username: string, password: string) =>
+    api.post<{ access_token: string; token_type: string }>(
+      '/api/auth/login',
+      new URLSearchParams({ username, password }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    ),
+  register: (data: { username: string; email?: string; password: string }) =>
     api.post('/api/auth/register', data),
 }
 
 export const userChannelApi = {
-  like: (channelId: number) => api.post(`/api/users/channels/${channelId}/like`),
-  unlike: (channelId: number) => api.delete(`/api/users/channels/${channelId}/like`),
-  block: (channelId: number) => api.post(`/api/users/channels/${channelId}/block`),
-  unblock: (channelId: number) => api.delete(`/api/users/channels/${channelId}/block`),
-  getLiked: () => api.get('/api/users/channels', { params: { type: 'liked' } }),
-  getBlocked: () => api.get('/api/users/channels', { params: { type: 'blocked' } }),
-}
-
-export const orgApi = {
-  getAll: () => api.get('/api/organizations'),
-  get: (id: number) => api.get(`/api/organizations/${id}`),
-  create: (data: Partial<Organization>) => api.post('/api/organizations', data),
-  update: (id: number, data: Partial<Organization>) => api.put(`/api/organizations/${id}`, data),
-  delete: (id: number) => api.delete(`/api/organizations/${id}`),
+  like:       (channelId: number) =>
+    api.post(`/api/users/channels/${channelId}/like`),
+  unlike:     (channelId: number) =>
+    api.delete(`/api/users/channels/${channelId}/like`),
+  block:      (channelId: number) =>
+    api.post(`/api/users/channels/${channelId}/block`),
+  unblock:    (channelId: number) =>
+    api.delete(`/api/users/channels/${channelId}/block`),
+  getLiked:   () =>
+    api.get<Channel[]>('/api/users/channels', { params: { type: 'liked' } }),
+  getBlocked: () =>
+    api.get<Channel[]>('/api/users/channels', { params: { type: 'blocked' } }),
 }
 
 export const adminVideosApi = {
@@ -111,16 +190,17 @@ export const adminVideosApi = {
     page?: number
     page_size?: number
   }) =>
-    api.get('/api/admin/videos', {
+    api.get<PaginatedVideos>('/api/admin/videos', {
       params: {
-        channel_id: params.channel_id,
-        status: params.status ?? undefined,
+        channel_id:   params.channel_id,
+        status:       params.status       ?? undefined,
         duration_min: params.duration_min ?? undefined,
         duration_max: params.duration_max ?? undefined,
-        page: params.page ?? undefined,
-        page_size: params.page_size ?? undefined,
+        page:         params.page         ?? undefined,
+        page_size:    params.page_size    ?? undefined,
       },
     }),
+
   batchUpdateStatus: (payload: { video_ids: string[]; new_status: string }) =>
     api.post('/api/admin/videos/batch-update-status', payload),
 }

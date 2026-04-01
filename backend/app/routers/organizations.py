@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from app.database import SessionLocal
+
+from app.deps import get_db
 from app.schemas.schemas import (
     OrganizationCreate,
     OrganizationResponse,
@@ -10,14 +11,6 @@ from app.schemas.schemas import (
 from app.models.models import Organization
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get("", response_model=List[OrganizationResponse])
@@ -35,8 +28,7 @@ def get_organization(org_id: int, db: Session = Depends(get_db)):
 
 @router.post("", response_model=OrganizationResponse)
 def create_organization(org: OrganizationCreate, db: Session = Depends(get_db)):
-    existing = db.query(Organization).filter(Organization.name == org.name).first()
-    if existing:
+    if db.query(Organization).filter(Organization.name == org.name).first():
         raise HTTPException(status_code=400, detail="Organization already exists")
     db_org = Organization(**org.model_dump())
     db.add(db_org)
@@ -47,14 +39,15 @@ def create_organization(org: OrganizationCreate, db: Session = Depends(get_db)):
 
 @router.put("/{org_id}", response_model=OrganizationResponse)
 def update_organization(
-    org_id: int, org_update: OrganizationUpdate, db: Session = Depends(get_db)
+    org_id: int,
+    org_update: OrganizationUpdate,
+    db: Session = Depends(get_db),
 ):
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    update_data = org_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
+    for key, value in org_update.model_dump(exclude_unset=True).items():
         setattr(org, key, value)
 
     db.commit()
@@ -68,7 +61,6 @@ def delete_organization(org_id: int, db: Session = Depends(get_db)):
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # 将关联的 channel 的 org_id 设为 null
     for channel in org.channels:
         channel.org_id = None
 

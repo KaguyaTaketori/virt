@@ -1,123 +1,95 @@
-import httpx
-from app.loguru_config import logger
-import re
+# backend/app/services/youtube_backfill.py
+"""
+YouTube 频道视频批量回填模块
+
+职责：通过 PlaylistItems(UUxxx) → Videos.list 双接口组合，
+以极低配额消耗回填频道历史视频。
+"""
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from typing import Optional
+
+import httpx
 from sqlalchemy.orm import Session
-from sqlalchemy import select
-from typing import Optional, Tuple
 
 from app.config import settings
+from app.loguru_config import logger
 from app.models.models import Video, Channel
+from app.services.youtube_utils import (  # ← 统一使用共享工具
+    parse_video_item,
+)
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-def _convert_to_uploads_playlist(channel_id: str) -> str | None:
-    """【核心魔法1】：将普通频道ID (UCxxx) 转换为上传播放列表ID (UUxxx)"""
+def _convert_to_uploads_playlist(channel_id: str) -> Optional[str]:
+    """将普通频道 ID（UCxxx）转换为上传播放列表 ID（UUxxx）。"""
     if channel_id and channel_id.startswith("UC"):
         return "UU" + channel_id[2:]
     return None
 
 
-def _parse_yt_duration(duration_str: str) -> Tuple[Optional[str], int]:
-    """解析 YouTube 持续时间 (PT#H#M#S)，返回 (格式化字符串, 总秒数)"""
-    if not duration_str:
-        return None, 0
-
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration_str)
-    if not match:
-        return None, 0
-
-    hours = int(match.group(1)) if match.group(1) else 0
-    minutes = int(match.group(2)) if match.group(2) else 0
-    seconds = int(match.group(3)) if match.group(3) else 0
-
-    total_seconds = hours * 3600 + minutes * 60 + seconds
-
-    parts = []
-    if hours > 0:
-        parts.append(f"{hours:02d}")
-    parts.append(f"{minutes:02d}")
-    parts.append(f"{seconds:02d}")
-
-    return ":".join(parts), total_seconds
-
-
-def _parse_yt_datetime(date_str: Optional[str]) -> Optional[datetime]:
-    if not date_str:
-        return None
-    try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
-def _determine_video_status(item: dict, total_seconds: int) -> str:
-    """【核心逻辑】：精准判断视频类型 (直播/录播/待机/普通/Shorts)"""
-    live_details = item.get("liveStreamingDetails")
-
-    # 如果存在 liveStreamingDetails，说明是直播相关
-    if live_details:
-        if "actualEndTime" in live_details:
-            return "archive"  # 已经播完的录播
-        elif "actualStartTime" in live_details:
-            return "live"  # 正在直播中
-        elif "scheduledStartTime" in live_details:
-            return "upcoming"  # 待机室
-
-    # 如果不是直播，根据时长判断是否为 Shorts (粗略估计：<=60秒)
-    if total_seconds > 0 and total_seconds <= 61:
-        return "short"
-
-    return "upload"  # 常规上传视频
-
-
 async def backfill_channel_videos(
-    db: Session, channel: Channel, full_refresh: bool = False
+    db: Session,
+    channel: Channel,
+    full_refresh: bool = False,
 ) -> int:
     """
-    【高阶函数】：低消耗、高速度拉取频道历史视频
-    - full_refresh=True: 拉取该频道历史所有视频（Initial Backfill）
-    - full_refresh=False: 仅增量更新最近的 50-100 个视频
+    低消耗批量回填频道历史视频。
 
-    返回: 成功处理的视频数量
+    参数：
+        full_refresh=True  — 拉取全部历史（Initial Backfill）
+        full_refresh=False — 仅增量更新最近 50 条
+
+    返回：
+        成功处理的视频数量
+
+    配额消耗（每 50 条）：
+        PlaylistItems.list × 1 = 1 配额
+        Videos.list        × 1 = 1 配额
+        合计 ≈ 2 配额 / 50 条
     """
     if not settings.youtube_api_key:
-        logger.warning("缺少 YouTube API Key")
+        logger.warning("缺少 YouTube API Key，跳过回填")
         return 0
 
     uploads_playlist_id = _convert_to_uploads_playlist(channel.channel_id)
     if not uploads_playlist_id:
-        logger.warning("无法转换频道ID为播放列表: {}", channel.channel_id)
+        logger.warning("无法转换频道 ID: {}", channel.channel_id)
         return 0
 
     total_processed = 0
-    next_page_token = None
+    next_page_token: Optional[str] = None
 
-    # 获取数据库中该频道所有现存的 video_id，用于快速判断 Upsert (跨数据库兼容性最好)
-    existing_videos_map = {
+    # 预加载当前已有的 video_id → Video 映射，避免循环内 N+1 查询
+    existing_videos_map: dict[str, Video] = {
         v.video_id: v
         for v in db.query(Video).filter(Video.channel_id == channel.id).all()
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
-            # 1. 极低消耗：通过 PlaylistItems 获取基础列表（耗费 1 Quota / 50 视频）
+            # ── Step 1: PlaylistItems.list 获取视频 ID 列表 ──────────────────
             pl_params = {
-                "part": "snippet",
+                "part":       "snippet",
                 "playlistId": uploads_playlist_id,
                 "maxResults": 50,
-                "key": settings.youtube_api_key,
+                "key":        settings.youtube_api_key,
             }
             if next_page_token:
                 pl_params["pageToken"] = next_page_token
 
-            pl_resp = await client.get(
-                f"{YOUTUBE_API_BASE}/playlistItems", params=pl_params
-            )
-
-            if pl_resp.status_code != 200:
-                logger.error("获取播放列表失败: {}", pl_resp.text)
+            try:
+                pl_resp = await client.get(
+                    f"{YOUTUBE_API_BASE}/playlistItems", params=pl_params
+                )
+                pl_resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logger.error("PlaylistItems.list 失败 {}: {}", e.response.status_code, e.response.text[:200])
+                break
+            except httpx.RequestError as e:
+                logger.error("PlaylistItems.list 网络错误: {}", e)
                 break
 
             pl_data = pl_resp.json()
@@ -125,102 +97,73 @@ async def backfill_channel_videos(
             if not items:
                 break
 
-            # 提取这 50 个视频的 ID
             video_ids = [
-                item.get("snippet", {}).get("resourceId", {}).get("videoId")
+                item["snippet"]["resourceId"]["videoId"]
                 for item in items
                 if item.get("snippet", {}).get("resourceId", {}).get("videoId")
             ]
-
             if not video_ids:
                 break
 
-            # 2. 批量查详情：获取时长、播放量和直播状态（耗费 1 Quota / 50 视频）
-            vid_resp = await client.get(
-                f"{YOUTUBE_API_BASE}/videos",
-                params={
-                    "part": "snippet,contentDetails,statistics,liveStreamingDetails",
-                    "id": ",".join(video_ids),
-                    "key": settings.youtube_api_key,
-                },
-            )
+            # ── Step 2: Videos.list 批量获取详情 ────────────────────────────
+            try:
+                vid_resp = await client.get(
+                    f"{YOUTUBE_API_BASE}/videos",
+                    params={
+                        "part": "snippet,contentDetails,statistics,liveStreamingDetails",
+                        "id":   ",".join(video_ids),
+                        "key":  settings.youtube_api_key,
+                    },
+                )
+                vid_resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logger.error("Videos.list 失败 {}: {}", e.response.status_code, e.response.text[:200])
+                # 单批次失败不影响整体，继续下一页
+                next_page_token = pl_data.get("nextPageToken")
+                if not full_refresh or not next_page_token:
+                    break
+                continue
+            except httpx.RequestError as e:
+                logger.error("Videos.list 网络错误: {}", e)
+                break
 
-            if vid_resp.status_code == 200:
-                vid_data = vid_resp.json()
-                vid_items = vid_data.get("items", [])
+            # ── Step 3: 解析 & Upsert ────────────────────────────────────────
+            for item in vid_resp.json().get("items", []):
+                vid_id = item["id"]
+                # 使用共享工具函数，不再重复解析逻辑
+                video_data = parse_video_item(channel.id, channel.platform, item)
 
-                # 3. 内存清洗与入库 (Upsert 逻辑，完美兼容 SQLite 与 PostgreSQL)
-                for item in vid_items:
-                    vid_id = item["id"]
-                    snippet = item.get("snippet", {})
-                    content_details = item.get("contentDetails", {})
-                    statistics = item.get("statistics", {})
+                if vid_id in existing_videos_map:
+                    existing = existing_videos_map[vid_id]
+                    for key in (
+                        "title", "thumbnail_url", "duration", "duration_secs",
+                        "view_count", "like_count", "status",
+                        "published_at", "scheduled_at",
+                        "live_started_at", "live_ended_at", "live_chat_id",
+                    ):
+                        if key in video_data:
+                            setattr(existing, key, video_data[key])
+                    existing.fetched_at = datetime.now(timezone.utc)
+                else:
+                    new_video = Video(**{
+                        k: v for k, v in video_data.items()
+                        if hasattr(Video, k)
+                    })
+                    new_video.fetched_at = datetime.now(timezone.utc)
+                    db.add(new_video)
+                    existing_videos_map[vid_id] = new_video
 
-                    # 解析封面
-                    thumbnails = snippet.get("thumbnails", {})
-                    thumb_url = (
-                        thumbnails.get("maxres", {}).get("url")
-                        or thumbnails.get("high", {}).get("url")
-                        or thumbnails.get("medium", {}).get("url")
-                        or thumbnails.get("default", {}).get("url")
-                    )
+                total_processed += 1
 
-                    # 解析时长与状态
-                    duration_str, total_seconds = _parse_yt_duration(
-                        content_details.get("duration")
-                    )
-                    status = _determine_video_status(item, total_seconds)
+            db.commit()
 
-                    # 组装数据
-                    video_data = {
-                        "title": snippet.get("title", ""),
-                        "thumbnail_url": thumb_url,
-                        "duration": duration_str,
-                        "view_count": int(statistics.get("viewCount", 0)),
-                        "published_at": _parse_yt_datetime(snippet.get("publishedAt")),
-                        "status": status,
-                        "fetched_at": datetime.now(timezone.utc),
-                    }
-
-                    # 执行 Insert 或 Update
-                    if vid_id in existing_videos_map:
-                        # 存在则更新最新状态（播放量、封面、是否从直播转为录播等）
-                        existing_video = existing_videos_map[vid_id]
-                        for key, value in video_data.items():
-                            setattr(existing_video, key, value)
-                    else:
-                        # 不存在则插入
-                        new_video = Video(
-                            channel_id=channel.id,
-                            platform=channel.platform,
-                            video_id=vid_id,
-                            **video_data,
-                        )
-                        db.add(new_video)
-                        existing_videos_map[vid_id] = (
-                            new_video  # 加入字典防止这一批次内重复
-                        )
-
-                # 提交这一批次（50条）到数据库
-                db.commit()
-                total_processed += len(vid_items)
-
-            # 4. 翻页与增量控制逻辑
+            # ── Step 4: 翻页控制 ─────────────────────────────────────────────
             next_page_token = pl_data.get("nextPageToken")
-
-            # 如果不是全量拉取 (Initial Backfill)，那么拉满 50 条最近数据就可以停了
-            # 因为最近的50条已经足够覆盖日常的增量更新
-            if not full_refresh:
+            if not full_refresh or not next_page_token:
                 break
 
-            if not next_page_token:
-                break
-
-    # 更新频道最后获取时间
     channel.videos_last_fetched = datetime.now(timezone.utc)
     db.commit()
 
-    logger.info(
-        "频道 {} 视频拉取完成，共处理 {} 个视频。", channel.name, total_processed
-    )
+    logger.info("频道 {} 回填完成，共处理 {} 个视频", channel.name, total_processed)
     return total_processed
