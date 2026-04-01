@@ -43,20 +43,54 @@ def parse_duration(iso_duration: Optional[str]) -> tuple[Optional[str], int]:
     return fmt, total_secs
 
 
+PREMIERE_TITLE_KWS = re.compile(r"\b(mv|official video|cover|premiere|trailer|teaser|lyric video)\b|翻唱|首播|原创|动画", re.IGNORECASE)
+LIVE_TITLE_KWS = re.compile(r"\b(live|stream|chat|freechat)\b|🔴|直播|歌枠|杂谈|vtuber|耐久|アーカイブ", re.IGNORECASE)
+
+PREMIERE_DESC_KWS = re.compile(r"\b(vocal|mix|illust|movie|director|music|arrangement)\s*[:：]", re.IGNORECASE)
+LIVE_DESC_KWS = re.compile(r"\b(superchat|rules|streamlabs)\b|直播规则|聊天室规则|ルール", re.IGNORECASE)
+
+def is_premiere_heuristic(item: dict, total_secs: int) -> bool:
+    score = 0
+    snippet = item.get("snippet", {})
+    title = snippet.get("title", "")
+    description = snippet.get("description", "")
+    category_id = snippet.get("categoryId", "")
+
+    if total_secs < 300:
+        score += 80
+    elif total_secs < 600:
+        score += 40
+    elif total_secs < 1800:
+        score += 20
+    elif total_secs > 7200:
+        score -= 80
+    elif total_secs > 3600:
+        score -= 40
+
+    if PREMIERE_TITLE_KWS.search(title):
+        score += 30
+    if LIVE_TITLE_KWS.search(title):
+        score -= 40
+
+    if PREMIERE_DESC_KWS.search(description):
+        score += 30
+    if LIVE_DESC_KWS.search(description):
+        score -= 40
+
+    if category_id == "10":
+        score += 20
+    elif category_id == "20":
+        score -= 15
+    
+    return score > 0
+
 def determine_video_status(item: dict, total_secs: int) -> str:
     """
     根据 YouTube API video item 精准判断视频状态。
-    
-    参数：
-        item      — YouTube Videos.list 返回的单个视频 item dict (需要包含 snippet 和 liveStreamingDetails)
-        total_secs — 已解析的视频总秒数
     """
     snippet = item.get("snippet", {})
     live_content = snippet.get("liveBroadcastContent", "none") 
     live_details = item.get("liveStreamingDetails", {})
-
-    if 0 < total_secs <= 61:
-        return "short"
 
     if live_content == "live":
         return "live"
@@ -64,7 +98,14 @@ def determine_video_status(item: dict, total_secs: int) -> str:
         return "upcoming"
 
     if live_details.get("actualEndTime"):
-        return "archive"
+        is_premiere = is_premiere_heuristic(item, total_secs)
+        if is_premiere:
+            return "upload"
+        else:
+            return "archive"
+
+    if 0 < total_secs <= 61:
+        return "short"
 
     return "upload"
 

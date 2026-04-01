@@ -32,7 +32,6 @@ async def _heartbeat_task(websocket: WebSocket) -> None:
         try:
             await websocket.send_json({"type": "ping"})
         except Exception:
-            # 连接已断开，安静退出
             break
 
 
@@ -81,7 +80,6 @@ async def _handle_client_message(
     raw: str,
 ) -> None:
     """解析并处理单条客户端消息。"""
-    # 兼容纯文本 ping
     if raw == "ping":
         await websocket.send_json({"type": "pong"})
         return
