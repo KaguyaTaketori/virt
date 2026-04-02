@@ -384,17 +384,17 @@ function goToLogin() {
 }
 // ===========================================
 
-async function fetchChannel(channelId: string) {
+async function fetchChannel(id: number) {
   loading.value = true
   bilibiliError.value = null
   try {
-    const { data } = await channelApi.get(channelId)
+    const { data } = await channelApi.get(id)
     channel.value = data
     currentPage.value = 1
     liveCurrentPage.value = 1
-    await fetchVideos(channelId)
-    await fetchLiveVideos(channelId)
-    await fetchShortsVideos(channelId)
+    await fetchVideos(id)
+    await fetchLiveVideos(id)
+    await fetchShortsVideos(id)
   } catch (err: any) {
     if (err.response?.status === 403) {
       bilibiliError.value = err.response.data?.detail || 'B站功能需要登录后访问'
@@ -407,7 +407,7 @@ async function fetchChannel(channelId: string) {
   }
 }
 
-async function fetchVideos(channelId: string) {
+async function fetchVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
     const status = platform === 'youtube' ? 'upload' : undefined
@@ -420,7 +420,7 @@ async function fetchVideos(channelId: string) {
   }
 }
 
-async function fetchLiveVideos(channelId: string) {
+async function fetchLiveVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
     if (platform === 'youtube') {
@@ -442,7 +442,7 @@ async function fetchLiveVideos(channelId: string) {
   }
 }
 
-async function fetchShortsVideos(channelId: string) {
+async function fetchShortsVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
     const status = platform === 'youtube' ? 'short' : undefined
@@ -455,13 +455,13 @@ async function fetchShortsVideos(channelId: string) {
 
 onMounted(async () => {
   await orgStore.fetchOrganizations()
-  const channelId = route.params.channel_id as string
+  const channelId = Number(route.params.channel_id)
   await fetchChannel(channelId)
 })
 
 watch(activeTab, async (tab) => {
   if (!channel.value) return
-  const channelId = route.params.channel_id as string
+  const channelId = Number(route.params.channel_id)
   if (tab === 'videos') {
     currentPage.value = 1
     await fetchVideos(channelId)

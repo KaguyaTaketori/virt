@@ -119,11 +119,12 @@ export const channelApi = {
   getAll:    (params?: Record<string, unknown>) =>
     api.get<Channel[]>('/api/channels', { params }),
 
-  get:       (channelId: string) =>
-    api.get<Channel>(`/api/channels/${channelId}`),
+  get:       (id: number) =>
+    api.get<Channel>(`/api/channels/${id}`),
 
-  getVideos: (channelId: string, page?: number, pageSize?: number, status?: string) =>
-    api.get<PaginatedVideos>(`/api/channels/${channelId}/videos`, {
+  // 明确返回 PaginatedVideos，消除隐式 any
+  getVideos: (id: number, page?: number, pageSize?: number, status?: string) =>
+    api.get<PaginatedVideos>(`/api/channels/${id}/videos`, {
       params: { page, page_size: pageSize, status },
     }),
 
