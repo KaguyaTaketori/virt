@@ -141,9 +141,8 @@ onMounted(async () => {
 
 function openMultiView(stream: Stream) {
   if (!stream?.video_id) return
-  const channel = { platform: stream.platform, id: stream.video_id }
-  const tree = { type: 'leaf', channel }
-  localStorage.setItem('multiview_tree', JSON.stringify(tree))
+  const channels = [{ platform: stream.platform, id: stream.video_id }]
+  localStorage.setItem('multiview_channels', JSON.stringify(channels))
   router.push({ name: 'MultiView' })
 }
 </script>

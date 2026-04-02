@@ -37,7 +37,7 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '频道' },
   },
   {
-    path: '/channel/:channel_id',
+    path: '/channel/:id',
     name: 'ChannelDetail',
     component: () => import('../views/ChannelDetail.vue'),
     meta: { title: '频道详情' },

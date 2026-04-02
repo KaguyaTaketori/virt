@@ -12,7 +12,6 @@ YouTube 视频元数据低消耗同步模块（重构版）。
   - sync_channel_videos()           — 频道级全量/增量同步
   - fetch_and_upsert_single_video() — WebSub 推送后单条更新
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -24,68 +23,15 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
-from app.models.models import Channel, Video, Stream, Platform, StreamStatus
+from app.models.models import Channel, Video
 from app.services.youtube_utils import parse_video_item  # ← 共享工具
 
 _YT_API_BASE = "https://www.googleapis.com/youtube/v3"
-_BATCH_SIZE = 50
+_BATCH_SIZE  = 50
 _HTTP_TIMEOUT = 20.0
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
-
-
-def _map_video_status_to_stream(video_status: str) -> StreamStatus:
-    """将 Video.status 映射为 StreamStatus"""
-    mapping = {
-        "live": StreamStatus.LIVE,
-        "upcoming": StreamStatus.UPCOMING,
-        "archive": StreamStatus.ARCHIVE,
-    }
-    return mapping.get(video_status, StreamStatus.OFFLINE)
-
-
-async def _upsert_stream_async(
-    session: AsyncSession,
-    channel_id: int,
-    video_data: dict,
-    platform: str,
-) -> None:
-    """将视频数据同步到 Stream 表（事件驱动）"""
-    stream_status = _map_video_status_to_stream(video_data.get("status", ""))
-    if stream_status not in (StreamStatus.LIVE, StreamStatus.UPCOMING):
-        return
-
-    from sqlalchemy import select
-
-    stream = await session.execute(
-        select(Stream).where(
-            Stream.channel_id == channel_id,
-            Stream.video_id == video_data["video_id"],
-        )
-    )
-    stream = stream.scalar_one_or_none()
-
-    if not stream:
-        stream = Stream(
-            channel_id=channel_id,
-            platform=Platform[platform.upper()],
-            video_id=video_data["video_id"],
-        )
-        session.add(stream)
-
-    stream.title = video_data.get("title")
-    stream.thumbnail_url = video_data.get("thumbnail_url")
-    stream.viewer_count = video_data.get("view_count", 0)
-    stream.status = stream_status
-    stream.scheduled_at = video_data.get("scheduled_at")
-    stream.started_at = video_data.get("live_started_at")
-    stream.live_chat_id = video_data.get("live_chat_id")
-    stream.updated_at = datetime.now(timezone.utc)
-
-    if video_data.get("view_count", 0) > (stream.peak_viewers or 0):
-        stream.peak_viewers = video_data["view_count"]
-
 
 def _uc_to_uu(channel_id: str) -> Optional[str]:
     """将频道 ID（UCxxx）转为上传播放列表 ID（UUxxx）。"""
@@ -112,7 +58,6 @@ async def _load_existing_video_id_set(
 
 
 # ── Upsert ────────────────────────────────────────────────────────────────────
-
 
 async def _upsert_video(
     session: AsyncSession,
@@ -157,7 +102,6 @@ async def _upsert_video(
 
 # ── YouTube API 调用 ──────────────────────────────────────────────────────────
 
-
 async def _fetch_playlist_page(
     client: httpx.AsyncClient,
     api_key: str,
@@ -169,8 +113,8 @@ async def _fetch_playlist_page(
     消耗：1 配额 / 次（最多 50 条）。
     """
     params: dict = {
-        "key": api_key,
-        "part": "snippet",
+        "key":        api_key,
+        "part":       "snippet",
         "playlistId": playlist_id,
         "maxResults": _BATCH_SIZE,
     }
@@ -185,11 +129,7 @@ async def _fetch_playlist_page(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "PlaylistItems.list HTTP {}: {}",
-            e.response.status_code,
-            e.response.text[:200],
-        )
+        logger.error("PlaylistItems.list HTTP {}: {}", e.response.status_code, e.response.text[:200])
         return [], None
     except httpx.RequestError as e:
         logger.error("PlaylistItems.list 网络错误: {}", e)
@@ -217,9 +157,9 @@ async def _fetch_video_details_batch(
         return []
 
     params = {
-        "key": api_key,
+        "key":  api_key,
         "part": "snippet,contentDetails,statistics,liveStreamingDetails",
-        "id": ",".join(video_ids),
+        "id":   ",".join(video_ids),
     }
     try:
         resp = await client.get(
@@ -229,9 +169,7 @@ async def _fetch_video_details_batch(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Videos.list HTTP {}: {}", e.response.status_code, e.response.text[:200]
-        )
+        logger.error("Videos.list HTTP {}: {}", e.response.status_code, e.response.text[:200])
         return []
     except httpx.RequestError as e:
         logger.error("Videos.list 网络错误: {}", e)
@@ -241,7 +179,6 @@ async def _fetch_video_details_batch(
 
 
 # ── 公开核心函数 ───────────────────────────────────────────────────────────────
-
 
 async def sync_channel_videos(
     session: AsyncSession,
@@ -262,7 +199,7 @@ async def sync_channel_videos(
         logger.warning("无法转换 channel_id={} 为播放列表 ID", channel.channel_id)
         return 0
 
-    db_video_columns = await _get_table_columns(session, "videos")
+    db_video_columns   = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
 
     total_processed = 0
@@ -302,9 +239,7 @@ async def sync_channel_videos(
 
     logger.info(
         "Channel {!r} 同步完成 | full_refresh={} | processed={}",
-        channel.name,
-        full_refresh,
-        total_processed,
+        channel.name, full_refresh, total_processed,
     )
     return total_processed
 
@@ -326,7 +261,7 @@ async def fetch_and_upsert_single_video(
         logger.warning("Single update: video_id={} 无数据，跳过", video_id)
         return None
 
-    db_video_columns = await _get_table_columns(session, "videos")
+    db_video_columns   = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
     video_data = parse_video_item(channel.id, channel.platform, items[0])
 
@@ -336,15 +271,10 @@ async def fetch_and_upsert_single_video(
         db_video_columns=db_video_columns,
         video_data=video_data,
     )
-
-    await _upsert_stream_async(session, channel.id, video_data, channel.platform)
-
     await session.commit()
 
     logger.info(
         "Single upsert 完成 | video_id={!r} title={!r} status={}",
-        video_id,
-        video_data.get("title"),
-        video_data.get("status"),
+        video_id, video_data.get("title"), video_data.get("status"),
     )
     return video_data
