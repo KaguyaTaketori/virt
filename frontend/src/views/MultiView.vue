@@ -19,6 +19,7 @@ import VideoGrid from '@/components/multiview/VideoGrid.vue'
 import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
 import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
 import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
+import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
 import { useThemeStore } from '@/stores/theme'
 import { getPresetMeta } from '@/utils/layoutEngine'
 
