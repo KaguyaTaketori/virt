@@ -134,7 +134,11 @@
           <div v-if="liveVideos.length > 0">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <div
-                v-for="video in liveVideos"
+                v-for="video in [...liveVideos].sort((a, b) => {
+                  if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
+                  if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
+                  return 0
+                })"
                 :key="video.id"
                 class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
                 @click="addToMultiview(video)"
@@ -305,9 +309,10 @@ const orgStore = useOrgStore()
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
 const bilibiliError = ref<string | null>(null)
-const activeTab = ref('videos')
+const activeTab = ref('live')
 
 const videos = ref<Video[]>([])
+const upcomingVideos = ref<Video[]>([])
 const liveVideos = ref<Video[]>([])
 const shortsVideos = ref<Video[]>([])
 const currentPage = ref(1)
@@ -423,11 +428,13 @@ async function fetchVideos(channelId: number) {
 async function fetchLiveVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
-    const status = platform === 'youtube' ? 'live' : undefined
-    const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, status)
-    liveVideos.value = data.videos
-    liveTotalPages.value = data.total_pages
-    liveTotalVideos.value = data.total
+    const [liveRes, upcomingRes] = await Promise.all([
+      channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'live'),
+      channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'upcoming')
+    ])
+    liveVideos.value = [...upcomingRes.data.videos, ...liveRes.data.videos]
+    liveTotalPages.value = liveRes.data.total_pages
+    liveTotalVideos.value = liveRes.data.total
   } catch (err) {
     console.error('Failed to fetch live videos:', err)
   }
@@ -437,7 +444,7 @@ async function fetchShortsVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
     const status = platform === 'youtube' ? 'short' : undefined
-    const { data } = await channelApi.getVideos(channelId, 1, 50, status)
+    const { data } = await channelApi.getVideos(channelId, 1, 48, status)
     shortsVideos.value = data.videos
   } catch (err) {
     console.error('Failed to fetch shorts videos:', err)
