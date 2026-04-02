@@ -46,7 +46,7 @@ api.interceptors.response.use(
 export interface Stream {
   id: number
   channel_id: number
-  platform: 'youtube' | 'bilibili'
+  platform: 'youtube' | 'bilibili' | 'empty'
   video_id: string | null
   title: string | null
   thumbnail_url: string | null
@@ -62,7 +62,7 @@ export interface Stream {
 
 export interface Channel {
   id: number
-  platform: 'youtube' | 'bilibili'
+  platform: 'youtube' | 'bilibili' | 'empty'
   channel_id: string
   name: string
   avatar_url: string | null

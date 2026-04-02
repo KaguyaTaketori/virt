@@ -1,5 +1,5 @@
 # backend/seed_data.py
-from app.loguru_config import logger          # ← 修正：原文件错误写成 app.loggeruru_config / loggerger
+from app.loguru_config import logger
 from app.database import SessionLocal, engine, Base
 from app.models.models import Channel, Platform
 

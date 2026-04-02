@@ -1,8 +1,7 @@
-// frontend/src/stores/stream.ts
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { streamApi } from '../api'
+import { streamApi } from '@/api'
 
 export interface Stream {
   id: number

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { themes, defaultTheme } from '../config/themes'
+import { themes, defaultTheme } from '@/config/themes'
 
 export const useThemeStore = defineStore('theme', () => {
   const currentThemeId = ref(localStorage.getItem('theme') || defaultTheme.id)

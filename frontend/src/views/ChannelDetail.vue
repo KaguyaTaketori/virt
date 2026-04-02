@@ -270,7 +270,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
 import { useOrgStore } from '../stores/org'
-import { channelApi, type Channel } from '../api'
+import { channelApi, type Channel as ApiChannel } from '../api'
+
+// 引入我们刚才新建的布局树引擎
+import { 
+  createEmptyLeaf, 
+  addChannelToTree, 
+  getActiveChannels,
+  type LayoutNode 
+} from '@/utils/layoutEngine'
 
 interface Video {
   id: string
@@ -286,7 +294,7 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
 
-const channel = ref<Channel | null>(null)
+const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
 const activeTab = ref('videos')
 
@@ -325,20 +333,43 @@ function toggleBlock() {
   }
 }
 
+// === 重点修改：适配全新的二叉树多窗系统 ===
 function addToMultiview(video?: Video) {
   if (!channel.value) return
+  
+  // 构造要添加的视频节点数据
   const channelData = {
-    platform: channel.value.platform,
+    platform: channel.value.platform as 'youtube' | 'bilibili',
     id: video ? video.id : channel.value.channel_id
   }
-  const saved = localStorage.getItem('multiview_channels')
-  const channels = saved ? JSON.parse(saved) : []
-  if (!channels.find((c: any) => c.id === channelData.id && c.platform === channelData.platform)) {
-    channels.push(channelData)
-    localStorage.setItem('multiview_channels', JSON.stringify(channels))
+
+  let tree: LayoutNode
+  try {
+    // 尝试读取现有的布局树
+    const saved = localStorage.getItem('multiview_tree')
+    tree = saved ? JSON.parse(saved) : createEmptyLeaf()
+    
+    // 检查这个视频是否已经在当前播放列表中了
+    const existingChannels = getActiveChannels(tree)
+    const isExist = existingChannels.some(
+      c => c.id === channelData.id && c.platform === channelData.platform
+    )
+
+    if (!isExist) {
+      // 核心算法：自动寻找最大面积的窗口切分一半给新视频，或者填补空位
+      addChannelToTree(tree, channelData)
+      localStorage.setItem('multiview_tree', JSON.stringify(tree))
+    }
+  } catch (err) {
+    // 如果解析失败，重新创建一个树
+    tree = createEmptyLeaf()
+    addChannelToTree(tree, channelData)
+    localStorage.setItem('multiview_tree', JSON.stringify(tree))
   }
+
   router.push({ name: 'MultiView' })
 }
+// ===========================================
 
 async function fetchChannel(id: number) {
   loading.value = true
@@ -400,8 +431,6 @@ onMounted(async () => {
   await fetchChannel(channelId)
 })
 
-// 避免你在后端改完逻辑但当前页面没重新加载时，
-// 切换 Tab 仍然展示旧的缓存数据：Tab 切换时按需重新拉取。
 watch(activeTab, async (tab) => {
   if (!channel.value) return
   const channelId = Number(route.params.id)

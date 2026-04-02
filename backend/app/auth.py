@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from app.deps import get_db
 from app.config import settings
 from app.database import SessionLocal
 from app.models.models import User
@@ -35,14 +36,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
     return encoded_jwt
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 async def get_current_user(

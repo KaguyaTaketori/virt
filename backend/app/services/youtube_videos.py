@@ -19,49 +19,6 @@ YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
 LIVE_ARCHIVE_DURATION_THRESHOLD_MINUTES = 30  # 以“视频总时长”为归类依据
 
-
-def _parse_duration(duration_str: Optional[str]) -> Optional[str]:
-    if not duration_str:
-        return None
-
-    import re
-
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration_str)
-    if not match:
-        return None
-
-    hours, minutes, seconds = match.groups()
-    parts = []
-    if hours:
-        parts.append(f"{int(hours):02d}")
-    if minutes:
-        parts.append(f"{int(minutes):02d}")
-    if seconds:
-        parts.append(f"{int(seconds):02d}")
-    elif not parts:
-        return "00:00"
-
-    return ":".join(parts)
-
-
-def _get_status_from_broadcast(live_broadcast_content: Optional[str]) -> str:
-    if live_broadcast_content == "live":
-        return "live"
-    elif live_broadcast_content == "upcoming":
-        return "upcoming"
-    else:
-        return "archive"
-
-
-def _parse_datetime(date_str: Optional[str]) -> Optional[datetime]:
-    if not date_str:
-        return None
-    try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-    except:
-        return None
-
-
 def _needs_update(channel: Channel) -> bool:
     if not channel.videos_last_fetched:
         return True

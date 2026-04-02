@@ -1,10 +1,8 @@
-<!-- frontend/src/components/StreamCard.vue ← 完整替换 -->
 <template>
   <div
     class="bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-pink-500 transition transform hover:-translate-y-1"
     @click="$emit('click', stream)"
   >
-    <!-- 缩略图区域 -->
     <div class="relative aspect-video bg-gray-900">
       <img
         v-if="stream.thumbnail_url"
@@ -20,7 +18,6 @@
         </svg>
       </div>
 
-      <!-- 状态角标 -->
       <div 
         class="absolute top-2 left-2 text-xs px-2 py-1 rounded font-bold"
         :class="{
@@ -33,7 +30,6 @@
         {{ statusText }}
       </div>
 
-      <!-- 观看人数（仅直播时显示） -->
       <div v-if="stream.status === 'live'" class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
@@ -43,10 +39,8 @@
       </div>
     </div>
 
-    <!-- 信息区域 -->
     <div class="p-4">
       <div class="flex items-start gap-3">
-        <!-- 频道头像 -->
         <img
           v-if="stream.channel_avatar"
           :src="stream.channel_avatar"

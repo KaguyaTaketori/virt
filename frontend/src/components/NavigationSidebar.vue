@@ -7,12 +7,6 @@ import {
   SlidersHorizontal, Building2, ChevronDown, ChevronUp
 } from 'lucide-vue-next'
 
-// ── 类型定义 ──────────────────────────────────────────────────────────────────
-
-/**
- * type: 'link'  — 普通导航项，点击跳转 to
- * type: 'group' — 分组折叠项，点击展开/收起子菜单，to 无效
- */
 interface NavItem {
   label: string
   icon: any
@@ -131,7 +125,6 @@ const labelClass = computed<string>(() =>
               {{ item.label }}
             </span>
 
-            <!-- 分组折叠箭头 -->
             <template v-if="item.type === 'group' && !isCollapsed">
               <component
                 :is="showAdminMenu ? ChevronUp : ChevronDown"
@@ -139,7 +132,6 @@ const labelClass = computed<string>(() =>
               />
             </template>
 
-            <!-- 角标 -->
             <span
               v-if="item.badge && !isCollapsed"
               class="ml-auto shrink-0 text-[10px] font-bold px-1.5 py-0.5
@@ -148,7 +140,6 @@ const labelClass = computed<string>(() =>
               {{ item.badge }}
             </span>
 
-            <!-- 收缩时 Tooltip -->
             <span
               v-if="isCollapsed"
               class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md
@@ -162,7 +153,6 @@ const labelClass = computed<string>(() =>
             </span>
           </button>
 
-          <!-- 管理子菜单（仅 group 类型展开时显示）-->
           <div
             v-if="item.type === 'group' && showAdminMenu && !isCollapsed"
             class="ml-4 mt-1 space-y-0.5"
@@ -196,7 +186,6 @@ const labelClass = computed<string>(() =>
       </template>
     </div>
 
-    <!-- 底部偏好设置 -->
     <div class="shrink-0 border-t border-zinc-800 py-3 px-2">
       <button
         class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5

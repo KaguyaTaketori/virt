@@ -20,8 +20,9 @@ class DanmakuPoller:
         with self.lock:
             if video_id in self.pollers:
                 return
-
-            poller = VideoPoller(video_id)
+            
+            loop = asyncio.get_event_loop()
+            poller = VideoPoller(video_id, loop)
             self.pollers[video_id] = poller
             poller.start()
 
@@ -41,7 +42,7 @@ class DanmakuPoller:
 class VideoPoller:
     """单个视频的轮询器"""
 
-    def __init__(self, video_id: str):
+    def __init__(self, video_id: str, loop: asyncio.AbstractEventLoop):
         self.video_id = video_id
         self.downloader = YouTubeChatDownloader()
         self.continuation: Optional[str] = None
@@ -52,6 +53,7 @@ class VideoPoller:
         self.thread: Optional[threading.Thread] = None
         self.last_message_ids: Set[str] = set()
         self._initialized = False
+        self.loop = loop
 
     def _initialize(self):
         """初始化：获取视频信息和continuation token"""
@@ -108,7 +110,14 @@ class VideoPoller:
                 if messages:
                     new_messages = self._filter_new_messages(messages)
                     if new_messages:
-                        asyncio.run(self._send_messages(new_messages))
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._send_messages(new_messages),
+                            self.loop
+                        )
+                        try:
+                            future.result(timeout=5)
+                        except Exception as e:
+                            logger.error("发送弹幕失败: {}", e)
 
                 time.sleep(1.0)
             except Exception as e:
@@ -256,7 +265,11 @@ class VideoPoller:
             if all_messages:
                 new_messages = self._filter_new_messages(all_messages)
                 if new_messages:
-                    asyncio.run(self._send_messages(new_messages))
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._send_messages(new_messages),
+                        self.loop
+                    )
+                    future.result(timeout=10)
         except Exception as e:
             logger.error("Error fetching replay: {}", e)
 
