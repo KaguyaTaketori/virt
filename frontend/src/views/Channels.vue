@@ -61,7 +61,7 @@
       <div
         v-for="channel in filteredChannels"
         :key="channel.id"
-        @click="goToChannel(channel.id)"
+        @click="goToChannel(channel)"
         class="group cursor-pointer"
       >
         <div class="relative aspect-square mb-3">
@@ -134,8 +134,8 @@ function getOrgName(orgId: number | null): string {
   return org?.name || '未知机构'
 }
 
-function goToChannel(id: number) {
-  router.push(`/channel/${id}`)
+function goToChannel(channel: any) {
+  router.push(`/channel/${channel.channel_id}`)
 }
 
 async function fetchChannels() {
