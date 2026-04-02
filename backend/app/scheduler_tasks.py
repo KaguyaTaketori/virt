@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models.models import Channel, Stream, StreamStatus, Platform
+from app.models.models import Channel, Stream, StreamStatus, Platform, Video
 from app.services.youtube_fetcher import (
     get_videos_details,
     parse_youtube_stream,
@@ -239,6 +239,82 @@ def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platfor
             stream.peak_viewers = parsed["viewer_count"]
 
 
+# ── Video 表同步到 Stream 表 ─────────────────────────────────────────────────
+
+
+async def sync_youtube_streams_from_videos():
+    """定时任务：从 Video 表同步 upcoming/live 视频到 Stream 表（兜底）"""
+    if not settings.youtube_api_key:
+        return
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(Video).where(
+                Video.platform == "youtube",
+                Video.status.in_(["live", "upcoming"]),
+            )
+        )
+        videos = result.scalars().all()
+
+        if not videos:
+            return
+
+        logger.info("从 Video 表同步 {} 个 upcoming/live 视频到 Stream 表", len(videos))
+
+        for video in videos:
+            video_data = {
+                "video_id": video.video_id,
+                "title": video.title,
+                "thumbnail_url": video.thumbnail_url,
+                "view_count": video.view_count,
+                "status": video.status,
+                "scheduled_at": video.scheduled_at,
+                "live_started_at": video.live_started_at,
+                "live_chat_id": video.live_chat_id,
+            }
+
+            stream_status_map = {
+                "live": StreamStatus.LIVE,
+                "upcoming": StreamStatus.UPCOMING,
+            }
+            stream_status = stream_status_map.get(video.status)
+            if not stream_status:
+                continue
+
+            stream = await session.execute(
+                select(Stream).where(
+                    Stream.channel_id == video.channel_id,
+                    Stream.video_id == video.video_id,
+                )
+            )
+            stream = stream.scalar_one_or_none()
+
+            if not stream:
+                stream = Stream(
+                    channel_id=video.channel_id,
+                    platform=Platform.YOUTUBE,
+                    video_id=video.video_id,
+                )
+                session.add(stream)
+
+            stream.title = video.title
+            stream.thumbnail_url = video.thumbnail_url
+            stream.viewer_count = video.view_count or 0
+            stream.status = stream_status
+            stream.scheduled_at = video.scheduled_at
+            stream.started_at = video.live_started_at
+            stream.live_chat_id = video.live_chat_id
+            stream.updated_at = datetime.now(timezone.utc)
+
+            if (video.view_count or 0) > (stream.peak_viewers or 0):
+                stream.peak_viewers = video.view_count
+
+        await session.commit()
+        logger.info("Video → Stream 同步完成")
+
+
 # ── 频道详情刷新 ─────────────────────────────────────────────────────────────
 
 
@@ -321,6 +397,13 @@ def start_scheduler():
         "interval",
         minutes=5,
         id="yt_update",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        sync_youtube_streams_from_videos,
+        "interval",
+        minutes=5,
+        id="yt_sync_from_videos",
         replace_existing=True,
     )
     scheduler.add_job(

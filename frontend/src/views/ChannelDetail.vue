@@ -176,7 +176,7 @@
               <n-pagination
                 v-model:page="liveCurrentPage"
                 :page-count="liveTotalPages"
-                @update:page="fetchLiveVideos(Number(route.params.id))"
+                @update:page="fetchLiveVideos(Number(route.params.channel_id))"
               />
             </div>
           </div>
@@ -217,7 +217,7 @@
             <n-pagination
               v-model:page="currentPage"
               :page-count="totalPages"
-              @update:page="fetchVideos(Number(route.params.id))"
+              @update:page="fetchVideos(Number(route.params.channel_id))"
             />
           </div>
         </div>
@@ -423,11 +423,20 @@ async function fetchVideos(channelId: number) {
 async function fetchLiveVideos(channelId: number) {
   try {
     const platform = channel.value?.platform
-    const status = platform === 'youtube' ? 'live' : undefined
-    const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, status)
-    liveVideos.value = data.videos
-    liveTotalPages.value = data.total_pages
-    liveTotalVideos.value = data.total
+    if (platform === 'youtube') {
+      const [liveRes, upcomingRes] = await Promise.all([
+        channelApi.getVideos(channelId, 1, 24, 'live'),
+        channelApi.getVideos(channelId, 1, 24, 'upcoming'),
+      ])
+      liveVideos.value = [...liveRes.data.videos, ...upcomingRes.data.videos]
+      liveTotalPages.value = 1
+      liveTotalVideos.value = liveVideos.value.length
+    } else {
+      const { data } = await channelApi.getVideos(channelId, liveCurrentPage.value, 48, undefined)
+      liveVideos.value = data.videos
+      liveTotalPages.value = data.total_pages
+      liveTotalVideos.value = data.total
+    }
   } catch (err) {
     console.error('Failed to fetch live videos:', err)
   }
@@ -446,13 +455,13 @@ async function fetchShortsVideos(channelId: number) {
 
 onMounted(async () => {
   await orgStore.fetchOrganizations()
-  const channelId = Number(route.params.id)
+  const channelId = Number(route.params.channel_id)
   await fetchChannel(channelId)
 })
 
 watch(activeTab, async (tab) => {
   if (!channel.value) return
-  const channelId = Number(route.params.id)
+  const channelId = Number(route.params.channel_id)
   if (tab === 'videos') {
     currentPage.value = 1
     await fetchVideos(channelId)
