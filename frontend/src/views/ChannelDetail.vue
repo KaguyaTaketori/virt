@@ -176,7 +176,7 @@
               <n-pagination
                 v-model:page="liveCurrentPage"
                 :page-count="liveTotalPages"
-                @update:page="fetchLiveVideos(route.params.channel_id as string)"
+                @update:page="fetchLiveVideos(Number(route.params.channel_id))"
               />
             </div>
           </div>
@@ -217,7 +217,7 @@
             <n-pagination
               v-model:page="currentPage"
               :page-count="totalPages"
-              @update:page="fetchVideos(route.params.channel_id as string)"
+              @update:page="fetchVideos(Number(route.params.channel_id))"
             />
           </div>
         </div>
