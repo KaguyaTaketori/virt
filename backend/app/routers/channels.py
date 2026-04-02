@@ -97,11 +97,11 @@ def get_channels(
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
 async def get_channel(
-    channel_id: str,
+    channel_id: int,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
+    channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
@@ -130,7 +130,7 @@ async def get_channel(
 
 @router.get("/{channel_id}/videos", response_model=PaginatedVideosResponse)
 async def get_channel_videos(
-    channel_id: str,
+    channel_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     status: Optional[str] = Query(
@@ -138,7 +138,7 @@ async def get_channel_videos(
     ),
     db: Session = Depends(get_db),
 ):
-    channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
+    channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
