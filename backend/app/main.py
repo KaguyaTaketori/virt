@@ -1,6 +1,6 @@
 import time
 
-from app.loguru_config import logger 
+from app.loguru_config import logger
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ from app.routers import (
     organizations,
     auth,
     user_channels,
+    permissions,
 )
 from app.services.youtube_websub import router as youtube_websub_router
 from app.database import engine, Base
@@ -65,6 +66,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
@@ -78,6 +80,7 @@ async def log_requests(request: Request, call_next):
     )
     return response
 
+
 app.include_router(streams.router)
 app.include_router(channels.router)
 app.include_router(danmaku.router)
@@ -86,6 +89,7 @@ app.include_router(websocket.router)
 app.include_router(organizations.router)
 app.include_router(auth.router)
 app.include_router(user_channels.router)
+app.include_router(permissions.router)
 app.include_router(youtube_websub_router)
 
 

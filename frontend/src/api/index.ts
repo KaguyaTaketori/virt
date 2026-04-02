@@ -205,4 +205,47 @@ export const adminVideosApi = {
     api.post('/api/admin/videos/batch-update-status', payload),
 }
 
+export interface Role {
+  id: number
+  name: string
+  description: string | null
+}
+
+export interface Permission {
+  id: number
+  name: string
+  description: string | null
+  resource: string
+  action: string
+}
+
+export interface UserWithRoles {
+  id: number
+  username: string
+  email: string | null
+  created_at: string
+  roles: string[]
+}
+
+export const adminPermissionsApi = {
+  getRoles: () => api.get<Role[]>('/api/admin/permissions/roles'),
+  createRole: (data: { name: string; description?: string }) =>
+    api.post<Role>('/api/admin/permissions/roles', data),
+  getPermissions: () => api.get<Permission[]>('/api/admin/permissions/permissions'),
+  createPermission: (data: { name: string; description?: string; resource: string; action: string }) =>
+    api.post<Permission>('/api/admin/permissions/permissions', data),
+  assignPermissionsToRole: (roleId: number, permissionIds: number[]) =>
+    api.post(`/api/admin/permissions/roles/${roleId}/permissions`, permissionIds),
+  getUsers: (skip = 0, limit = 100) =>
+    api.get<UserWithRoles[]>('/api/admin/permissions/users', { params: { skip, limit } }),
+  getUser: (userId: number) =>
+    api.get<UserWithRoles>(`/api/admin/permissions/users/${userId}`),
+  updateUserRoles: (userId: number, roleIds: number[]) =>
+    api.put(`/api/admin/permissions/users/${userId}/roles`, { role_ids: roleIds }),
+  createResourceACL: (userId: number, resource: string, resourceId: number, access: string) =>
+    api.post(`/api/admin/permissions/users/${userId}/resource-acl`, null, { params: { resource, resource_id: resourceId, access } }),
+  deleteResourceACL: (aclId: number) =>
+    api.delete(`/api/admin/permissions/resource-acl/${aclId}`),
+}
+
 export default api

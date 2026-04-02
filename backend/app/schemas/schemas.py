@@ -15,9 +15,34 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     created_at: datetime
+    roles: Optional[list[str]] = []
 
     class Config:
         from_attributes = True
+
+
+class RoleResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PermissionResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    resource: str
+    action: str
+
+    class Config:
+        from_attributes = True
+
+
+class UserRoleUpdate(BaseModel):
+    role_ids: list[int]
 
 
 class Token(BaseModel):

@@ -25,11 +25,13 @@ from app.services.bilibili_fetcher import (
 )
 from app.auth import get_current_user_optional
 from app.config import settings
+from app.services.permissions import get_user_roles
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
+
 
 def _apply_user_status(
     response: ChannelResponse,
@@ -48,12 +50,13 @@ def _apply_user_status(
         .first()
     )
     if uc:
-        response.is_liked   = uc.status == "liked"
+        response.is_liked = uc.status == "liked"
         response.is_blocked = uc.status == "blocked"
     return response
 
 
 # ── 路由 ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("", response_model=List[ChannelResponse])
 def get_channels(
@@ -78,9 +81,7 @@ def get_channels(
 
     # 批量加载用户状态，避免 N+1
     user_channels = (
-        db.query(UserChannel)
-        .filter(UserChannel.user_id == current_user.id)
-        .all()
+        db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
     )
     status_map = {uc.channel_id: uc.status for uc in user_channels}
 
@@ -88,7 +89,7 @@ def get_channels(
     for ch in channels:
         resp = ChannelResponse.model_validate(ch)
         st = status_map.get(ch.id)
-        resp.is_liked   = st == "liked"
+        resp.is_liked = st == "liked"
         resp.is_blocked = st == "blocked"
         result.append(resp)
     return result
@@ -106,22 +107,25 @@ async def get_channel(
 
     response = ChannelResponse.model_validate(channel)
 
-    # Bilibili 实时信息（粉丝数等）在频道详情页按需拉取
     if channel.platform == Platform.BILIBILI:
+        if not current_user:
+            raise HTTPException(status_code=403, detail="B站功能需要登录后访问")
+        roles = get_user_roles(current_user.id, db)
+        if not any(r in roles for r in ["superadmin", "admin", "operator", "user"]):
+            raise HTTPException(status_code=403, detail="B站功能需要注册用户权限")
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             user_info = await fetch_bilibili_user_info(client, channel.channel_id)
             if user_info:
-                response.bilibili_sign          = user_info.get("sign")
-                response.bilibili_fans          = user_info.get("follower")
+                response.bilibili_sign = user_info.get("sign")
+                response.bilibili_fans = user_info.get("follower")
                 response.bilibili_archive_count = user_info.get("archive_count")
                 if not response.avatar_url:
                     response.avatar_url = user_info.get("avatar_url")
                 if not response.name:
                     response.name = user_info.get("name")
 
-    return _apply_user_status(
-        response, db, current_user.id if current_user else None
-    )
+    return _apply_user_status(response, db, current_user.id if current_user else None)
 
 
 @router.get("/{channel_id}/videos", response_model=PaginatedVideosResponse)
@@ -129,7 +133,9 @@ async def get_channel_videos(
     channel_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
-    status: Optional[str] = Query(None, description="Filter: live/upcoming/archive/upload/short"),
+    status: Optional[str] = Query(
+        None, description="Filter: live/upcoming/archive/upload/short"
+    ),
     db: Session = Depends(get_db),
 ):
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
@@ -148,9 +154,9 @@ async def get_channel_videos(
         if status:
             query = query.filter(Video.status == status)
 
-        total      = query.count()
+        total = query.count()
         total_pages = (total + page_size - 1) // page_size if total else 0
-        videos_db  = (
+        videos_db = (
             query.order_by(Video.published_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -165,7 +171,9 @@ async def get_channel_videos(
                     thumbnail_url=v.thumbnail_url or "",
                     duration=v.duration or "",
                     view_count=v.view_count or 0,
-                    published_at=v.published_at.strftime("%Y-%m-%d") if v.published_at else None,
+                    published_at=v.published_at.strftime("%Y-%m-%d")
+                    if v.published_at
+                    else None,
                     status=v.status or "archive",
                 )
                 for v in videos_db
@@ -176,7 +184,9 @@ async def get_channel_videos(
             total_pages=total_pages,
         )
 
-    return PaginatedVideosResponse(videos=[], total=0, page=page, page_size=page_size, total_pages=0)
+    return PaginatedVideosResponse(
+        videos=[], total=0, page=page, page_size=page_size, total_pages=0
+    )
 
 
 @router.post("", response_model=ChannelResponse)
@@ -217,8 +227,8 @@ async def create_channel(
 
     # 新增 YouTube 频道后后台异步回填 + WebSub 订阅
     if db_channel.platform == Platform.YOUTUBE:
-        channel_id  = db_channel.id
-        api_key     = settings.youtube_api_key
+        channel_id = db_channel.id
+        api_key = settings.youtube_api_key
         callback_url = settings.websub_callback_url
 
         async def _bg_sync_and_subscribe():
@@ -269,14 +279,20 @@ def delete_channel(channel_id: int, db: Session = Depends(get_db)):
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    db.query(Video).filter(Video.channel_id == channel_id).delete(synchronize_session=False)
-    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(synchronize_session=False)
+    db.query(Video).filter(Video.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
+    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
     db.query(Danmaku).filter(
         Danmaku.stream_id.in_(
             db.query(Stream.id).filter(Stream.channel_id == channel_id)
         )
     ).delete(synchronize_session=False)
-    db.query(Stream).filter(Stream.channel_id == channel_id).delete(synchronize_session=False)
+    db.query(Stream).filter(Stream.channel_id == channel_id).delete(
+        synchronize_session=False
+    )
     db.delete(channel)
     db.commit()
     return {"message": "Channel deleted successfully"}

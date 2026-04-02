@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import hashlib
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -11,16 +12,24 @@ from app.database import SessionLocal
 from app.models.models import User
 from app.schemas.schemas import TokenData
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
+def _pre_hash_password(password: str) -> str:
+    """SHA-256 预哈希，避免 bcrypt 72 字节限制"""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """验证密码：SHA-256 预哈希后使用 bcrypt 验证"""
+    pre_hashed = _pre_hash_password(plain_password)
+    return bcrypt.checkpw(pre_hashed.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """生成密码哈希：SHA-256 预哈希后使用 bcrypt"""
+    pre_hashed = _pre_hash_password(password)
+    return bcrypt.hashpw(pre_hashed.encode("utf-8"), bcrypt.gensalt()).decode()
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

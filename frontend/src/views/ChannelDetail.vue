@@ -3,6 +3,14 @@
     <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-pink-500"></div>
   </div>
 
+  <div v-else-if="bilibiliError" class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="bg-zinc-800 p-8 rounded-lg max-w-md">
+      <h3 class="text-xl font-bold text-yellow-400 mb-2">需要登录</h3>
+      <p class="text-gray-300 mb-4">{{ bilibiliError }}</p>
+      <n-button type="primary" @click="goToLogin">去登录</n-button>
+    </div>
+  </div>
+
   <div v-else-if="channel" class="min-h-screen bg-zinc-950">
     <!-- Banner -->
     <div 
@@ -296,6 +304,7 @@ const orgStore = useOrgStore()
 
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
+const bilibiliError = ref<string | null>(null)
 const activeTab = ref('videos')
 
 const videos = ref<Video[]>([])
@@ -369,10 +378,15 @@ function addToMultiview(video?: Video) {
 
   router.push({ name: 'MultiView' })
 }
+
+function goToLogin() {
+  router.push({ name: 'Login' })
+}
 // ===========================================
 
 async function fetchChannel(id: number) {
   loading.value = true
+  bilibiliError.value = null
   try {
     const { data } = await channelApi.get(id)
     channel.value = data
@@ -381,8 +395,13 @@ async function fetchChannel(id: number) {
     await fetchVideos(id)
     await fetchLiveVideos(id)
     await fetchShortsVideos(id)
-  } catch (err) {
-    console.error('Failed to fetch channel:', err)
+  } catch (err: any) {
+    if (err.response?.status === 403) {
+      bilibiliError.value = err.response.data?.detail || 'B站功能需要登录后访问'
+      channel.value = null
+    } else {
+      console.error('Failed to fetch channel:', err)
+    }
   } finally {
     loading.value = false
   }

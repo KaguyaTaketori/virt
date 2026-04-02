@@ -26,6 +26,32 @@ class User(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     channels = relationship("UserChannel", back_populates="user")
+    user_roles = relationship("UserRole", back_populates="user")
+    login_logs = relationship("UserLoginLog", back_populates="user")
+
+
+class UserLoginLog(Base):
+    """用户登录记录表"""
+
+    __tablename__ = "user_login_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    ip_address = Column(String(45), nullable=True)  # 支持IPv6
+    user_agent = Column(String(500), nullable=True)
+    country = Column(String(100), nullable=True)
+    region = Column(String(100), nullable=True)
+    city = Column(String(100), nullable=True)
+    isp = Column(String(100), nullable=True)
+    login_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    success = Column(Boolean, default=True)
+    fail_reason = Column(String(200), nullable=True)
+
+    user = relationship("User", back_populates="login_logs")
+
+    __table_args__ = (Index("ix_user_login_log_user_login_at", "user_id", "login_at"),)
 
 
 class UserChannel(Base):
@@ -149,12 +175,12 @@ class Video(Base):
     published_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="archive")
     fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    duration_secs   = Column(Integer,  nullable=True)          # 秒数，便于 Shorts 判断
-    like_count      = Column(BigInteger, nullable=True)
-    live_chat_id    = Column(String(100), nullable=True)
-    scheduled_at    = Column(DateTime, nullable=True)
+    duration_secs = Column(Integer, nullable=True)  # 秒数，便于 Shorts 判断
+    like_count = Column(BigInteger, nullable=True)
+    live_chat_id = Column(String(100), nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
     live_started_at = Column(DateTime, nullable=True)
-    live_ended_at   = Column(DateTime, nullable=True)
+    live_ended_at = Column(DateTime, nullable=True)
 
     channel = relationship("Channel", back_populates="videos")
 
@@ -181,20 +207,121 @@ class Danmaku(Base):
 
 # backend/app/models/models.py 末尾追加
 
+
 class WebSubSubscription(Base):
     """记录每个 YouTube 频道的 WebSub/PubSubHubbub 订阅状态。"""
+
     __tablename__ = "websub_subscriptions"
 
-    id             = Column(Integer, primary_key=True, index=True)
-    channel_id     = Column(Integer, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False, unique=True)
-    topic_url      = Column(String(300), nullable=False)
-    hub_url        = Column(String(300), nullable=False)
-    secret         = Column(String(100), nullable=True)
-    verified       = Column(Boolean, default=False)
-    expires_at     = Column(DateTime, nullable=True)
-    subscribed_at  = Column(DateTime, nullable=True)
-    last_push_at   = Column(DateTime, nullable=True)
-    push_count     = Column(Integer, default=0)
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(
+        Integer,
+        ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    topic_url = Column(String(300), nullable=False)
+    hub_url = Column(String(300), nullable=False)
+    secret = Column(String(100), nullable=True)
+    verified = Column(Boolean, default=False)
+    expires_at = Column(DateTime, nullable=True)
+    subscribed_at = Column(DateTime, nullable=True)
+    last_push_at = Column(DateTime, nullable=True)
+    push_count = Column(Integer, default=0)
 
     channel = relationship("Channel")
 
+
+class Role(Base):
+    """角色定义表"""
+
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, nullable=False)
+    description = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    users = relationship("UserRole", back_populates="role")
+    permissions = relationship("RolePermission", back_populates="role")
+
+
+class Permission(Base):
+    """权限定义表"""
+
+    __tablename__ = "permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(String(200), nullable=True)
+    resource = Column(String(50), nullable=False)  # channel, user, system, etc.
+    action = Column(String(50), nullable=False)  # create, read, update, delete, manage
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    roles = relationship("RolePermission", back_populates="permission")
+
+
+class UserRole(Base):
+    """用户-角色关联表"""
+
+    __tablename__ = "user_roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role_id = Column(
+        Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="user_roles")
+    role = relationship("Role", back_populates="users")
+
+    __table_args__ = (Index("ix_user_role_unique", "user_id", "role_id", unique=True),)
+
+
+class RolePermission(Base):
+    """角色-权限关联表"""
+
+    __tablename__ = "role_permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(
+        Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
+    )
+    permission_id = Column(
+        Integer, ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    role = relationship("Role", back_populates="permissions")
+    permission = relationship("Permission", back_populates="roles")
+
+    __table_args__ = (
+        Index("ix_role_permission_unique", "role_id", "permission_id", unique=True),
+    )
+
+
+class ResourceACL(Base):
+    """用户-特定资源实例的ACL映射表（资源级权限）"""
+
+    __tablename__ = "resource_acls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    resource = Column(String(50), nullable=False)  # channel, organization, etc.
+    resource_id = Column(Integer, nullable=False)  # 具体资源ID
+    access = Column(String(20), nullable=False)  # owner, editor, viewer
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index(
+            "ix_resource_acl_unique", "user_id", "resource", "resource_id", unique=True
+        ),
+        Index("ix_resource_acl_lookup", "resource", "resource_id"),
+    )

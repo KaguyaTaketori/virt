@@ -4,8 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Home, Heart, Tv2, ListVideo,
   LayoutGrid, Music, HelpCircle, Settings,
-  SlidersHorizontal, Building2, ChevronDown, ChevronUp
+  SlidersHorizontal, Building2, ChevronDown, ChevronUp,
+  Users, Shield
 } from 'lucide-vue-next'
+import { useAuthStore } from '@/stores/auth'
 
 interface NavItem {
   label: string
@@ -26,6 +28,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const showAdminMenu = ref(false)
+const authStore = useAuthStore()
 
 const navSections: NavSection[] = [
   {
@@ -179,6 +182,32 @@ const labelClass = computed<string>(() =>
             >
               <Building2 style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
               <span class="font-medium">机构管理</span>
+            </button>
+
+            <button
+              v-if="authStore.isAdmin"
+              @click="router.push('/admin/users')"
+              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
+                     text-sm transition-colors duration-150"
+              :class="route.path.startsWith('/admin/users')
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+            >
+              <Users style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
+              <span class="font-medium">用户管理</span>
+            </button>
+
+            <button
+              v-if="authStore.isSuperAdmin"
+              @click="router.push('/admin/roles')"
+              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
+                     text-sm transition-colors duration-150"
+              :class="route.path.startsWith('/admin/roles')
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+            >
+              <Shield style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
+              <span class="font-medium">角色与权限</span>
             </button>
           </div>
         </div>
