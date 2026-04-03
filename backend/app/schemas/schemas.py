@@ -16,6 +16,7 @@ class UserResponse(BaseModel):
     email: Optional[str] = None
     created_at: datetime
     roles: Optional[list[str]] = []
+    permissions: Optional[list[str]] = []
 
     class Config:
         from_attributes = True
@@ -88,7 +89,12 @@ class ChannelBase(BaseModel):
     avatar_url: Optional[str] = None
     is_active: bool = True
     org_id: Optional[int] = None
-    avatar_shape: Optional[str] = "circle"  # circle or square
+    avatar_shape: Optional[str] = "circle"
+    twitter_url: Optional[str] = None
+    youtube_url: Optional[str] = None
+    twitch_url: Optional[str] = None
+    group: Optional[str] = None
+    status: Optional[str] = "active"
 
 
 class ChannelUpdate(BaseModel):
@@ -102,7 +108,10 @@ class ChannelUpdate(BaseModel):
     banner_url: Optional[str] = None
     twitter_url: Optional[str] = None
     youtube_url: Optional[str] = None
+    twitch_url: Optional[str] = None
     description: Optional[str] = None
+    group: Optional[str] = None
+    status: Optional[str] = None
 
 
 class ChannelCreate(ChannelBase):
@@ -115,7 +124,10 @@ class ChannelResponse(ChannelBase):
     banner_url: Optional[str] = None
     twitter_url: Optional[str] = None
     youtube_url: Optional[str] = None
+    twitch_url: Optional[str] = None
     description: Optional[str] = None
+    group: Optional[str] = None
+    status: Optional[str] = "active"
     is_liked: Optional[bool] = False
     is_blocked: Optional[bool] = False
     bilibili_sign: Optional[str] = None

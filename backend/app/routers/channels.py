@@ -25,7 +25,8 @@ from app.services.bilibili_fetcher import (
 )
 from app.auth import get_current_user_optional
 from app.config import settings
-from app.services.permissions import get_user_roles
+from app.services.permissions import get_user_roles, has_permission
+from app.services.scraper import sync as scraper_sync
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -67,6 +68,14 @@ def get_channels(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     query = db.query(Channel)
+
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+
+    if not has_bilibili_perm:
+        query = query.filter(Channel.platform == "youtube")
+
     if platform:
         query = query.filter(Channel.platform == platform)
     if is_active is not None:
@@ -96,7 +105,7 @@ def get_channels(
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
-async def get_channel(
+def get_channel_by_id(
     channel_id: int,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -105,27 +114,29 @@ async def get_channel(
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    response = ChannelResponse.model_validate(channel)
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
 
-    if channel.platform == Platform.BILIBILI:
-        if not current_user:
-            raise HTTPException(status_code=403, detail="B站功能需要登录后访问")
-        roles = get_user_roles(current_user.id, db)
-        if not any(r in roles for r in ["superadmin", "admin", "operator", "user"]):
-            raise HTTPException(status_code=403, detail="B站功能需要注册用户权限")
+    if channel.platform == Platform.BILIBILI and not has_bilibili_perm:
+        raise HTTPException(status_code=403, detail="需要B站访问权限")
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            user_info = await fetch_bilibili_user_info(client, channel.channel_id)
-            if user_info:
-                response.bilibili_sign = user_info.get("sign")
-                response.bilibili_fans = user_info.get("follower")
-                response.bilibili_archive_count = user_info.get("archive_count")
-                if not response.avatar_url:
-                    response.avatar_url = user_info.get("avatar_url")
-                if not response.name:
-                    response.name = user_info.get("name")
+    resp = ChannelResponse.model_validate(channel)
 
-    return _apply_user_status(response, db, current_user.id if current_user else None)
+    if current_user:
+        uc = (
+            db.query(UserChannel)
+            .filter(
+                UserChannel.user_id == current_user.id,
+                UserChannel.channel_id == channel_id,
+            )
+            .first()
+        )
+        if uc:
+            resp.is_liked = uc.status == "liked"
+            resp.is_blocked = uc.status == "blocked"
+
+    return resp
 
 
 @router.get("/{channel_id}/videos", response_model=PaginatedVideosResponse)
@@ -314,3 +325,38 @@ async def refresh_channel(channel_id: int, db: Session = Depends(get_db)):
             db.refresh(channel)
 
     return channel
+
+
+# ── Wiki Scraper 路由 ────────────────────────────────────────────────────────
+
+
+@router.post("/scrape/vspo", tags=["scraper"])
+async def scrape_vspo_channels(db: Session = Depends(get_db)):
+    """爬取VSPO! Wiki频道列表"""
+    try:
+        result = await scraper_sync.scrape_and_sync_vspo(db)
+        return {"status": "success", "source": "vspo", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scrape VSPO!: {str(e)}")
+
+
+@router.post("/scrape/nijisanji", tags=["scraper"])
+async def scrape_nijisanji_channels(db: Session = Depends(get_db)):
+    """爬取Nijisanji Wiki频道列表"""
+    try:
+        result = await scraper_sync.scrape_and_sync_nijisanji(db)
+        return {"status": "success", "source": "nijisanji", **result}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to scrape Nijisanji!: {str(e)}"
+        )
+
+
+@router.post("/scrape/all", tags=["scraper"])
+async def scrape_all_channels(db: Session = Depends(get_db)):
+    """爬取所有支持的VTuber Wiki频道列表"""
+    try:
+        result = await scraper_sync.scrape_and_sync_all(db)
+        return {"status": "success", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scrape: {str(e)}")

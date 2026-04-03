@@ -142,34 +142,62 @@ async def update_youtube_streams():
 
 
 async def update_bilibili_streams():
-    db = SessionLocal()
-    try:
-        channels = (
-            db.query(Channel)
-            .filter(Channel.platform == Platform.BILIBILI, Channel.is_active == True)
-            .all()
+    """使用 AsyncSession，与 YouTube 任务保持一致。"""
+    async with AsyncSessionFactory() as db:
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(Channel).where(
+                Channel.platform == Platform.BILIBILI,
+                Channel.is_active.is_(True),
+            )
         )
+        channels = result.scalars().all()
         if not channels:
             return
 
         uid_to_ch_id = {ch.channel_id: ch.id for ch in channels}
         uids = list(uid_to_ch_id.keys())
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            rooms_data = await get_rooms_by_uids(client, uids)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        rooms_data = await get_rooms_by_uids(client, uids)
 
+    async with AsyncSessionFactory() as db:
         for uid, room_data in rooms_data.items():
             if uid in uid_to_ch_id:
                 parsed = parse_bilibili_room(room_data)
-                _upsert_stream(db, uid_to_ch_id[uid], parsed, Platform.BILIBILI)
-
-        db.commit()
+                await _async_upsert_stream(
+                    db, uid_to_ch_id[uid], parsed, Platform.BILIBILI
+                )
+        await db.commit()
         logger.info("更新 {} 个房间", len(rooms_data))
-    except Exception as e:
-        logger.error("Error: {}", e)
-        db.rollback()
-    finally:
-        db.close()
+
+
+async def _async_upsert_stream(db, channel_id: int, parsed: dict, platform):
+    """异步版本的 upsert，供调度器使用。"""
+    from sqlalchemy import select, update
+    from app.models.models import Stream
+
+    result = await db.execute(
+        select(Stream).where(
+            Stream.channel_id == channel_id,
+            Stream.video_id == parsed["video_id"],
+        )
+    )
+    stream = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+
+    if not stream:
+        stream = Stream(channel_id=channel_id, platform=platform)
+        db.add(stream)
+
+    for field, value in parsed.items():
+        if getattr(stream, field, None) != value:
+            setattr(stream, field, value)
+
+    stream.updated_at = now
+    if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
+        stream.peak_viewers = parsed["viewer_count"]
 
 
 async def sync_bilibili_channels():
@@ -365,9 +393,23 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Wiki Scraper - 每周日凌晨2点(UTC)执行
+    from app.services.scraper import sync as scraper_sync
+
+    scheduler.add_job(
+        scraper_sync.scheduled_scrape_all,
+        "cron",
+        hour=2,
+        minute=0,
+        day_of_week=6,  # 0=monday, 6=sunday
+        id="wiki_scrape_weekly",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "yt_update=5min | bili_update=2min"
         " | bili_sync_ch=24h | channel_refresh=24h"
         " | daily_backfill=04:00 | websub_renew=每8天"
+        " | wiki_scrape=每周日02:00"
     )
