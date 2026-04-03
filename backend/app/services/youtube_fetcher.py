@@ -3,19 +3,9 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 from app.config import settings
+from app.services.youtube_utils import parse_yt_datetime
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
-
-
-def _parse_yt_datetime(s: Optional[str]) -> Optional[datetime]:
-    """把 YouTube 返回的 ISO 8601 字符串转成 aware datetime。"""
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return None
-
 
 async def get_channel_live_video_ids(
     client: httpx.AsyncClient,
@@ -100,8 +90,8 @@ def parse_youtube_stream(item: dict) -> Optional[dict]:
         "thumbnail_url": thumbnail_url,
         "status": status_map.get(life_cycle, "archive"),
         "viewer_count": viewer_count,
-        "scheduled_at": _parse_yt_datetime(live_details.get("scheduledStartTime")),
-        "started_at": _parse_yt_datetime(live_details.get("actualStartTime")),
-        "ended_at": _parse_yt_datetime(live_details.get("actualEndTime")),
+        "scheduled_at": parse_yt_datetime(live_details.get("scheduledStartTime")),
+        "started_at": parse_yt_datetime(live_details.get("actualStartTime")),
+        "ended_at": parse_yt_datetime(live_details.get("actualEndTime")),
         "live_chat_id": live_details.get("activeLiveChatId"),
     }

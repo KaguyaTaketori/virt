@@ -1,7 +1,3 @@
-# backend/seed_data.py
-import os
-import bcrypt
-import hashlib
 from app.loguru_config import logger
 from app.database import SessionLocal, engine, Base
 from app.models.models import (

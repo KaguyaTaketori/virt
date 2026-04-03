@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
-
-import httpx
 
 from app.deps import get_db
+from app.deps.permissions import AdminUser, require_permission_dep
 from app.database_async import AsyncSessionFactory
 from app.schemas.schemas import (
     ChannelCreate,
@@ -19,27 +17,23 @@ from app.services.youtube_channel import get_youtube_channel_info, get_channel_d
 from app.services.youtube_videos import get_channel_videos as fetch_channel_videos
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_channel
-from app.services.bilibili_fetcher import (
-    get_user_info as fetch_bilibili_user_info,
-    sync_bilibili_channel_videos,
-)
+from app.services.bilibili_fetcher import sync_bilibili_channel_videos
 from app.auth import get_current_user_optional
 from app.config import settings
-from app.services.permissions import get_user_roles, has_permission
+from app.services.permissions import has_permission
 from app.services.scraper import sync as scraper_sync
+from app.loguru_config import logger
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
-
 def _apply_user_status(
     response: ChannelResponse,
     db: Session,
     user_id: Optional[int],
 ) -> ChannelResponse:
-    """将当前用户对频道的 liked/blocked 状态附加到响应对象。"""
     if not user_id:
         return response
     uc = (
@@ -56,8 +50,7 @@ def _apply_user_status(
     return response
 
 
-# ── 路由 ──────────────────────────────────────────────────────────────────────
-
+# ── 只读路由（无需鉴权）──────────────────────────────────────────────────────
 
 @router.get("", response_model=List[ChannelResponse])
 def get_channels(
@@ -67,17 +60,15 @@ def get_channels(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    query = (
-        db.query(Channel)
-        .options(joinedload(Channel.organization))
-    )
+    query = db.query(Channel)
 
-    has_bilibili_perm = (
-        current_user and
-        has_permission(current_user.id, "bilibili", "access", db)
-    )
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+
     if not has_bilibili_perm:
         query = query.filter(Channel.platform == "youtube")
+
     if platform:
         query = query.filter(Channel.platform == platform)
     if is_active is not None:
@@ -90,10 +81,11 @@ def get_channels(
     if not current_user:
         return channels
 
-    status_map = {
-        uc.channel_id: uc.status
-        for uc in db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
-    }
+    user_channels = (
+        db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
+    )
+    status_map = {uc.channel_id: uc.status for uc in user_channels}
+
     result = []
     for ch in channels:
         resp = ChannelResponse.model_validate(ch)
@@ -102,6 +94,7 @@ def get_channels(
         resp.is_blocked = st == "blocked"
         result.append(resp)
     return result
+
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
 def get_channel_by_id(
@@ -143,9 +136,7 @@ async def get_channel_videos(
     channel_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
-    status: Optional[str] = Query(
-        None, description="Filter: live/upcoming/archive/upload/short"
-    ),
+    status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
@@ -156,7 +147,6 @@ async def get_channel_videos(
         return await fetch_channel_videos(channel.id, page, page_size, status)
 
     if channel.platform == Platform.BILIBILI:
-        # 首次访问时自动同步
         if not db.query(Video).filter(Video.channel_id == channel_id).count():
             await sync_bilibili_channel_videos(db, channel_id, channel.channel_id)
 
@@ -181,9 +171,7 @@ async def get_channel_videos(
                     thumbnail_url=v.thumbnail_url or "",
                     duration=v.duration or "",
                     view_count=v.view_count or 0,
-                    published_at=v.published_at.strftime("%Y-%m-%d")
-                    if v.published_at
-                    else None,
+                    published_at=v.published_at.strftime("%Y-%m-%d") if v.published_at else None,
                     status=v.status or "archive",
                 )
                 for v in videos_db
@@ -199,11 +187,14 @@ async def get_channel_videos(
     )
 
 
+# ── 写操作路由（要求 admin 及以上）───────────────────────────────────────────
+
 @router.post("", response_model=ChannelResponse)
 async def create_channel(
     channel: ChannelCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _current_user: User = AdminUser,          
 ):
     resolved_channel_id = channel.channel_id
     channel_details: Optional[dict] = None
@@ -235,7 +226,6 @@ async def create_channel(
     db.commit()
     db.refresh(db_channel)
 
-    # 新增 YouTube 频道后后台异步回填 + WebSub 订阅
     if db_channel.platform == Platform.YOUTUBE:
         channel_id = db_channel.id
         api_key = settings.youtube_api_key
@@ -268,6 +258,7 @@ def update_channel(
     channel_id: int,
     channel_update: ChannelUpdate,
     db: Session = Depends(get_db),
+    _current_user: User = AdminUser,          
 ):
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
@@ -282,34 +273,36 @@ def update_channel(
 
 
 @router.delete("/{channel_id}")
-def delete_channel(channel_id: int, db: Session = Depends(get_db)):
+def delete_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = AdminUser,          
+):
     from app.models.models import Stream, Danmaku
 
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    db.query(Video).filter(Video.channel_id == channel_id).delete(
-        synchronize_session=False
-    )
-    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(
-        synchronize_session=False
-    )
+    db.query(Video).filter(Video.channel_id == channel_id).delete(synchronize_session=False)
+    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(synchronize_session=False)
     db.query(Danmaku).filter(
         Danmaku.stream_id.in_(
             db.query(Stream.id).filter(Stream.channel_id == channel_id)
         )
     ).delete(synchronize_session=False)
-    db.query(Stream).filter(Stream.channel_id == channel_id).delete(
-        synchronize_session=False
-    )
+    db.query(Stream).filter(Stream.channel_id == channel_id).delete(synchronize_session=False)
     db.delete(channel)
     db.commit()
     return {"message": "Channel deleted successfully"}
 
 
 @router.post("/{channel_id}/refresh", response_model=ChannelResponse)
-async def refresh_channel(channel_id: int, db: Session = Depends(get_db)):
+async def refresh_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = AdminUser,          
+):
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -326,36 +319,45 @@ async def refresh_channel(channel_id: int, db: Session = Depends(get_db)):
     return channel
 
 
-# ── Wiki Scraper 路由 ────────────────────────────────────────────────────────
+# ── Wiki Scraper 路由（要求 channel.manage 权限）──────────────────────────────
 
-
-@router.post("/scrape/vspo", tags=["scraper"])
+@router.post(
+    "/scrape/vspo",
+    tags=["scraper"],
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+)
 async def scrape_vspo_channels(db: Session = Depends(get_db)):
-    """爬取VSPO! Wiki频道列表"""
     try:
         result = await scraper_sync.scrape_and_sync_vspo(db)
         return {"status": "success", "source": "vspo", **result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scrape VSPO!: {str(e)}")
+        logger.error("scrape_vspo error: {}", e)
+        raise HTTPException(status_code=500, detail="爬取 VSPO! 失败，请查看服务日志")
 
 
-@router.post("/scrape/nijisanji", tags=["scraper"])
+@router.post(
+    "/scrape/nijisanji",
+    tags=["scraper"],
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+)
 async def scrape_nijisanji_channels(db: Session = Depends(get_db)):
-    """爬取Nijisanji Wiki频道列表"""
     try:
         result = await scraper_sync.scrape_and_sync_nijisanji(db)
         return {"status": "success", "source": "nijisanji", **result}
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to scrape Nijisanji!: {str(e)}"
-        )
+        logger.error("scrape_nijisanji error: {}", e)
+        raise HTTPException(status_code=500, detail="爬取 Nijisanji 失败，请查看服务日志")
 
 
-@router.post("/scrape/all", tags=["scraper"])
+@router.post(
+    "/scrape/all",
+    tags=["scraper"],
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+)
 async def scrape_all_channels(db: Session = Depends(get_db)):
-    """爬取所有支持的VTuber Wiki频道列表"""
     try:
         result = await scraper_sync.scrape_and_sync_all(db)
         return {"status": "success", **result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scrape: {str(e)}")
+        logger.error("scrape_all error: {}", e)
+        raise HTTPException(status_code=500, detail="爬取失败，请查看服务日志")

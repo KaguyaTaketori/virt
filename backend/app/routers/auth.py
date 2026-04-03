@@ -1,4 +1,3 @@
-# backend/app/routers/auth.py  （全文替换）
 import asyncio
 from datetime import timedelta
 
@@ -18,8 +17,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
 
 _PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
-
-
+_DUMMY_HASH = get_password_hash("__dummy_password_for_timing__")
 
 # ── IP 工具 ───────────────────────────────────────────────────────────────────
 
@@ -87,39 +85,61 @@ async def register(
     user: UserCreate,
     db: Session = Depends(get_db),
 ):
-    if db.query(User).filter(User.username == user.username).first():
-        raise HTTPException(400, "Username already registered")
-    if user.email and db.query(User).filter(User.email == user.email).first():
-        raise HTTPException(400, "Email already registered")
-
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered",
+        )
+ 
+    if user.email:
+        existing_email = db.query(User).filter(User.email == user.email).first()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+ 
+    hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
         email=user.email,
-        hashed_password=get_password_hash(user.password),
+        hashed_password=hashed_password,
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    await record_login_log(db, db_user.id, request, success=True)
+ 
+    record_login_log(db, db_user.id, request, True)
     return db_user
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("10/minute")
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+ 
+    password_to_check = user.hashed_password if user else _DUMMY_HASH
+    password_valid = verify_password(form_data.password, password_to_check)
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    if not user or not password_valid:
         if user:
-            await record_login_log(db, user.id, request, False, "Incorrect password")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Incorrect username or password",
-                            headers={"WWW-Authenticate": "Bearer"})
-    await record_login_log(db, user.id, request, True)
-    token = create_access_token(
-        data={"sub": user.username},
-        expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
+            record_login_log(db, user.id, request, False, "Incorrect password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+ 
+    record_login_log(db, user.id, request, True)
+ 
+    access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer"}

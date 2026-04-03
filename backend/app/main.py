@@ -1,13 +1,16 @@
 import time
 
-from app.loguru_config import logger
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from app.routers.auth import limiter
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+
+from app.loguru_config import logger
+from app.config import settings
 from app.routers import (
     streams,
     channels,
@@ -24,13 +27,44 @@ from app.database import engine, Base
 from app.scheduler_tasks import start_scheduler
 
 
+def _assert_production_secrets() -> None:
+    env = settings.env.lower()
+    if env != "prod":
+        return
+
+    errors = []
+
+    if settings.jwt_secret_key == "your-secret-key-change-in-production":
+        errors.append(
+            "JWT_SECRET_KEY 使用了默认值，生产环境必须设置强随机密钥（建议 32+ 字节）"
+        )
+
+    if not settings.websub_secret:
+        errors.append(
+            "WEBSUB_SECRET 未设置，生产环境必须配置以防止伪造推送"
+        )
+
+    if not settings.youtube_api_key:
+        logger.warning("YOUTUBE_API_KEY 未设置，YouTube 相关功能将不可用")
+
+    if errors:
+        for e in errors:
+            logger.critical("启动安全检查失败: {}", e)
+        raise RuntimeError(
+            "生产环境安全检查未通过，请修复以下问题后重新启动：\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── 安全检查（必须在任何业务逻辑之前）──────────────────────────────────
+    _assert_production_secrets()
+
     from app.services.youtube_websub import subscribe_all_active_channels
     from app.database_async import AsyncSessionFactory
     from sqlalchemy import select, func
     from app.models.models import WebSubSubscription
-    from app.config import settings
 
     Base.metadata.create_all(bind=engine)
 
@@ -54,6 +88,8 @@ async def lifespan(app: FastAPI):
     yield
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="VTuber Live Aggregator API",
     description="聚合 YouTube 和 Bilibili 直播流的后端 API",
@@ -63,14 +99,33 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+_cors_origins_raw = settings.cors_origins
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()] if _cors_origins_raw else ["http://localhost:5173", "http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "未处理异常 | {} {} | {}",
+        request.method,
+        request.url.path,
+        exc,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "服务器内部错误，请稍后重试"},
+    )
 
 
 @app.middleware("http")
@@ -78,11 +133,12 @@ async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
-    formatted_process_time = f"{process_time:.2f}ms"
     logger.info(
-        f"Request: {request.method} {request.url.path} | "
-        f"Status: {response.status_code} | "
-        f"Time: {formatted_process_time}"
+        "Request: {} {} | Status: {} | Time: {:.2f}ms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        process_time,
     )
     return response
 

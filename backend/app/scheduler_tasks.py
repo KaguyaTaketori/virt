@@ -2,7 +2,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
 import httpx
 from app.loguru_config import logger
-import os
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
@@ -60,9 +59,7 @@ async def _daily_backfill_sync():
 
 async def _renew_websub():
     """每 8 天续订所有频道的 WebSub 订阅，避免 10 天后过期失效。"""
-    callback_url = os.getenv(
-        "WEBSUB_CALLBACK_URL", "https://your-domain.com/api/websub/youtube"
-    )
+    callback_url = settings.websub_callback_url
     await subscribe_all_active_channels(callback_url)
 
 

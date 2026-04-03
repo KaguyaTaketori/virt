@@ -1,27 +1,9 @@
-"""
-youtube_websub.py
-─────────────────
-YouTube WebSub（PubSubHubbub）订阅与推送接收模块。
-
-协议流程：
-  1. 向 Hub 发送订阅请求（POST）
-  2. Hub 回调验证端点（GET /api/websub/youtube?hub.mode=subscribe&hub.challenge=...）
-  3. 验证通过后，Hub 在频道有新内容时推送 Atom XML（POST /api/websub/youtube）
-  4. 解析 XML → 提取 video_id → 交给 BackgroundTasks 拉取详情 → 立刻 200 OK
-
-设计要点：
-  - 推送接收端点必须在 200ms 内返回 200，否则 Hub 认为失败并重试（最多数次）。
-  - 视频详情拉取放入 FastAPI BackgroundTasks，不阻塞 HTTP 响应。
-  - HMAC-SHA1 签名验证（可选但推荐开启，防伪造推送）。
-  - 订阅有效期通常为 10 天，到期前需续订（由调度器定期执行）。
-"""
-
 from __future__ import annotations
 
 import hashlib
 import hmac
 from app.loguru_config import logger
-import os
+
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -31,20 +13,18 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Re
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.database_async import get_async_session, AsyncSessionFactory
 from app.models.models import Channel, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
-
+from app.config import settings
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
 _TOPIC_BASE = "https://www.youtube.com/xml/feeds/videos.xml?channel_id="
-_LEASE_DAYS = 9  # 订阅期限（天）。YouTube Hub 最长支持 10 天，留 1 天安全余量
+_LEASE_DAYS = 9
 
-# 从环境变量读取 API Key 和 WebSub 签名密钥
-_YT_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
-_WEBSUB_SECRET: str = os.getenv("WEBSUB_SECRET", "")  # 空字符串 = 不验证签名
+_YT_API_KEY: str = settings.youtube_api_key
+_WEBSUB_SECRET: str = settings.websub_secret
 
 # Atom Feed 命名空间
 _NS = {
@@ -58,8 +38,6 @@ router = APIRouter(prefix="/api/websub", tags=["websub"])
 # ─────────────────────────────────────────────────────────────────────────────
 # 订阅发送函数
 # ─────────────────────────────────────────────────────────────────────────────
-
-
 async def subscribe_channel(
     channel_youtube_id: str,
     callback_url: str,
@@ -68,23 +46,6 @@ async def subscribe_channel(
     lease_seconds: int = _LEASE_DAYS * 86400,
     secret: str = _WEBSUB_SECRET,
 ) -> bool:
-    """
-    向 YouTube PubSubHubbub Hub 发送（或取消）订阅请求。
-
-    参数：
-        channel_youtube_id — YouTube 频道 ID（UCxxx 格式）
-        callback_url        — Hub 将回调的公网可访问 URL，即本模块的端点
-        mode                — 'subscribe' 或 'unsubscribe'
-        lease_seconds       — 订阅有效期（秒），最大 864000（10天）
-        secret              — HMAC 签名密钥，为空则不签名
-
-    返回：
-        True = Hub 接受请求（202 Accepted），False = 失败
-
-    注意：
-        Hub 收到请求后会异步回调 callback_url 进行验证（GET 请求带 hub.challenge）。
-        本函数返回时，订阅尚未正式生效，验证通过后才生效。
-    """
     topic_url = f"{_TOPIC_BASE}{channel_youtube_id}"
 
     payload: dict[str, str] = {
@@ -121,10 +82,6 @@ async def subscribe_channel(
 
 
 async def subscribe_all_active_channels(callback_url: str) -> None:
-    """
-    批量订阅数据库中所有激活的 YouTube 频道。
-    建议在应用启动时和每日定时任务中调用（续订即将到期的订阅）。
-    """
     async with AsyncSessionFactory() as session:
         result = await session.execute(
             select(Channel).where(
@@ -141,7 +98,6 @@ async def subscribe_all_active_channels(callback_url: str) -> None:
         ok = await subscribe_channel(ch.channel_id, callback_url)
         if ok:
             success_count += 1
-            # 更新数据库中的预期过期时间
             async with AsyncSessionFactory() as session:
                 sub = await session.scalar(
                     select(WebSubSubscription).where(
@@ -161,8 +117,6 @@ async def subscribe_all_active_channels(callback_url: str) -> None:
                     days=_LEASE_DAYS
                 )
                 await session.commit()
-
-        # 避免对 Hub 请求过于密集（礼貌性限速）
         import asyncio
 
         await asyncio.sleep(0.3)
@@ -178,16 +132,10 @@ async def subscribe_all_active_channels(callback_url: str) -> None:
 def _verify_hmac_signature(
     body: bytes, signature_header: Optional[str], secret: str
 ) -> bool:
-    """
-    验证 Hub 推送的 HMAC-SHA1 签名。
-
-    Hub 在 HTTP Header 'X-Hub-Signature' 中携带：
-        sha1=<hex_digest>
-
-    如果系统未配置 WEBSUB_SECRET，跳过验证（返回 True）。
-    """
     if not secret:
-        return True  # 未配置密钥，不验签
+        if settings.env.lower() == "prod":
+            return False
+        return True
 
     if not signature_header:
         logger.warning("期望签名但 Header 缺失，拒绝推送")
