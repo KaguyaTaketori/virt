@@ -12,7 +12,7 @@ import {
   removeNodeAndMerge, 
   getActiveChannels 
 } from '@/utils/layoutEngine'
-import { X, LayoutGrid, LayoutTemplate } from 'lucide-vue-next'
+import { X, LayoutGrid } from 'lucide-vue-next'
 
 // 导入组件
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
@@ -111,7 +111,7 @@ function closeChannel(nodeId: string) {
 }
 
 function removeChannelByPlatformId(platform: string, id: string) {
-  function findAndRemove(node: LayoutNode) {
+  function findAndRemove(node: LayoutNode): boolean {
     if (node.type === 'leaf' && node.channel?.platform === platform && node.channel?.id === id) {
       closeChannel(node.id)
       return true

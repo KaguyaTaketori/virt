@@ -1,48 +1,31 @@
-# backend/app/deps.py
-"""
-全局依赖注入模块。
-
-所有 Router 统一从此处导入，禁止在各 Router 文件中重复定义。
-"""
+# backend/app/deps.py（完整重写）
 from __future__ import annotations
-
-from typing import Generator, Optional
-
+from typing import AsyncGenerator, Generator
 from fastapi import Header, HTTPException
 from sqlalchemy.orm import Session
-
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
-from app.database import SessionLocal
-
-
-# ── 数据库 Session ────────────────────────────────────────────────────────────
+from app.database_async import AsyncSessionFactory
+    
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionFactory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 def get_db() -> Generator[Session, None, None]:
-    """
-    同步数据库 Session 依赖注入。
-
-    使用方式：
-        @router.get("/")
-        def endpoint(db: Session = Depends(get_db)):
-            ...
-    """
+    from app.database import SessionLocal
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-
 def verify_admin_key(x_admin_key: str = Header(default=None)) -> None:
-    """
-    静态 API Key 验证。
-    未配置 admin_secret_key 时跳过验证（开发模式）。
-    生产环境必须在 .env 里配置，否则任何人都能触发管理接口。
-    """
     if not settings.admin_secret_key:
         return
     if x_admin_key != settings.admin_secret_key:
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid or missing X-Admin-Key header",
-        )
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")

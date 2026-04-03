@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime
 
@@ -67,15 +67,17 @@ def get_channels(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    query = db.query(Channel)
+    query = (
+        db.query(Channel)
+        .options(joinedload(Channel.organization))
+    )
 
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
-
+    has_bilibili_perm = (
+        current_user and
+        has_permission(current_user.id, "bilibili", "access", db)
+    )
     if not has_bilibili_perm:
         query = query.filter(Channel.platform == "youtube")
-
     if platform:
         query = query.filter(Channel.platform == platform)
     if is_active is not None:
@@ -88,12 +90,10 @@ def get_channels(
     if not current_user:
         return channels
 
-    # 批量加载用户状态，避免 N+1
-    user_channels = (
-        db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
-    )
-    status_map = {uc.channel_id: uc.status for uc in user_channels}
-
+    status_map = {
+        uc.channel_id: uc.status
+        for uc in db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
+    }
     result = []
     for ch in channels:
         resp = ChannelResponse.model_validate(ch)
@@ -102,7 +102,6 @@ def get_channels(
         resp.is_blocked = st == "blocked"
         result.append(resp)
     return result
-
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
 def get_channel_by_id(

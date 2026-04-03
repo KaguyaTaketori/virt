@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Menu, Search, SlidersHorizontal, Bell, ChevronDown, LogOut, User as UserIcon, Settings } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 interface Props {
@@ -14,7 +13,6 @@ const emit = defineEmits<{
   (e: 'toggleSidebar'): void
 }>()
 
-const router = useRouter()
 const authStore = useAuthStore()
 
 const searchQuery = ref('')

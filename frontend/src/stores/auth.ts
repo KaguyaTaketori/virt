@@ -9,6 +9,7 @@ interface User {
   email: string | null
   created_at: string
   roles: string[]
+  permissions?: string[]
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -25,7 +26,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isSuperAdmin = computed(() => hasRole('superadmin'))
   const isAdmin = computed(() => hasRole('admin') || isSuperAdmin.value)
   const isOperator = computed(() => hasRole('operator') || isAdmin.value)
-  const canAccessBilibili = computed(() => hasRole('user') || hasRole('operator') || isAdmin.value)
+  const canAccessBilibili = computed(() => user.value?.permissions?.includes('bilibili.access') ?? false)
 
   async function login(username: string, password: string) {
     loading.value = true

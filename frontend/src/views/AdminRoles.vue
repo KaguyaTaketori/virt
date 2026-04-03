@@ -136,8 +136,13 @@
 
 <script setup lang="ts">
 import { ref, h, onMounted } from 'vue'
-import { NButton, NTag, NDataTable, NModal, NForm, NFormItem, NInput, NCard, NSpace, useMessage } from 'naive-ui'
+import {
+  NButton, NTag, NDataTable, NModal, NForm, NFormItem,
+  NInput, NCard, NSpace, NCheckboxGroup, NCheckbox,
+  useMessage,
+} from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
+import { Plus, Shield } from 'lucide-vue-next'
 import { adminPermissionsApi, type Role, type Permission } from '@/api'
 
 const message = useMessage()

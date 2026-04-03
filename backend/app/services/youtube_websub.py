@@ -36,6 +36,7 @@ from app.database_async import get_async_session, AsyncSessionFactory
 from app.models.models import Channel, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 
+
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
 _TOPIC_BASE = "https://www.youtube.com/xml/feeds/videos.xml?channel_id="
@@ -331,28 +332,33 @@ async def websub_verify(
     hub_challenge: str = Query(..., alias="hub.challenge"),
     hub_lease_seconds: Optional[int] = Query(None, alias="hub.lease_seconds"),
 ) -> PlainTextResponse:
-    """
-    处理 Hub 的订阅验证请求（subscribe / unsubscribe）。
-
-    验证逻辑：
-      - 检查 hub.mode 是否为合法值
-      - 检查 hub.topic 是否以 YouTube Feed URL 开头
-      - 通过后原样返回 hub.challenge
-
-    任何验证失败应返回 404，Hub 会认为订阅失败。
-    """
     if hub_mode not in ("subscribe", "unsubscribe"):
         raise HTTPException(status_code=404, detail="不支持的 hub.mode")
-
     if not hub_topic.startswith(_TOPIC_BASE):
         raise HTTPException(status_code=404, detail="不认识的 hub.topic")
 
-    logger.info(
-        f"验证通过 | mode={hub_mode} | "
-        f"channel={hub_topic.split('=')[-1]} | lease={hub_lease_seconds}s"
-    )
+    yt_channel_id = hub_topic.removeprefix(_TOPIC_BASE)
+    logger.info("验证通过 | mode={} | channel={} | lease={}s",
+                hub_mode, yt_channel_id, hub_lease_seconds)
 
-    # 原样回显 challenge，Hub 收到后确认订阅生效
+    if hub_mode == "subscribe":
+        async with AsyncSessionFactory() as session:
+            channel = await session.scalar(
+                select(Channel).where(
+                    Channel.channel_id == yt_channel_id,
+                    Channel.platform == "youtube",
+                )
+            )
+            if channel:
+                sub = await session.scalar(
+                    select(WebSubSubscription).where(
+                        WebSubSubscription.channel_id == channel.id
+                    )
+                )
+                if sub:
+                    sub.verified = True
+                    await session.commit()
+
     return PlainTextResponse(hub_challenge, status_code=200)
 
 

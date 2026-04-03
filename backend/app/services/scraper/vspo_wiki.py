@@ -24,23 +24,18 @@ class VSPOWikiScraper(BaseWikiScraper):
         soup = BeautifulSoup(html, "html.parser")
         channels = []
 
-        # 找到所有h2标题
-        h2_elements = soup.find_all("h2")
+        target_groups = {"JP", "EN"}
 
-        for h2 in h2_elements:
-            # 提取group名称（h2的文本内容）
+        for h2 in soup.find_all("h2"):
             group = h2.get_text(strip=True)
+            if group not in target_groups:
+                continue
 
-            # 找到h2后面的表格
-            next_element = h2.find_next_sibling()
-            while next_element and next_element.name not in ["table", "h2"]:
-                next_element = next_element.find_next_sibling()
-
-            if next_element and next_element.name == "table":
-                table_channels = self._parse_table(next_element, group)
+            group_table = self._find_next_table_by_section(h2)
+            if group_table:
+                table_channels = self._parse_table(group_table, group)
                 channels.extend(table_channels)
 
-        # 去重
         seen = set()
         unique_channels = []
         for ch in channels:
@@ -51,6 +46,35 @@ class VSPOWikiScraper(BaseWikiScraper):
 
         logger.info(f"Parsed {len(unique_channels)} VSPO! channels from wiki")
         return unique_channels
+
+    def _find_next_table_by_section(self, heading) -> Optional[Tag]:
+        """在h2标题所在的section中查找后续的table"""
+        parent = heading.parent
+        if not parent:
+            return None
+
+        heading_idx = None
+        for i, child in enumerate(parent.children):
+            if (
+                hasattr(child, "name")
+                and child.name in ["h2", "h3"]
+                and child == heading
+            ):
+                heading_idx = i
+                break
+
+        if heading_idx is None:
+            return None
+
+        for i in range(heading_idx + 1, len(list(parent.children))):
+            child = list(parent.children)[i]
+            if hasattr(child, "name"):
+                if child.name == "table":
+                    return child
+                elif child.name in ["h2", "h3"]:
+                    break
+
+        return None
 
     def _parse_table(self, table, group: str) -> list[VtuberChannel]:
         """解析单个表格"""

@@ -98,7 +98,11 @@
 import { ref, onMounted, h } from 'vue'
 import { NButton, NModal, NForm, NFormItem, NSpace, NDataTable, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
 import { orgApi, type Organization } from '../api'
+import { useOrgStore } from '../stores/org'
+import { useApiError } from '@/composables/useApiError'
+const { handleError } = useApiError()
 
+const orgStore = useOrgStore()
 const organizations = ref<Organization[]>([])
 const loading = ref(false)
 
@@ -195,8 +199,7 @@ async function deleteOrganization(id: number) {
     await orgApi.delete(id)
     await fetchOrganizations()
   } catch (err) {
-    console.error('Failed to delete organization:', err)
-    alert('删除失败')
+    handleError(err, '删除失败')
   }
 }
 
@@ -229,7 +232,7 @@ async function submitForm() {
       await orgApi.create(data)
     }
     
-    await fetchOrganizations()
+    await orgStore.invalidate()
     closeModal()
   } catch (err: any) {
     console.error('Failed to save organization:', err)

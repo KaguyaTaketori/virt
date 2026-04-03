@@ -96,15 +96,30 @@ def _get_videos_from_db(
         total_pages=total_pages,
     )
 
+async def _refresh_channel_videos(channel: Channel, full_refresh: bool = False) -> None:
+    """
+    统一的视频刷新入口。
+    full_refresh=False → 增量（拉最新 50 条，≈2 配额）
+    full_refresh=True  → 全量历史（首次入库时调用）
+    """
+    if not settings.youtube_api_key:
+        return
+    async with AsyncSessionFactory() as session:
+        ch_obj = await session.get(Channel, channel.id)
+        if ch_obj:
+            await sync_channel_videos(
+                session,
+                ch_obj,
+                settings.youtube_api_key,
+                full_refresh=full_refresh,
+            )
 
 async def get_channel_videos(
     channel_id: int,
     page: int = 1,
     page_size: int = 24,
-    status_filter: str = None,
+    status_filter: str | None = None,
 ) -> PaginatedVideosResponse:
-    """获取频道视频列表（带缓存的增量更新）"""
-
     db = SessionLocal()
     try:
         channel = db.query(Channel).filter(Channel.id == channel_id).first()
@@ -113,32 +128,9 @@ async def get_channel_videos(
                 videos=[], total=0, page=page, page_size=page_size, total_pages=0
             )
 
-        existing_count = db.query(Video).filter(Video.channel_id == channel_id).count()
-
         if _needs_update(channel):
-            # “正在直播”场景：使用 youtube_sync 的增量更新
-            if status_filter == "live":
-                await _incrementally_update_live_videos_via_youtube_sync(channel)
-            else:
-                await _incrementally_update_videos(db, channel)
+            await _refresh_channel_videos(channel, full_refresh=False)
 
         return _get_videos_from_db(db, channel_id, page, page_size, status_filter)
-
     finally:
         db.close()
-
-
-async def _incrementally_update_videos(db: Session, channel: Channel):
-    await backfill_channel_videos(db, channel, full_refresh=False)
-
-
-async def _incrementally_update_live_videos_via_youtube_sync(channel: Channel) -> None:
-    async with AsyncSessionFactory() as session:
-        ch_obj = await session.get(Channel, channel.id)
-        if ch_obj:
-            await sync_channel_videos(
-                session,
-                ch_obj,
-                settings.youtube_api_key,
-                full_refresh=False,
-            )

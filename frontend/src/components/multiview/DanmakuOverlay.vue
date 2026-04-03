@@ -262,49 +262,61 @@ const WS_BASE =
   import.meta.env.VITE_WS_BASE ||
   (import.meta.env.VITE_API_BASE?.replace(/^http/, 'ws') ?? 'ws://localhost:8000')
 
+let reconnectAttempts = 0
+const MAX_BACKOFF = 30_000
+
 function connectWebSocket() {
   if (!props.videoId || props.platform !== 'youtube') return
-  const wsUrl = `${WS_BASE}/ws/danmaku/${props.videoId}`
-  
-  try {
-    ws = new WebSocket(wsUrl)
-    
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'danmaku' && Array.isArray(data.data)) {
-          for (const rawMsg of data.data) {
-            const formattedMsg = {
-              ...rawMsg,
-              messageId: rawMsg.message_id || rawMsg.messageId || `local_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-              userId: rawMsg.user_id || rawMsg.userId,
-              comment: rawMsg.comment || rawMsg.message || ''
-            }
 
-            if (!danmakuQueue.find(m => m.messageId === formattedMsg.messageId)) {
-              danmakuQueue.push(formattedMsg)
-            }
+  const url = `${WS_BASE}/ws/danmaku/${props.videoId}`
+  try {
+    ws = new WebSocket(url)
+  } catch (e) {
+    scheduleReconnect()
+    return
+  }
+
+  ws.onopen = () => {
+    reconnectAttempts = 0
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'danmaku' && Array.isArray(data.data)) {
+        for (const rawMsg of data.data) {
+          const msg = {
+            ...rawMsg,
+            messageId: rawMsg.message_id || rawMsg.messageId
+              || `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            userId: rawMsg.user_id || rawMsg.userId,
+            comment: rawMsg.comment || rawMsg.message || '',
           }
+          if (!danmakuQueue.find(m => m.messageId === msg.messageId))
+            danmakuQueue.push(msg)
         }
-      } catch (e) {
-        console.error('[WS Error] 解析失败:', e)
       }
-    }
-    
-    ws.onerror = (err) => console.error('[WS Error] 连接发生错误:', err)
-    ws.onclose = () => {
-      reconnectTimer = setTimeout(connectWebSocket, 3000)
-    }
-  } catch (e) { 
-    console.error('[WS Error] 实例化失败:', e)
+    } catch { /* ignore parse errors */ }
+  }
+
+  ws.onerror  = (err) => console.error('[WS Error] 连接发生错误:', err)
+
+  ws.onclose = () => {
+    ws = null
+    if (props.enabled && props.platform === 'youtube') scheduleReconnect()
   }
 }
 
+function scheduleReconnect() {
+  const delay = Math.min(1_000 * 2 ** reconnectAttempts, MAX_BACKOFF)
+  reconnectAttempts++
+  reconnectTimer = setTimeout(connectWebSocket, delay)
+}
+
 function disconnectWebSocket() {
-  ws?.close()
-  ws = null
-  if (reconnectTimer) clearTimeout(reconnectTimer)
-  reconnectTimer = null
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  if (ws) { ws.onclose = null; ws.close(); ws = null }
+  reconnectAttempts = 0
 }
 
 function clearDanmaku() {

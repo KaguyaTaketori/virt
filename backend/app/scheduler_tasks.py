@@ -1,5 +1,5 @@
-# backend/app/scheduler_tasks.py
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.base import STATE_STOPPED
 import httpx
 from app.loguru_config import logger
 import os
@@ -86,7 +86,7 @@ async def update_youtube_streams():
         return
 
     # update 是高优先级，只要还有配额就执行（不设 discover_reserve 限制）
-    if not can_spend("videos.list", 1):
+    if not await can_spend("videos.list", 1):
         logger.info("配额耗尽，跳过")
         return
 
@@ -112,11 +112,11 @@ async def update_youtube_streams():
             # 50 个一批，每批消耗 1 配额
             for i in range(0, len(video_ids), 50):
                 chunk = video_ids[i : i + 50]
-                if not can_spend("videos.list", 1):
+                if not await can_spend("videos.list", 1):
                     logger.info("配额耗尽，停止当前批次")
                     break
                 items = await get_videos_details(client, chunk)
-                spend("videos.list", 1)
+                await spend("videos.list", 1)
                 for item in items:
                     parsed = parse_youtube_stream(item)
                     if parsed and parsed["video_id"] in vid_to_ch_id:
@@ -339,8 +339,7 @@ async def refresh_channel_details():
 
 
 def start_scheduler():
-    # 允许重复调用（例如 uvicorn --reload 会触发 lifespan），避免重复 start/add_job。
-    if getattr(scheduler, "running", False):
+    if scheduler.state != STATE_STOPPED:
         return
 
     now = datetime.now(timezone.utc)

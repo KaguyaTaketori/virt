@@ -125,7 +125,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { NButton, NSelect, NInput, NModal, NForm, NFormItem, NSpace, NCheckbox, NTag, NRadio, NRadioGroup, type DataTableColumns } from 'naive-ui'
-import { channelApi, type Channel } from '../api'
+import { channelApi, type Channel } from '@/api'
+import { useApiError } from '@/composables/useApiError'
+import { useAuthStore } from '../stores/auth'
+const { handleError } = useApiError()
+const authStore = useAuthStore()
 
 const channels = ref<Channel[]>([])
 const loading = ref(false)
@@ -150,10 +154,13 @@ const formRules = {
   channel_id: { required: true, message: '请输入 Channel ID', trigger: 'blur' }
 }
 
-const platformOptions = [
-  { label: 'YouTube', value: 'youtube' },
-  { label: 'Bilibili', value: 'bilibili' }
-]
+const platformOptions = computed(() => {
+  const opts = [{ label: 'YouTube', value: 'youtube' }]
+  if (authStore.canAccessBilibili) {
+    opts.push({ label: 'Bilibili', value: 'bilibili' })
+  }
+  return opts
+})
 
 const statusOptions = [
   { label: '启用', value: 'true' },
@@ -252,7 +259,7 @@ async function fetchChannels() {
 function editChannel(channel: Channel) {
   editingId.value = channel.id
   formData.value = {
-    platform: channel.platform,
+    platform: channel.platform as 'youtube' | 'bilibili',
     channel_id: channel.channel_id,
     name: channel.name,
     avatar_url: channel.avatar_url || '',
@@ -269,8 +276,7 @@ async function deleteChannel(id: number) {
     await channelApi.delete(id)
     await fetchChannels()
   } catch (err) {
-    console.error('Failed to delete channel:', err)
-    alert('删除失败')
+    handleError(err, '删除失败')
   }
 }
 

@@ -104,21 +104,26 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useOrgStore } from '../stores/org'
+import { useAuthStore } from '../stores/auth'
 import { channelApi, type Channel } from '../api'
 
 const router = useRouter()
 const orgStore = useOrgStore()
+const authStore = useAuthStore()
 
 const channels = ref<Channel[]>([])
 const loading = ref(false)
 const selectedOrgId = ref<number | null>(null)
 const selectedPlatform = ref<string>('all')
 
-const platforms = [
-  { value: 'all', label: '全部' },
-  { value: 'youtube', label: 'YouTube' },
-  { value: 'bilibili', label: 'Bilibili' }
-]
+const platforms = computed(() => {
+  const opts = [{ value: 'all', label: '全部' }]
+  if (authStore.canAccessBilibili) {
+    opts.push({ value: 'bilibili', label: 'Bilibili' } as const)
+  }
+  opts.push({ value: 'youtube', label: 'YouTube' } as const)
+  return opts
+})
 
 const filteredChannels = computed(() => {
   return channels.value.filter(ch => {

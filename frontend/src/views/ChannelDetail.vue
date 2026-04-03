@@ -51,7 +51,7 @@
             <span class="text-gray-400 text-sm">{{ getOrgName(channel.org_id) }}</span>
           </div>
           <!-- Bilibili 额外信息 -->
-          <div v-if="channel.platform === 'bilibili'" class="mt-2 text-sm text-gray-400">
+          <div v-if="channel.platform === 'bilibili' && authStore.canAccessBilibili" class="mt-2 text-sm text-gray-400">
             <span v-if="channel.bilibili_fans" class="mr-4">
               粉丝: {{ channel.bilibili_fans.toLocaleString() }}
             </span>
@@ -279,10 +279,11 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NPagination } from 'naive-ui'
+import { NButton, NPagination, useMessage } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
 import { useOrgStore } from '../stores/org'
-import { channelApi, type Channel as ApiChannel } from '../api'
+import { useAuthStore } from '../stores/auth'
+import { channelApi, userChannelApi, type Channel as ApiChannel } from '../api'
 
 // 引入我们刚才新建的布局树引擎
 import { 
@@ -295,16 +296,18 @@ import {
 interface Video {
   id: string
   title: string
-  thumbnail_url: string
-  duration: string
+  thumbnail_url: string | null
+  duration: string | null
   view_count: number
-  published_at: string
+  published_at: string | null
   status: string
 }
 
 const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
+const authStore = useAuthStore()
+const message = useMessage()
 
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
@@ -312,7 +315,6 @@ const bilibiliError = ref<string | null>(null)
 const activeTab = ref('live')
 
 const videos = ref<Video[]>([])
-const upcomingVideos = ref<Video[]>([])
 const liveVideos = ref<Video[]>([])
 const shortsVideos = ref<Video[]>([])
 const currentPage = ref(1)
@@ -335,50 +337,77 @@ function getOrgName(orgId: number | null): string {
   return org?.name || ''
 }
 
-function toggleLike() {
-  if (channel.value) {
-    channel.value.is_liked = !channel.value.is_liked
+async function toggleLike() {
+  if (!channel.value) return
+  const prev = channel.value.is_liked
+  channel.value.is_liked = !prev
+  try {
+    if (!prev) {
+      await userChannelApi.like(channel.value.id)
+      message.success('已添加到收藏')
+    } else {
+      await userChannelApi.unlike(channel.value.id)
+      message.info('已取消收藏')
+    }
+  } catch {
+    channel.value.is_liked = prev
+    message.error('操作失败，请重试')
   }
 }
 
-function toggleBlock() {
-  if (channel.value) {
-    channel.value.is_blocked = !channel.value.is_blocked
+async function toggleBlock() {
+  if (!channel.value) return
+  const prev = channel.value.is_blocked
+  channel.value.is_blocked = !prev
+  try {
+    if (!prev) {
+      await userChannelApi.block(channel.value.id)
+      message.success('已屏蔽该频道')
+    } else {
+      await userChannelApi.unblock(channel.value.id)
+      message.info('已取消屏蔽')
+    }
+  } catch {
+    channel.value.is_blocked = prev
+    message.error('操作失败，请重试')
   }
 }
 
-// === 重点修改：适配全新的二叉树多窗系统 ===
 function addToMultiview(video?: Video) {
   if (!channel.value) return
-  
-  // 构造要添加的视频节点数据
+
   const channelData = {
     platform: channel.value.platform as 'youtube' | 'bilibili',
-    id: video ? video.id : channel.value.channel_id
+    id: video ? video.id : channel.value.channel_id,
   }
 
   let tree: LayoutNode
-  try {
-    // 尝试读取现有的布局树
-    const saved = localStorage.getItem('multiview_tree')
-    tree = saved ? JSON.parse(saved) : createEmptyLeaf()
-    
-    // 检查这个视频是否已经在当前播放列表中了
-    const existingChannels = getActiveChannels(tree)
-    const isExist = existingChannels.some(
-      c => c.id === channelData.id && c.platform === channelData.platform
-    )
+  const raw = localStorage.getItem('multiview_tree')
 
-    if (!isExist) {
-      // 核心算法：自动寻找最大面积的窗口切分一半给新视频，或者填补空位
-      addChannelToTree(tree, channelData)
-      localStorage.setItem('multiview_tree', JSON.stringify(tree))
+  if (raw) {
+    try {
+      tree = JSON.parse(raw)
+      if (typeof tree !== 'object' || !tree.type) throw new Error('invalid')
+    } catch {
+      localStorage.removeItem('multiview_tree')
+      tree = createEmptyLeaf()
     }
-  } catch (err) {
-    // 如果解析失败，重新创建一个树
+  } else {
     tree = createEmptyLeaf()
+  }
+
+  const existing = getActiveChannels(tree)
+  const alreadyAdded = existing.some(
+    c => c.id === channelData.id && c.platform === channelData.platform
+  )
+
+  if (!alreadyAdded) {
     addChannelToTree(tree, channelData)
-    localStorage.setItem('multiview_tree', JSON.stringify(tree))
+    try {
+      localStorage.setItem('multiview_tree', JSON.stringify(tree))
+    } catch {
+      message.warning('存储已满，布局将不会被保存')
+    }
   }
 
   router.push({ name: 'MultiView' })
@@ -387,7 +416,6 @@ function addToMultiview(video?: Video) {
 function goToLogin() {
   router.push({ name: 'Login' })
 }
-// ===========================================
 
 async function fetchChannel(id: number) {
   loading.value = true
@@ -425,12 +453,11 @@ async function fetchVideos(channelId: number) {
   }
 }
 
-async function fetchLiveVideos(channelId: number) {
+async function fetchLiveVideos(_channelId: number) {
   try {
-    const platform = channel.value?.platform
     const [liveRes, upcomingRes] = await Promise.all([
-      channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'live'),
-      channelApi.getVideos(channelId, liveCurrentPage.value, 48, 'upcoming')
+      channelApi.getVideos(_channelId, liveCurrentPage.value, 48, 'live'),
+      channelApi.getVideos(_channelId, liveCurrentPage.value, 48, 'upcoming')
     ])
     liveVideos.value = [...upcomingRes.data.videos, ...liveRes.data.videos]
     liveTotalPages.value = liveRes.data.total_pages
@@ -452,7 +479,7 @@ async function fetchShortsVideos(channelId: number) {
 }
 
 onMounted(async () => {
-  await orgStore.fetchOrganizations()
+  await orgStore.invalidate()
   const channelId = Number(route.params.id)
   await fetchChannel(channelId)
 })

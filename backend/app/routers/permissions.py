@@ -17,7 +17,7 @@ from app.schemas.schemas import (
     UserRoleUpdate,
 )
 from app.auth import get_current_user
-from app.services.permissions import get_user_roles
+from app.services.permissions import get_user_roles, has_permission
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
 
@@ -44,9 +44,16 @@ def get_current_user_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前登录用户的信息"""
+    """获取当前登录用户的信息和权限"""
     resp = UserResponse.model_validate(current_user)
     resp.roles = get_user_roles(current_user.id, db)
+    all_perms = db.query(Permission).all()
+    user_perms = [
+        p.name
+        for p in all_perms
+        if has_permission(current_user.id, p.resource, p.action, db)
+    ]
+    resp.permissions = user_perms
     return resp
 
 

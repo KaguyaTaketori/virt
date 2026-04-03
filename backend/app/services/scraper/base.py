@@ -10,7 +10,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+
+DEFAULT_HEADERS = {
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.7,en;q=0.6",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
+}
 
 
 @dataclass
@@ -32,7 +46,7 @@ class BaseWikiScraper:
     def __init__(self):
         self.client = httpx.AsyncClient(
             timeout=30.0,
-            headers={"User-Agent": DEFAULT_USER_AGENT},
+            headers=DEFAULT_HEADERS.copy(),
             follow_redirects=True,
         )
 
@@ -43,6 +57,13 @@ class BaseWikiScraper:
         """获取页面HTML"""
         resp = await self.client.get(url)
         resp.raise_for_status()
+
+        if "cloudflare" in resp.text.lower() or "blocked" in resp.text.lower():
+            logger.warning(f"Cloudflare blocked request to {url}")
+            raise Exception(
+                "Cloudflare blocked - please solve CAPTCHA manually or wait"
+            )
+
         return resp.text
 
     def clean_text(self, text: str) -> str:

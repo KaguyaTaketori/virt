@@ -1,45 +1,62 @@
+# backend/app/routers/streams.py  （全文替换）
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import List
 
 from app.deps import get_db
+from app.models.models import Channel, Platform, Stream, StreamStatus, User
 from app.schemas.schemas import StreamResponse
-from app.models.models import Stream, StreamStatus, Channel
+from app.auth import get_current_user_optional
+from app.services.permissions import has_permission
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])
 
 
-@router.get("/live", response_model=List[StreamResponse])
-def get_live_streams(db: Session = Depends(get_db)):
-    """获取当前正在直播的列表。"""
+@router.get("/live", response_model=list[StreamResponse])
+def get_live_streams(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+
     streams = (
         db.query(Stream)
         .join(Channel, Stream.channel_id == Channel.id)
         .filter(Stream.status == StreamStatus.LIVE)
-        .all()
     )
-    return [_to_response(s) for s in streams]
+
+    if not has_bilibili_perm:
+        streams = streams.filter(Channel.platform == Platform.YOUTUBE)
+
+    return [_to_response(s) for s in streams.all()]
 
 
-@router.get("", response_model=List[StreamResponse])
+@router.get("", response_model=list[StreamResponse])
 def get_all_streams(
-    platform: str = None,
-    status: str = None,
+    platform: Optional[Platform] = None,
+    status: Optional[StreamStatus] = None,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """获取所有直播列表，可按平台和状态筛选。"""
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+
     query = db.query(Stream).join(Channel, Stream.channel_id == Channel.id)
 
-    if platform:
-        query = query.filter(Stream.platform == platform)
-    if status:
-        query = query.filter(Stream.status == status)
+    if not has_bilibili_perm:
+        query = query.filter(Channel.platform == Platform.YOUTUBE)
 
+    if platform is not None:
+        query = query.filter(Stream.platform == platform)
+    if status is not None:
+        query = query.filter(Stream.status == status)
     return [_to_response(s) for s in query.all()]
 
 
 def _to_response(stream: Stream) -> StreamResponse:
-    """将 Stream ORM 对象转为 StreamResponse，集中处理关联字段。"""
     ch = stream.channel
     return StreamResponse(
         id=stream.id,

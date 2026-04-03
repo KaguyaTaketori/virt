@@ -72,7 +72,7 @@
 
     <div v-else class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
       <StreamCard
-        v-for="(stream, index) in store.currentStreams"
+        v-for="(stream, index) in filteredStreams"
         :key="stream.id ?? `stream-${index}`"
         :stream="stream"
         @click="openMultiView"
@@ -86,11 +86,19 @@ import { onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useStreamStore, type StreamStatus, type Stream } from '@/stores/stream'
 import { useOrgStore } from '@/stores/org'
+import { useAuthStore } from '@/stores/auth'
 import StreamCard from '@/components/StreamCard.vue'
 
 const store    = useStreamStore()
 const orgStore = useOrgStore()
+const authStore = useAuthStore()
 const router   = useRouter()
+
+const filteredStreams = computed(() => {
+  const streams = store.currentStreams
+  if (authStore.canAccessBilibili) return streams
+  return streams.filter(s => s.platform !== 'bilibili')
+})
 
 const statuses: { value: StreamStatus; label: string }[] = [
   { value: 'live',     label: '直播中' },

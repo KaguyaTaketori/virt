@@ -7,9 +7,10 @@ from app.services.danmaku import get_live_chat_messages
 from app.services.danmaku_bilibili import get_bilibili_danmaku
 from app.config import settings
 from app.models.models import User
-from app.services.permissions import get_user_roles
+from app.services.permissions import get_user_roles, has_permission
 from app.auth import get_current_user_optional
 from fastapi import HTTPException
+from app.deps import get_db
 
 try:
     from app.services.danmaku_youtube import (
@@ -28,15 +29,6 @@ except ImportError:
     save_to_db = None
 
 router = APIRouter(prefix="/api/danmaku", tags=["danmaku"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 
 def require_registered_user(db: Session, current_user: Optional[User]):
     """要求注册用户及以上权限"""
@@ -120,9 +112,19 @@ async def get_bilibili_danmaku_endpoint(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    """获取B站直播弹幕 - 需要注册用户及以上权限"""
-    if not require_registered_user(db, current_user):
-        raise HTTPException(status_code=403, detail="B站功能需要注册用户权限")
+    """获取B站直播弹幕 - 需要bilibili.access权限"""
+    if current_user and has_permission(current_user.id, "bilibili", "access", db):
+        pass
+    elif current_user:
+        roles = get_user_roles(current_user.id, db)
+        if (
+            "operator" not in roles
+            and "admin" not in roles
+            and "superadmin" not in roles
+        ):
+            raise HTTPException(status_code=403, detail="需要B站访问权限")
+    else:
+        raise HTTPException(status_code=401, detail="请先登录")
 
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}

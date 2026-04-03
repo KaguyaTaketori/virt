@@ -1,5 +1,7 @@
 # backend/seed_data.py
 import os
+import bcrypt
+import hashlib
 from app.loguru_config import logger
 from app.database import SessionLocal, engine, Base
 from app.models.models import (
@@ -11,8 +13,10 @@ from app.models.models import (
     RolePermission,
     User,
 )
+from app.config import settings
 from app.auth import get_password_hash
 from datetime import datetime, timezone
+from sqlalchemy.orm import Session
 
 
 def seed_data():
@@ -193,8 +197,8 @@ def seed_roles_and_permissions():
                 "content.manage",
                 "bilibili.access",
             ],
-            "operator": ["channel.read", "content.manage", "bilibili.access"],
-            "user": ["channel.read", "bilibili.access"],
+            "operator": ["channel.read", "content.manage"],
+            "user": ["channel.read"],
         }
 
         for role_name, perms in role_perms.items():
@@ -223,58 +227,23 @@ def seed_roles_and_permissions():
 
 
 def seed_superadmin():
-    """创建初始 superadmin 用户"""
-    from app.config import settings
-    import bcrypt
-    import hashlib
-
+    """创建或更新初始 superadmin 用户。"""
     username = settings.superadmin_username or "admin"
     password = settings.superadmin_password or ""
-
     if not password:
         logger.warning("SUPERADMIN_PASSWORD not set, skipping superadmin creation")
         return
 
-    # SHA-256 预哈希 (64字符 = 32字节)，避免 bcrypt 72 字节限制
-    sha256_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    # Bcrypt 处理
-    hashed_password = bcrypt.hashpw(
-        sha256_hash.encode("utf-8"), bcrypt.gensalt()
-    ).decode()
+    hashed_password = get_password_hash(password)
 
     db = SessionLocal()
     try:
-        import hashlib
-        import bcrypt
-
-        # SHA-256 预哈希 (64字符 = 32字节)，避免 bcrypt 72 字节限制
-        sha256_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-        # Bcrypt 处理
-        hashed_password = bcrypt.hashpw(
-            sha256_hash.encode("utf-8"), bcrypt.gensalt()
-        ).decode()
-
         existing = db.query(User).filter(User.username == username).first()
         if existing:
-            # 更新密码哈希
             existing.hashed_password = hashed_password
             db.commit()
-            logger.info(f"Updated password for user: {username}")
-
-            superadmin_role = db.query(Role).filter(Role.name == "superadmin").first()
-            if superadmin_role:
-                has_role = (
-                    db.query(UserRole)
-                    .filter(
-                        UserRole.user_id == existing.id,
-                        UserRole.role_id == superadmin_role.id,
-                    )
-                    .first()
-                )
-                if not has_role:
-                    db.add(UserRole(user_id=existing.id, role_id=superadmin_role.id))
-                    db.commit()
-                    logger.info(f"Assigned superadmin role to {username}")
+            logger.info("Updated password for user: {}", username)
+            _ensure_superadmin_role(db, existing.id)
             return
 
         user = User(
@@ -285,26 +254,36 @@ def seed_superadmin():
         )
         db.add(user)
         db.flush()
-
-        superadmin_role = db.query(Role).filter(Role.name == "superadmin").first()
-        if superadmin_role:
-            db.add(
-                UserRole(
-                    user_id=user.id,
-                    role_id=superadmin_role.id,
-                    created_at=datetime.now(timezone.utc),
-                )
-            )
-
+        _ensure_superadmin_role(db, user.id)
         db.commit()
-        logger.info(f"Created superadmin user: {username}")
-
+        logger.info("Created superadmin user: {}", username)
     except Exception as e:
         db.rollback()
         logger.error("Superadmin seed error: {}", e)
         raise
     finally:
         db.close()
+
+
+def _ensure_superadmin_role(db: Session, user_id: int) -> None:
+    superadmin_role = db.query(Role).filter(Role.name == "superadmin").first()
+    if not superadmin_role:
+        return
+    has = (
+        db.query(UserRole)
+        .filter(UserRole.user_id == user_id, UserRole.role_id == superadmin_role.id)
+        .first()
+    )
+    if not has:
+        db.add(
+            UserRole(
+                user_id=user_id,
+                role_id=superadmin_role.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+        logger.info("Assigned superadmin role to user_id={}", user_id)
 
 
 if __name__ == "__main__":

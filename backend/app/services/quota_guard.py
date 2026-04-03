@@ -1,16 +1,13 @@
 from __future__ import annotations
-
+import asyncio
 import json
-from app.loguru_config import logger
-import threading
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from app.loguru_config import logger
 
 QUOTA_FILE = Path("./quota_state.json")
 DAILY_LIMIT = 9_500
 DISCOVER_RESERVE = 2_000
-
 COSTS: dict[str, int] = {
     "search.list": 100,
     "videos.list": 1,
@@ -18,89 +15,72 @@ COSTS: dict[str, int] = {
     "playlistItems.list": 1,
 }
 
-_lock = threading.Lock()
+_lock = asyncio.Lock()
+_state: dict = {}
 
 
-# ── 内部 I/O ──────────────────────────────────────────────────────────────────
+def _fresh_state() -> dict:
+    return {"date": str(date.today()), "used": 0, "ops": {}}
 
 
-def _load() -> dict:
-    """读取配额状态，如果不是今天的数据则重置。"""
+def _load_from_disk() -> dict:
     if QUOTA_FILE.exists():
         try:
             data = json.loads(QUOTA_FILE.read_text())
             if data.get("date") == str(date.today()):
                 return data
-        except (json.JSONDecodeError, KeyError):
+        except Exception:
             pass
-    return {"date": str(date.today()), "used": 0, "ops": {}}
+    return _fresh_state()
 
 
-def _save(data: dict) -> None:
-    QUOTA_FILE.write_text(json.dumps(data, indent=2))
+async def _init():
+    global _state
+    if not _state or _state.get("date") != str(date.today()):
+        _state = await asyncio.to_thread(_load_from_disk)
 
 
-# ── 公开 API ──────────────────────────────────────────────────────────────────
+async def _persist():
+    data = dict(_state)
+    await asyncio.to_thread(
+        lambda: QUOTA_FILE.write_text(json.dumps(data, indent=2))
+    )
 
 
-def status() -> dict:
-    """返回当日配额状态，供 /api/admin/quota 端点使用。"""
-    with _lock:
-        data = _load()
-        used = data["used"]
+async def status() -> dict:
+    async with _lock:
+        await _init()
+        used = _state["used"]
         return {
-            "date": data["date"],
+            "date": _state["date"],
             "used": used,
             "limit": DAILY_LIMIT,
             "remaining": max(0, DAILY_LIMIT - used),
-            "ops": data.get("ops", {}),
+            "ops": dict(_state.get("ops", {})),
         }
 
 
-def can_spend(op: str, count: int = 1) -> bool:
-    """
-    检查能否执行 count 次 op 操作。
-    search.list 额外受 DISCOVER_RESERVE 保护：
-    剩余配额必须在扣除本次消耗后仍 >= DISCOVER_RESERVE，才允许执行。
-    """
+async def can_spend(op: str, count: int = 1) -> bool:
     cost = COSTS.get(op, 1) * count
-    with _lock:
-        data = _load()
-        remaining = DAILY_LIMIT - data["used"]
-
+    async with _lock:
+        await _init()
+        remaining = DAILY_LIMIT - _state["used"]
         if remaining < cost:
             logger.warning("拒绝 {}×{}（需要 {}，剩余 {}）", op, count, cost, remaining)
             return False
-
         if op == "search.list" and (remaining - cost) < DISCOVER_RESERVE:
-            logger.warning(
-                f"search.list 被储备保护拦截"
-                f"（剩余 {remaining}，扣后 {remaining - cost} < 储备 {DISCOVER_RESERVE}）"
-            )
+            logger.warning("search.list 被储备保护拦截（剩余 {}）", remaining)
             return False
-
         return True
 
 
-def spend(op: str, count: int = 1) -> int:
-    """
-    扣减配额并持久化。返回扣减后剩余配额。
-    即使 can_spend 已检查，这里仍做二次保护。
-    """
+async def spend(op: str, count: int = 1) -> int:
     cost = COSTS.get(op, 1) * count
-    with _lock:
-        data = _load()
-        data["used"] += cost
-        data["ops"][op] = data["ops"].get(op, 0) + count
-        _save(data)
-        remaining = max(0, DAILY_LIMIT - data["used"])
-        logger.info(
-            f"{op}×{count} -{cost} | 今日已用 {data['used']}/{DAILY_LIMIT}（剩余 {remaining}）"
-        )
-        return remaining
-
-
-def remaining() -> int:
-    """快速查剩余配额（不加锁，用于日志）。"""
-    data = _load()
-    return max(0, DAILY_LIMIT - data["used"])
+    async with _lock:
+        await _init()
+        _state["used"] += cost
+        _state["ops"][op] = _state["ops"].get(op, 0) + count
+        remaining = max(0, DAILY_LIMIT - _state["used"])
+        logger.info("{} -{} | 已用 {}/{}", op, cost, _state["used"], DAILY_LIMIT)
+    await _persist()
+    return remaining

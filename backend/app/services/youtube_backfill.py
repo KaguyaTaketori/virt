@@ -1,11 +1,18 @@
 # backend/app/services/youtube_backfill.py
 """
-YouTube 频道视频批量回填模块
-
-职责：通过 PlaylistItems(UUxxx) → Videos.list 双接口组合，
-以极低配额消耗回填频道历史视频。
+DEPRECATED: 此模块已废弃，请使用 youtube_sync.sync_channel_videos。
+将在下一个主版本删除。
 """
 from __future__ import annotations
+import warnings
+warnings.warn(
+    "youtube_backfill is deprecated, use youtube_sync.sync_channel_videos",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+
+
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,6 +26,7 @@ from app.models.models import Video, Channel
 from app.services.youtube_utils import (  # ← 统一使用共享工具
     parse_video_item,
 )
+
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 

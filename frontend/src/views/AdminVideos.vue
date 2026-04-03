@@ -33,11 +33,10 @@
 
       <div class="flex flex-col gap-2">
         <span class="text-xs text-gray-500">最短时长（分钟）</span>
-        <n-input
+        <n-input-number
           v-model:value="durationMinMinutes"
-          type="number"
-          min="0"
-          step="1"
+          :min="0"
+          :step="1"
           placeholder="例如 10"
           style="width: 140px"
         />
@@ -45,11 +44,10 @@
 
       <div class="flex flex-col gap-2">
         <span class="text-xs text-gray-500">最长时长（分钟）</span>
-        <n-input
+        <n-input-number
           v-model:value="durationMaxMinutes"
-          type="number"
-          min="0"
-          step="1"
+          :min="0"
+          :step="1"
           placeholder="例如 60"
           style="width: 140px"
         />
@@ -115,7 +113,7 @@
         :page-count="Math.ceil(total / pageSize)"
         :page-sizes="[24, 48, 96]"
         @update:page="fetchVideos"
-        @update:page-size="(ps: number) => { pageSize.value = ps; currentPage = 1; fetchVideos() }"
+        @update:page-size="(ps: number) => { pageSize = ps; currentPage = 1; fetchVideos() }"
       />
     </div>
   </div>
@@ -123,7 +121,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, h } from 'vue'
-import { NButton, NSelect, NInput, NDataTable, NTag, NPagination } from 'naive-ui'
+import { NButton, NSelect, NInputNumber, NDataTable, NTag, NPagination } from 'naive-ui'
 import { channelApi, adminVideosApi, type Video, type Channel } from '../api'
 
 type VideoStatus = 'live' | 'upcoming' | 'archive' | 'upload' | 'short'
@@ -139,8 +137,8 @@ const filterChannelId = ref<number | null>(null)
 const filterStatus = ref<string | null>(null)
 
 // duration in minutes (UI)
-const durationMinMinutes = ref<number | null>(null)
-const durationMaxMinutes = ref<number | null>(null)
+const durationMinMinutes = ref<number | undefined>(undefined)
+const durationMaxMinutes = ref<number | undefined>(undefined)
 
 const batchNewStatus = ref<VideoStatus>('archive')
 
@@ -234,8 +232,8 @@ const columns: any = [
 
 function resetFilters() {
   filterStatus.value = null
-  durationMinMinutes.value = null
-  durationMaxMinutes.value = null
+  durationMinMinutes.value = undefined
+  durationMaxMinutes.value = undefined
   currentPage.value = 1
   selectedIds.value = []
 }
@@ -244,8 +242,8 @@ async function fetchVideos() {
   if (!filterChannelId.value) return
   loading.value = true
   try {
-    const min = durationMinMinutes.value === null ? null : Math.max(0, Math.floor(durationMinMinutes.value)) * 60
-    const max = durationMaxMinutes.value === null ? null : Math.max(0, Math.floor(durationMaxMinutes.value)) * 60
+    const min = durationMinMinutes.value === undefined ? null : Math.max(0, Math.floor(durationMinMinutes.value)) * 60
+    const max = durationMaxMinutes.value === undefined ? null : Math.max(0, Math.floor(durationMaxMinutes.value)) * 60
 
     const { data } = await adminVideosApi.getVideos({
       channel_id: filterChannelId.value,

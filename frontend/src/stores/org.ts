@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { orgApi, type Organization } from '@/api'
 
 export const useOrgStore = defineStore('org', () => {
+  const queryClient = useQueryClient()
+
   const { data, isLoading: loading } = useQuery({
     queryKey: ['organizations'],
     queryFn: async () => {
@@ -15,8 +17,13 @@ export const useOrgStore = defineStore('org', () => {
 
   const organizations = computed(() => data.value ?? [])
 
-  async function fetchOrganizations() {
+  async function invalidate() {
+    await queryClient.invalidateQueries({ queryKey: ['organizations'] })
   }
 
-  return { organizations, loading, fetchOrganizations }
+  async function fetchOrganizations() {
+    await invalidate()
+  }
+
+  return { organizations, loading, invalidate, fetchOrganizations }
 })

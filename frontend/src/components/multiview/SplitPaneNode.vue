@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { inject, ref } from 'vue'
 import { LayoutNode } from '@/utils/layoutEngine'
-import { Plus, Youtube, Tv, RefreshCw, Eraser, X, GripHorizontal, MessageSquare} from 'lucide-vue-next'
+import { Plus, Youtube, Tv, Eraser, X, GripHorizontal, MessageSquare} from 'lucide-vue-next'
 import YouTubePlayer from './YouTubePlayer.vue'
 import DanmakuOverlay from './DanmakuOverlay.vue'
+import { useAuthStore } from '@/stores/auth'
 // 注意引入 naive-ui 的 n-split
-import { NSplit } from 'naive-ui' 
+import { NSplit } from 'naive-ui'
+
+const authStore = useAuthStore() 
 
 const props = defineProps<{ node: LayoutNode }>()
 
@@ -21,7 +24,6 @@ const handleTimeUpdate = (time: number) => {
 }
 
 // 全局状态注入
-const isDragging = inject('isDragging') as { value: boolean }
 const showDanmaku = inject('showDanmaku') as { value: boolean }
 const danmakuSettings = inject('danmakuSettings') as any
 const onDragStartGlobal = inject('onDragStart') as (e: DragEvent, id: string) => void
@@ -69,10 +71,13 @@ function isDanmakuEnabled(ch: any): boolean {
       <!-- 视频播放器 -->
       <template v-else>
         <YouTubePlayer v-if="node.channel.platform === 'youtube'" :video-id="node.channel.id" @time-update="handleTimeUpdate" />
-        <template v-else-if="node.channel.platform === 'bilibili'">
+        <template v-else-if="node.channel.platform === 'bilibili' && authStore.canAccessBilibili">
           <iframe v-if="node.channel.id.startsWith('BV')" :src="`https://player.bilibili.com/player.html?bvid=${node.channel.id}&autoplay=1`" class="absolute inset-0 w-full h-full" frameborder="0" allowfullscreen />
           <iframe v-else :src="`https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${node.channel.id}&quality=0`" class="absolute inset-0 w-full h-full" frameborder="0" allowfullscreen />
         </template>
+        <div v-else-if="node.channel.platform === 'bilibili'" class="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500">
+          无B站访问权限
+        </div>
         
         <DanmakuOverlay v-if="isDanmakuEnabled(node.channel)" :video-id="node.channel.id" :platform="node.channel.platform" :enabled="true" :settings="danmakuSettings" :current-time="currentTime" />
       </template>
