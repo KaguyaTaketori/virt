@@ -103,6 +103,46 @@ export interface PaginatedVideos {
   total_pages: number
 }
 
+export interface BilibiliInfo {
+  info: {
+    mid: number
+    name: string
+    sex: string
+    face: string
+    sign: string
+    level: number
+    fans: number
+    attention: number
+    archive_count: number
+    article_count: number
+    following: number
+    like_num: number
+    official_verify: { type: number; desc: string } | null
+  } | null
+  dynamics: Array<{
+    dynamic_id: string
+    type: number
+    timestamp: number
+    content: string
+    images: string[]
+    repost_content: string | null
+  }>
+  videos: Array<{
+    bvid: string
+    title: string
+    pic: string
+    aid: number
+    duration: string
+    pubdate: number
+    play: number
+    like: number
+    coin: number
+    favorite: number
+    share: number
+    reply: number
+  }>
+}
+
 // ── API 方法 ──────────────────────────────────────────────────────────────────
 
 export const streamApi = {
@@ -117,6 +157,9 @@ export const channelApi = {
 
   get:       (id: number) =>
     api.get<Channel>(`/api/channels/${id}`),
+
+  getBilibili: (id: number) =>
+    api.get<BilibiliInfo>(`/api/channels/${id}/bilibili`),
 
   // 明确返回 PaginatedVideos，消除隐式 any
   getVideos: (id: number, page?: number, pageSize?: number, status?: string) =>

@@ -129,8 +129,112 @@
 
       <!-- Tab 内容 -->
       <div class="py-6">
-        <!-- 直播 Tab -->
-        <div v-if="activeTab === 'live'">
+        <!-- Bilibili 主页 Tab -->
+        <div v-if="activeTab === 'home' && isBilibili">
+          <div v-if="bilibiliInfo" class="space-y-6">
+            <div class="bg-zinc-900 rounded-lg p-6">
+              <div class="flex flex-col md:flex-row gap-6">
+                <img 
+                  :src="bilibiliInfo.face" 
+                  class="w-24 h-24 rounded-full"
+                  referrerpolicy="no-referrer"
+                />
+                <div class="flex-1">
+                  <h3 class="text-xl font-bold text-white">{{ bilibiliInfo.name }}</h3>
+                  <div class="flex flex-wrap gap-3 mt-2 text-sm text-gray-400">
+                    <span class="text-pink-400">粉丝 {{ bilibiliInfo.fans?.toLocaleString() }}</span>
+                    <span>关注 {{ bilibiliInfo.attention }}</span>
+                    <span>稿件 {{ bilibiliInfo.archive_count }}</span>
+                  </div>
+                  <p v-if="bilibiliInfo.sign" class="mt-3 text-gray-300 text-sm">{{ bilibiliInfo.sign }}</p>
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              <div 
+                v-for="v in bilibiliVideos.slice(0, 8)" 
+                :key="v.bvid"
+                class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <div class="aspect-video relative">
+                  <img 
+                    :src="v.pic + '@_webp'" 
+                    class="w-full h-full object-cover"
+                    referrerpolicy="no-referrer"
+                  />
+                  <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
+                    {{ formatDuration(v.duration) }}
+                  </span>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-sm text-white line-clamp-2">{{ v.title }}</h4>
+                  <p class="text-xs text-gray-500 mt-1">{{ v.play?.toLocaleString() }}播放</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-12 text-gray-500">加载中...</div>
+        </div>
+
+        <!-- Bilibili 动态 Tab -->
+        <div v-if="activeTab === 'dynamics' && isBilibili">
+          <div v-if="bilibiliDynamics.length > 0" class="space-y-4">
+            <div 
+              v-for="d in bilibiliDynamics" 
+              :key="d.dynamic_id"
+              class="bg-zinc-900 rounded-lg p-4"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-xs px-2 py-0.5 bg-pink-600 text-white rounded">{{ getDynamicTypeLabel(d.type) }}</span>
+                <span class="text-xs text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
+              </div>
+              <p class="text-gray-300 text-sm whitespace-pre-wrap">{{ d.content }}</p>
+              <div v-if="d.images?.length > 0" class="flex gap-2 mt-3 flex-wrap">
+                <img 
+                  v-for="(img, idx) in d.images.slice(0, 4)" 
+                  :key="idx"
+                  :src="img + '@_webp'" 
+                  class="w-20 h-20 object-cover rounded"
+                  referrerpolicy="no-referrer"
+                />
+              </div>
+              <p v-if="d.repost_content" class="mt-2 text-gray-500 text-sm border-l-2 border-gray-700 pl-3">
+                {{ d.repost_content }}
+              </p>
+            </div>
+          </div>
+          <div v-else class="text-center py-12 text-gray-500">暂无动态</div>
+        </div>
+
+        <!-- Bilibili 投稿 Tab -->
+        <div v-if="activeTab === 'videos' && isBilibili">
+          <div v-if="bilibiliVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div
+              v-for="v in bilibiliVideos"
+              :key="v.bvid"
+              class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <div class="aspect-video relative">
+                <img 
+                  :src="v.pic + '@_webp'" 
+                  class="w-full h-full object-cover"
+                  referrerpolicy="no-referrer"
+                />
+                <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
+                  {{ formatDuration(v.duration) }}
+                </span>
+              </div>
+              <div class="p-3">
+                <h4 class="text-sm text-white line-clamp-2">{{ v.title }}</h4>
+                <p class="text-xs text-gray-500 mt-1">{{ v.play?.toLocaleString() }}播放</p>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-12 text-gray-500">暂无投稿</div>
+        </div>
+
+        <!-- YouTube 直播 Tab -->
+        <div v-if="activeTab === 'live' && !isBilibili">
           <div v-if="liveVideos.length > 0">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <div
@@ -189,8 +293,8 @@
           </div>
         </div>
 
-        <!-- 视频 Tab -->
-        <div v-if="activeTab === 'videos'">
+        <!-- YouTube 视频 Tab -->
+        <div v-if="activeTab === 'videos' && !isBilibili">
           <div v-if="videos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <div
               v-for="video in videos"
@@ -226,8 +330,8 @@
           </div>
         </div>
 
-        <!-- Shorts Tab -->
-        <div v-if="activeTab === 'shorts'">
+        <!-- YouTube Shorts Tab -->
+        <div v-if="activeTab === 'shorts' && !isBilibili">
           <div v-if="shortsVideos.length > 0" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             <div
               v-for="video in shortsVideos"
@@ -259,8 +363,8 @@
           </div>
         </div>
 
-        <!-- 概要 Tab -->
-        <div v-if="activeTab === 'streams'">
+        <!-- YouTube 概要 Tab -->
+        <div v-if="activeTab === 'streams' && !isBilibili">
           <div class="bg-zinc-900 rounded-lg p-6">
             <h3 class="text-lg font-medium text-white mb-4">频道简介</h3>
             <div v-if="channel.description" class="text-gray-300 whitespace-pre-wrap text-sm leading-relaxed">
@@ -277,7 +381,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination, useMessage } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
@@ -303,6 +407,25 @@ interface Video {
   status: string
 }
 
+interface Dynamic {
+  dynamic_id: string
+  type: number
+  timestamp: number
+  content: string
+  images: string[]
+  repost_content: string | null
+}
+
+interface BilibiliVideo {
+  bvid: string
+  title: string
+  pic: string
+  aid: number
+  duration: string
+  pubdate: number
+  play: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
@@ -312,7 +435,7 @@ const message = useMessage()
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
 const bilibiliError = ref<string | null>(null)
-const activeTab = ref('live')
+const activeTab = ref('home')
 
 const videos = ref<Video[]>([])
 const liveVideos = ref<Video[]>([])
@@ -324,12 +447,27 @@ const liveCurrentPage = ref(1)
 const liveTotalPages = ref(0)
 const liveTotalVideos = ref(0)
 
-const tabs = [
-  { value: 'live', label: '直播' },
-  { value: 'videos', label: '视频' },
-  { value: 'shorts', label: 'Shorts' },
-  { value: 'streams', label: '概要' }
-]
+const bilibiliInfo = ref<any>(null)
+const bilibiliDynamics = ref<Dynamic[]>([])
+const bilibiliVideos = ref<BilibiliVideo[]>([])
+
+const isBilibili = computed(() => channel.value?.platform === 'bilibili')
+
+const tabs = computed(() => {
+  if (isBilibili.value) {
+    return [
+      { value: 'home', label: '主页' },
+      { value: 'dynamics', label: '动态' },
+      { value: 'videos', label: '投稿' }
+    ]
+  }
+  return [
+    { value: 'live', label: '直播' },
+    { value: 'videos', label: '视频' },
+    { value: 'shorts', label: 'Shorts' },
+    { value: 'streams', label: '概要' }
+  ]
+})
 
 function getOrgName(orgId: number | null): string {
   if (!orgId) return ''
@@ -425,9 +563,14 @@ async function fetchChannel(id: number) {
     channel.value = data
     currentPage.value = 1
     liveCurrentPage.value = 1
-    await fetchVideos(id)
-    await fetchLiveVideos(id)
-    await fetchShortsVideos(id)
+    
+    if (isBilibili.value) {
+      await fetchBilibiliData(id)
+    } else {
+      await fetchVideos(id)
+      await fetchLiveVideos(id)
+      await fetchShortsVideos(id)
+    }
   } catch (err: any) {
     if (err.response?.status === 403) {
       bilibiliError.value = err.response.data?.detail || 'B站功能需要登录后访问'
@@ -437,6 +580,17 @@ async function fetchChannel(id: number) {
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchBilibiliData(channelId: number) {
+  try {
+    const { data } = await channelApi.getBilibili(channelId)
+    bilibiliInfo.value = data.info
+    bilibiliDynamics.value = data.dynamics
+    bilibiliVideos.value = data.videos
+  } catch (err) {
+    console.error('Failed to fetch Bilibili data:', err)
   }
 }
 
@@ -478,6 +632,40 @@ async function fetchShortsVideos(channelId: number) {
   }
 }
 
+function formatTimestamp(ts: number): string {
+  const date = new Date(ts * 1000)
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+  
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟前`
+  if (hours < 24) return `${hours}小时前`
+  if (days < 7) return `${days}天前`
+  return date.toLocaleDateString('zh-CN')
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function getDynamicTypeLabel(type: number): string {
+  const map: Record<number, string> = {
+    1: '转发',
+    2: '图文',
+    4: '文字',
+    8: '视频',
+    64: '专栏'
+  }
+  return map[type] || '动态'
+}
+
 onMounted(async () => {
   await orgStore.invalidate()
   const channelId = Number(route.params.id)
@@ -487,14 +675,21 @@ onMounted(async () => {
 watch(activeTab, async (tab) => {
   if (!channel.value) return
   const channelId = Number(route.params.id)
-  if (tab === 'videos') {
-    currentPage.value = 1
-    await fetchVideos(channelId)
-  } else if (tab === 'live') {
-    liveCurrentPage.value = 1
-    await fetchLiveVideos(channelId)
-  } else if (tab === 'shorts') {
-    await fetchShortsVideos(channelId)
+  
+  if (isBilibili.value) {
+    if (tab === 'home' && !bilibiliInfo.value) {
+      await fetchBilibiliData(channelId)
+    }
+  } else {
+    if (tab === 'videos') {
+      currentPage.value = 1
+      await fetchVideos(channelId)
+    } else if (tab === 'live') {
+      liveCurrentPage.value = 1
+      await fetchLiveVideos(channelId)
+    } else if (tab === 'shorts') {
+      await fetchShortsVideos(channelId)
+    }
   }
 })
 </script>

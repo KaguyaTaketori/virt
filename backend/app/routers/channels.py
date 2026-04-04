@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List, Optional
@@ -19,6 +20,7 @@ from app.services.youtube_videos import get_channel_videos as fetch_channel_vide
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_channel
 from app.services.bilibili_fetcher import sync_bilibili_channel_videos
+from app.services.bilibili_channel import bilibili_channel_service
 from app.auth import get_current_user_optional
 from app.config import settings
 from app.services.permissions import has_permission
@@ -378,3 +380,41 @@ async def scrape_all_channels(db: AsyncSession = Depends(get_async_db)):
     except Exception as e:
         logger.error("scrape_all error: {}", e)
         raise HTTPException(status_code=500, detail="爬取失败，请查看服务日志")
+
+
+@router.get("/{channel_id}/bilibili")
+async def get_channel_bilibili_info(
+    channel_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    if channel.platform != Platform.BILIBILI:
+        raise HTTPException(status_code=400, detail="Channel is not a Bilibili channel")
+
+    has_bilibili_perm = False
+    if current_user:
+        has_bilibili_perm = await has_permission(
+            current_user.id, "bilibili", "access", db
+        )
+
+    if not has_bilibili_perm:
+        raise HTTPException(status_code=403, detail="需要B站访问权限")
+
+    uid = channel.channel_id
+
+    info, dynamics, videos = await asyncio.gather(
+        bilibili_channel_service.get_info(uid),
+        bilibili_channel_service.get_dynamics(uid),
+        bilibili_channel_service.get_videos(uid),
+    )
+
+    return {
+        "info": info,
+        "dynamics": dynamics or [],
+        "videos": videos or [],
+    }
