@@ -4,10 +4,11 @@ import json
 from datetime import date
 from pathlib import Path
 from app.loguru_config import logger
+from app.config import settings
 
 QUOTA_FILE = Path("./quota_state.json")
-DAILY_LIMIT = 9_500
-DISCOVER_RESERVE = 2_000
+DAILY_LIMIT = settings.youtube_quota_daily_limit
+DISCOVER_RESERVE = settings.youtube_quota_discover_reserve
 COSTS: dict[str, int] = {
     "search.list": 100,
     "videos.list": 1,

@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Re
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from app.loguru_config import logger
-from app.database_async import get_async_session, AsyncSessionFactory
+from app.database_async import AsyncSessionFactory
 from app.models.models import Channel, User, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 from app.config import settings

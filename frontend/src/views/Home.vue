@@ -84,11 +84,12 @@ import { useRouter } from 'vue-router'
 import { useStreamStore, type StreamStatus, type Stream } from '@/stores/stream'
 import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
+import { useMultiviewStore } from '@/stores/multiview'
 import StreamCard from '@/components/StreamCard.vue'
 
-import { createLeaf, addChannelToTree } from '@/utils/layoutEngine'
 
 const store    = useStreamStore()
+const multiviewStore = useMultiviewStore()
 const orgStore = useOrgStore()
 const authStore = useAuthStore()
 const router   = useRouter()
@@ -148,28 +149,7 @@ onMounted(async () => {
 
 function openMultiView(stream: Stream) {
   if (!stream?.video_id) return
-
-  const newChannel = { 
-    platform: stream.platform, 
-    id: stream.video_id 
-  }
-
-  let tree: any = null
-  const saved = localStorage.getItem('multiview_tree')
-  
-  try {
-    if (saved) {
-      tree = JSON.parse(saved)
-      addChannelToTree(tree, newChannel)
-    } else {
-      tree = createLeaf(newChannel)
-    }
-  } catch (e) {
-    tree = createLeaf(newChannel)
-  }
-
-  localStorage.setItem('multiview_tree', JSON.stringify(tree))
-  
+  multiviewStore.addFromVideoId(stream.platform, stream.video_id)
   router.push({ name: 'MultiView' })
 }
 </script>

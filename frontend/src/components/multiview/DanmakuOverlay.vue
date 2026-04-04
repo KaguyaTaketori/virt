@@ -1,16 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { DEFAULT_DANMAKU_SETTINGS, type DanmakuSettings } from '@/types/danmaku'
+ import { useDanmakuUsers } from '@/composables/useDanmakuUsers'
 
-interface DanmakuSettings {
-  fontSize: number
-  speed: number
-  opacity: number
-  color: string
-  strokeEnabled: boolean
-  strokeColor: string
-  strokeWidth: number
-}
- 
+const { blockUser, highlightUser, isBlocked } = useDanmakuUsers()
+
 interface Props {
   videoId: string
   platform: 'youtube' | 'bilibili'
@@ -36,17 +30,7 @@ interface ActiveDanmaku {
 
 const props = defineProps<Props>()
 
-const defaultSettings: DanmakuSettings = {
-  fontSize: 24,
-  speed: 2,
-  opacity: 1,
-  color: '#ffffff',
-  strokeEnabled: true,
-  strokeColor: '#000000',
-  strokeWidth: 2
-}
-
-const settings = ref<DanmakuSettings>({ ...defaultSettings })
+const settings = ref<DanmakuSettings>({ ...DEFAULT_DANMAKU_SETTINGS })
 
 watch(() => props.settings, (s) => {
   if (s) {
@@ -132,6 +116,7 @@ function render(timestamp: number) {
 
   while (danmakuQueue.length > 0 && activeDanmaku.length < 30) {
     const msg = danmakuQueue.shift()!
+    if (msg.userId && isBlocked(msg.userId)) continue
     const textWidth = ctx.measureText(msg.comment).width
     const y = Math.random() * (height - fontSize - 10)
 
@@ -333,23 +318,24 @@ function closeHoverMenu() {
 }
 
 function handleHighlightUser() {
-  console.log('✅ [Menu Click] 执行了【高亮此人】操作:', {
-    userId: hoveredDanmaku.value.userId,
-    displayName: hoveredDanmaku.value.displayName,
-    messageId: hoveredDanmaku.value.messageId
-  })
-  
-
+  if (!hoveredDanmaku.value.userId) return
+  highlightUser(hoveredDanmaku.value.userId)
   closeHoverMenu()
 }
 
 function handleBlockUser() {
-  console.log('🚫 [Menu Click] 执行了【屏蔽用户】操作:', {
-    userId: hoveredDanmaku.value.userId,
-    displayName: hoveredDanmaku.value.displayName,
-    messageId: hoveredDanmaku.value.messageId
-  })
-  
+  if (!hoveredDanmaku.value.userId) return
+  blockUser(hoveredDanmaku.value.userId)
+  for (let i = activeDanmaku.length - 1; i >= 0; i--) {
+    if (activeDanmaku[i].msg.userId === hoveredDanmaku.value.userId) {
+      const mid = activeDanmaku[i].msg.messageId
+      if (mid) {
+        hitLayerDivs.get(mid)?.remove()
+        hitLayerDivs.delete(mid)
+      }
+      activeDanmaku.splice(i, 1)
+    }
+  }
   
   closeHoverMenu()
 }

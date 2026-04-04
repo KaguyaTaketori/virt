@@ -5,6 +5,10 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings
 
+_DEV_FALLBACK_JWT_SECRET = (
+    "dev-only-secret-do-not-use-in-production-vtuber-live-2024"
+)
+
 
 class Settings(BaseSettings):
     youtube_api_key: str = ""
@@ -23,8 +27,10 @@ class Settings(BaseSettings):
     superadmin_password: str = ""
 
     cors_origins: Optional[str] = None
-
     cors_allowed_methods: str = "GET,POST,PUT,DELETE,OPTIONS"
+
+    youtube_quota_daily_limit: int = 9_500
+    youtube_quota_discover_reserve: int = 2_000
 
     env: str = "DEV"
     base_log_dir: str = "logs"
@@ -39,12 +45,13 @@ class Settings(BaseSettings):
         self._resolve_jwt_secret()
 
     def _resolve_jwt_secret(self) -> None:
-        if not self.jwt_secret_key:
-            if self.env.lower() == "prod":
-                pass
-            else:
-                auto_key = secrets.token_urlsafe(48)
-                object.__setattr__(self, "jwt_secret_key", auto_key)
+        if self.jwt_secret_key:
+            return
+
+        if self.env.lower() == "prod":
+            return
+
+        object.__setattr__(self, "jwt_secret_key", _DEV_FALLBACK_JWT_SECRET)
 
     @property
     def cors_origins_list(self) -> list[str]:

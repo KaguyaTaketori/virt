@@ -17,6 +17,7 @@ import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
 import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
 import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
 import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
+import { DEFAULT_DANMAKU_SETTINGS } from '@/types/danmaku'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,16 +34,7 @@ const showDanmakuSettings = ref(false)
 const replaceTargetNodeId = ref<string | null>(null)
 
 // === 弹幕设置逻辑 (UI 局部状态) ===
-const defaultDanmakuSettings = {
-  fontSize: 24,
-  speed: 2,
-  opacity: 1,
-  color: '#ffffff',
-  strokeEnabled: true,
-  strokeColor: '#000000',
-  strokeWidth: 2
-}
-const danmakuSettings = reactive({ ...defaultDanmakuSettings })
+const danmakuSettings = reactive({ ...DEFAULT_DANMAKU_SETTINGS })
 
 function loadDanmakuSettings() {
   try {
@@ -293,7 +285,7 @@ onMounted(() => {
 
             <div class="pt-4 border-t border-zinc-700">
               <button
-                @click="Object.assign(danmakuSettings, defaultDanmakuSettings); saveDanmakuSettings()"
+                @click="Object.assign(danmakuSettings, DEFAULT_DANMAKU_SETTINGS); saveDanmakuSettings()"
                 class="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm transition-colors"
               >
                 恢复默认

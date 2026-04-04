@@ -3,19 +3,12 @@ from fastapi import APIRouter
 from app.deps.guards import AdminUser
 from app.models.models import User
 from app.scheduler_tasks import (
-    discover_youtube_streams,
     update_bilibili_streams,
     sync_bilibili_channels,
 )
 from app.services.quota_guard import status as quota_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
-
-
-@router.post("/trigger/youtube-discover")
-async def trigger_youtube_discover(_: User = AdminUser):
-    await discover_youtube_streams()
-    return {"status": "ok", "message": "YouTube discover job completed"}
 
 
 @router.post("/trigger/bilibili-update")

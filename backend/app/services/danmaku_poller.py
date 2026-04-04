@@ -13,6 +13,8 @@ except ImportError:
     _YT_DOWNLOADER_AVAILABLE = False
     YouTubeChatDownloader = None
 
+_MAX_SEEN_IDS = 10_000
+
 
 class DanmakuPoller:
 
@@ -129,6 +131,13 @@ class DanmakuPoller:
         except Exception as e:
             logger.error("fetch error for {}: {}", video_id, e)
             return continuation
+
+        if len(seen_ids) > _MAX_SEEN_IDS:
+            logger.debug(
+                "seen_ids for {} exceeded {}, resetting to prevent memory leak",
+                video_id, _MAX_SEEN_IDS,
+            )
+            seen_ids.clear()
 
         new_msgs = [
             m for m in messages

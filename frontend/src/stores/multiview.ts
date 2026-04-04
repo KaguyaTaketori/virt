@@ -117,6 +117,18 @@ export const useMultiviewStore = defineStore('multiview', () => {
     persist()
   }
 
+  function addFromVideoId(platform: 'youtube' | 'bilibili', videoId: string) {
+    if (!videoId) return
+    const channel: Channel = { platform, id: videoId }
+    const alreadyAdded = activeChannels.value.some(
+      c => c.id === channel.id && c.platform === channel.platform
+    )
+    if (!alreadyAdded) {
+      addChannelToTree(tree.value, channel)
+      persist()
+    }
+  }
+
   return {
     tree,
     activeChannels,
@@ -129,7 +141,8 @@ export const useMultiviewStore = defineStore('multiview', () => {
     applyPreset,
     copyShareUrl,
     loadFromShareParam,
-    saveTree,
+    saveTree, 
+    addFromVideoId,
   }
 })
 

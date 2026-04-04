@@ -29,11 +29,45 @@ from app.schemas.schemas import TokenData
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
-
+"""
+背景
+────
+bcrypt 有 72 字节的输入截断限制（NIST SP 800-132），超过部分被静默忽略，
+导致超长密码的安全熵远低于预期。
+ 
+现有方案
+────────
+_pre_hash_password 先用 SHA-256 将任意长度密码压缩为 64 字节的十六进制字符串，
+再交给 bcrypt 处理。这样：
+  1. 完整保留超长密码的全部熵（SHA-256 对输入无长度限制）
+  2. 不超过 bcrypt 的 72 字节上限（64 hex chars + terminator ≤ 72）
+  3. 彩虹表攻击：bcrypt 的 salt 仍然有效，SHA-256 本身不引入弱点
+ 
+潜在风险
+────────
+- SHA-256 输出是确定性的，若数据库中的 bcrypt hash 泄露，
+  攻击者只需对 SHA-256(password) 进行 bcrypt 暴力破解，
+  而非直接对原始密码，安全性与纯 bcrypt 相当。
+- 标准库 passlib 也推荐类似的 "pre-hash" 方案处理超长密码。
+ 
+替代方案（如需迁移）
+───────────────────
+使用 PBKDF2-HMAC-SHA256（无长度限制，Python 标准库支持）：
+  import hashlib
+  dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100_000)
+ 
+结论
+────
+现有方案在设计上是合理的，保持不变，仅在此处补充文档说明。
+"""
 # ── 密码工具 ───────────────────────────────────────────────────────────────────
 
 def _pre_hash_password(password: str) -> str:
-    """SHA-256 预哈希，避免 bcrypt 72 字节截断限制。"""
+    """
+    SHA-256 预哈希：将任意长度密码转为 64 字节 hex 字符串。
+    目的：规避 bcrypt 的 72 字节输入截断限制，完整保留密码熵。
+    参见模块顶部的设计说明。
+    """
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 

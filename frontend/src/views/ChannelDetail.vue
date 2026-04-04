@@ -387,15 +387,9 @@ import { NButton, NPagination, useMessage } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
 import { useOrgStore } from '../stores/org'
 import { useAuthStore } from '../stores/auth'
+import { useMultiviewStore } from '@/stores/multiview'
 import { channelApi, userChannelApi, type Channel as ApiChannel } from '../api'
 
-// 引入我们刚才新建的布局树引擎
-import { 
-  createEmptyLeaf, 
-  addChannelToTree, 
-  getActiveChannels,
-  type LayoutNode 
-} from '@/utils/layoutEngine'
 
 interface Video {
   id: string
@@ -430,6 +424,7 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
 const authStore = useAuthStore()
+const multiviewStore = useMultiviewStore()
 const message = useMessage()
 
 const channel = ref<ApiChannel | null>(null)
@@ -513,41 +508,8 @@ async function toggleBlock() {
 
 function addToMultiview(video?: Video) {
   if (!channel.value) return
-
-  const channelData = {
-    platform: channel.value.platform as 'youtube' | 'bilibili',
-    id: video ? video.id : channel.value.channel_id,
-  }
-
-  let tree: LayoutNode
-  const raw = localStorage.getItem('multiview_tree')
-
-  if (raw) {
-    try {
-      tree = JSON.parse(raw)
-      if (typeof tree !== 'object' || !tree.type) throw new Error('invalid')
-    } catch {
-      localStorage.removeItem('multiview_tree')
-      tree = createEmptyLeaf()
-    }
-  } else {
-    tree = createEmptyLeaf()
-  }
-
-  const existing = getActiveChannels(tree)
-  const alreadyAdded = existing.some(
-    c => c.id === channelData.id && c.platform === channelData.platform
-  )
-
-  if (!alreadyAdded) {
-    addChannelToTree(tree, channelData)
-    try {
-      localStorage.setItem('multiview_tree', JSON.stringify(tree))
-    } catch {
-      message.warning('存储已满，布局将不会被保存')
-    }
-  }
-
+  const id = video?.id ?? channel.value.channel_id
+  multiviewStore.addFromVideoId(channel.value.platform as 'youtube' | 'bilibili', id)
   router.push({ name: 'MultiView' })
 }
 

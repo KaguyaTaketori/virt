@@ -8,7 +8,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
-from sqlalchemy import text
+from sqlalchemy import text, select, func
 
 from app.config import settings
 from app.routers import (
@@ -22,9 +22,12 @@ from app.routers import (
     user_channels,
     permissions,
 )
-from app.services.youtube_websub import router as youtube_websub_router
+from app.services.token_blacklist import token_blacklist
+from app.services.youtube_websub import router as youtube_websub_router, subscribe_all_active_channels
+from app.schedulers import start_scheduler, scheduler
+from app.database_async import AsyncSessionFactory, create_all_tables
 from app.database import engine, Base
-from app.scheduler_tasks import start_scheduler
+from app.models.models import WebSubSubscription
 
 
 def _assert_production_secrets() -> None:
@@ -59,16 +62,9 @@ async def lifespan(app: FastAPI):
     try:
         _assert_production_secrets()
     
-        from app.services.youtube_websub import subscribe_all_active_channels
-        from app.database_async import AsyncSessionFactory, create_all_tables
-        from app.database import engine, Base
-        from sqlalchemy import select, func
-        from app.models.models import WebSubSubscription
-    
         Base.metadata.create_all(bind=engine)
         await create_all_tables()
     
-        from app.services.token_blacklist import token_blacklist
         try:
             async with AsyncSessionFactory() as session:
 
@@ -85,7 +81,6 @@ async def lifespan(app: FastAPI):
                     "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti ON blacklisted_tokens (jti)"
                 ))
                 await session.commit()
-                # 预热内存缓存
                 await token_blacklist.warm_up(session)
         except Exception as e:
             logger.error("Token blacklist warmup failed: {}", e)
@@ -103,7 +98,6 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error("首次订阅失败: {}", e)
     
-        from app.scheduler_tasks import start_scheduler, scheduler
         start_scheduler()
     
         async def _cleanup_blacklist():
