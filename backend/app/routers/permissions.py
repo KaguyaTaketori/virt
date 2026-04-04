@@ -19,7 +19,7 @@ from app.schemas.schemas import (
 )
 from app.auth import get_current_user
 from app.services.permissions import get_user_roles, has_permission
-from app.deps.permissions import AdminUser, SuperAdminUser
+from app.deps.guards import AdminUser, SuperAdminUser
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
 

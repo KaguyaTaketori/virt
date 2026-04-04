@@ -1,23 +1,21 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
-from app.loguru_config import logger
+import httpx
+import hashlib
 
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.database_async import get_async_session, AsyncSessionFactory
-from app.models.models import Channel, WebSubSubscription
+from app.models.models import Channel, User, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 from app.config import settings
-from app.deps.guards import validate_websub_callback
+from app.deps.guards import AdminUser, validate_websub_callback
+from app.loguru_config import logger
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
@@ -388,6 +386,7 @@ async def manual_subscribe(
         ...,
         description="本服务的公网回调 URL，如 https://example.com/api/websub/youtube",
     ),
+    _: User = AdminUser, 
 ) -> dict:
     """
     对数据库中指定 Channel（通过主键 ID）发起 WebSub 订阅请求。
@@ -438,6 +437,7 @@ async def manual_subscribe(
 )
 async def bulk_subscribe(
     callback_url: str = Query(..., description="本服务的公网回调 URL"),
+    _: User = AdminUser,
 ) -> dict:
     """
     批量订阅数据库中所有 is_active=True 的 YouTube 频道。
@@ -454,7 +454,7 @@ async def bulk_subscribe(
     "/youtube/subscriptions",
     summary="查询所有 WebSub 订阅状态",
 )
-async def list_subscriptions() -> list[dict]:
+async def list_subscriptions(_: User = AdminUser,) -> list[dict]:
     """列出数据库中记录的全部 WebSub 订阅状态，用于运维监控。"""
     async with AsyncSessionFactory() as session:
         result = await session.execute(
@@ -464,7 +464,7 @@ async def list_subscriptions() -> list[dict]:
         )
         rows = result.all()
  
-    now = datetime.now(datetime.timezone.utc)
+    now = datetime.now(timezone.utc)
     return [
         {
             "channel_id": sub.channel_id,
@@ -485,11 +485,11 @@ def _calc_health(sub: WebSubSubscription) -> str:
     """评估订阅健康状态。"""
     if not sub.verified:
         return "未订阅"
-    if sub.expires_at and sub.expires_at < datetime.utcnow():
+    if sub.expires_at and sub.expires_at < datetime.now(timezone.utc):
         return "已过期"
     if not sub.last_push_at:
         return "无推送"
-    hours_since = (datetime.utcnow() - sub.last_push_at).total_seconds() / 3600
+    hours_since = (datetime.now(timezone.utc) - sub.last_push_at).total_seconds() / 3600
     if hours_since > 48:
         return "异常(48h无推送)"
     return "正常"

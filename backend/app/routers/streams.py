@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.deps import get_async_db
+from app.deps.guards import BilibiliAccess
 from app.models.models import Channel, Platform, Stream, StreamStatus, User
 from app.schemas.schemas import StreamResponse
 from app.auth import get_current_user_optional
@@ -15,21 +16,16 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 @router.get("/live", response_model=list[StreamResponse])
 async def get_live_streams(
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    _: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
 ):
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = await has_permission(
-            current_user.id, "bilibili", "access", db
-        )
-
     query = (
         select(Stream)
         .join(Channel, Stream.channel_id == Channel.id)
         .where(Stream.status == StreamStatus.LIVE)
     )
 
-    if not has_bilibili_perm:
+    if not can_bilibili:
         query = query.where(Channel.platform == Platform.YOUTUBE)
 
     result = await db.execute(query)
@@ -42,17 +38,12 @@ async def get_all_streams(
     platform: Optional[Platform] = None,
     status: Optional[StreamStatus] = None,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    _: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
 ):
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = await has_permission(
-            current_user.id, "bilibili", "access", db
-        )
-
     query = select(Stream).join(Channel, Stream.channel_id == Channel.id)
 
-    if not has_bilibili_perm:
+    if not can_bilibili:
         query = query.where(Channel.platform == Platform.YOUTUBE)
 
     if platform is not None:

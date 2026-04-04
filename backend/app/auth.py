@@ -11,7 +11,7 @@ backend/app/auth.py  ← 完整替换原文件
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -55,14 +55,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     jti 使用 UUID4，概率碰撞极低（2^122 分之一）。
     """
     to_encode = data.copy()
-    expire = datetime.utcnow() + (
+    expire = datetime.now(timezone.utc) + (
         expires_delta
         or timedelta(minutes=settings.jwt_access_token_expire_minutes)
     )
     to_encode.update({
         "exp": expire,
-        "jti": str(uuid.uuid4()),  # ← 新增：唯一 Token ID，用于黑名单撤销
-        "iat": datetime.utcnow(),  # ← 新增：签发时间，便于审计
+        "jti": str(uuid.uuid4()),
+        "iat": datetime.now(timezone.utc),
     })
     return jwt.encode(
         to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List
 
 from app.deps import get_async_db
-from app.deps.permissions import AdminUser
+from app.deps.guards import AdminUser
 from app.models.models import Organization, User
 from app.schemas.schemas import (
     OrganizationCreate,

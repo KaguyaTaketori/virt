@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from typing import List, Optional
 
 from app.deps import get_async_db
-from app.deps.permissions import AdminUser, require_permission_dep
+from app.deps.guards import AdminUser, BilibiliAccess, require_permission
 from app.database_async import AsyncSessionFactory
 from app.schemas.schemas import (
     ChannelCreate,
@@ -57,15 +56,11 @@ async def get_channels(
     org_id: Optional[int] = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
 ):
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = await has_permission(
-            current_user.id, "bilibili", "access", db
-        )
 
     query = select(Channel)
-    if not has_bilibili_perm:
+    if not can_bilibili:
         query = query.where(Channel.platform == "youtube")
     if platform:
         query = query.where(Channel.platform == platform)
@@ -101,19 +96,14 @@ async def get_channel_by_id(
     channel_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = await has_permission(
-            current_user.id, "bilibili", "access", db
-        )
-
-    if channel.platform == Platform.BILIBILI and not has_bilibili_perm:
+    if channel.platform == Platform.BILIBILI and not can_bilibili:
         raise HTTPException(status_code=403, detail="需要B站访问权限")
 
     resp = ChannelResponse.model_validate(channel)
@@ -341,7 +331,7 @@ async def refresh_channel(
 @router.post(
     "/scrape/vspo",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],
+    dependencies=[Depends(require_permission("channel", "manage"))],
 )
 async def scrape_vspo_channels(db: AsyncSession = Depends(get_async_db)):
     try:
@@ -355,7 +345,7 @@ async def scrape_vspo_channels(db: AsyncSession = Depends(get_async_db)):
 @router.post(
     "/scrape/nijisanji",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],
+    dependencies=[Depends(require_permission("channel", "manage"))],
 )
 async def scrape_nijisanji_channels(db: AsyncSession = Depends(get_async_db)):
     try:
@@ -371,7 +361,7 @@ async def scrape_nijisanji_channels(db: AsyncSession = Depends(get_async_db)):
 @router.post(
     "/scrape/all",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],
+    dependencies=[Depends(require_permission("channel", "manage"))],
 )
 async def scrape_all_channels(db: AsyncSession = Depends(get_async_db)):
     try:
@@ -387,6 +377,7 @@ async def get_channel_bilibili_info(
     channel_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
@@ -396,13 +387,7 @@ async def get_channel_bilibili_info(
     if channel.platform != Platform.BILIBILI:
         raise HTTPException(status_code=400, detail="Channel is not a Bilibili channel")
 
-    has_bilibili_perm = False
-    if current_user:
-        has_bilibili_perm = await has_permission(
-            current_user.id, "bilibili", "access", db
-        )
-
-    if not has_bilibili_perm:
+    if not can_bilibili:
         raise HTTPException(status_code=403, detail="需要B站访问权限")
 
     info = {

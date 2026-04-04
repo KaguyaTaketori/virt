@@ -1,10 +1,5 @@
-import httpx
-from app.loguru_config import logger
 import math
-import subprocess
-import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, and_, or_, select, func
 

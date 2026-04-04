@@ -1,13 +1,38 @@
-from pydantic import BaseModel, Field, field_validator
+import re
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
 from app.models.models import Platform, StreamStatus
 
 
 class UserCreate(BaseModel):
-    username: str
-    email: Optional[str] = None
-    password: str
+    username: str = Field(
+        ..., 
+        min_length=3, 
+        max_length=50, 
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="用户名只能包含字母、数字、下划线和减号，长度为3-50"
+    )
+    email: Optional[EmailStr] = Field(None, description="可选的合法邮箱地址")
+    password: str = Field(
+        ..., 
+        min_length=8, 
+        max_length=128,
+        description="密码长度需在8-128位之间"
+    )
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_complexity(cls, value: str) -> str:
+        if not re.search(r"[A-Z]", value):
+            raise ValueError("密码必须包含至少一个大写字母")
+        if not re.search(r"[a-z]", value):
+            raise ValueError("密码必须包含至少一个小写字母")
+        if not re.search(r"[0-9]", value):
+            raise ValueError("密码必须包含至少一个数字")
+            
+        return value
 
 
 class UserResponse(BaseModel):

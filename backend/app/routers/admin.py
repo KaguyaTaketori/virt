@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.deps.permissions import AdminUser
+from app.deps.guards import AdminUser
 from app.models.models import User
 from app.scheduler_tasks import (
     discover_youtube_streams,
@@ -31,7 +31,7 @@ async def trigger_bilibili_sync_channels(_: User = AdminUser):
 
 
 @router.get("/quota")
-def get_quota_status(
+async def get_quota_status(
     _: User = AdminUser
 ):
-    return quota_status()
+    return await quota_status()

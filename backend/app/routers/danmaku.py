@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path as FPath
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.deps import get_async_db
+from app.deps.guards import BilibiliAccess
 from app.services.danmaku import get_live_chat_messages
 from app.services.danmaku_bilibili import get_bilibili_danmaku
 from app.config import settings
@@ -43,7 +44,10 @@ async def require_registered_user(db: AsyncSession, current_user: Optional[User]
 
 
 @router.get("/youtube/file/{video_id}")
-async def get_youtube_danmaku_from_file(video_id: str):
+async def get_youtube_danmaku_from_file(
+    video_id: str = FPath(..., pattern=r"^[a-zA-Z0-9_\-]{11}$"),
+    _: User = Depends(get_current_user),
+):
     """从本地文件获取YouTube弹幕"""
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
@@ -54,7 +58,9 @@ async def get_youtube_danmaku_from_file(video_id: str):
 
 @router.get("/youtube/db/{stream_id}")
 async def get_youtube_danmaku_from_db(
-    stream_id: int, db: AsyncSession = Depends(get_async_db)
+    stream_id: int, 
+    db: AsyncSession = Depends(get_async_db),
+    _: User = Depends(get_current_user),
 ):
     """从数据库获取YouTube弹幕"""
     if not settings.enable_danmaku:
@@ -113,12 +119,13 @@ async def get_youtube_danmaku(live_chat_id: str, page_token: str = None):
 async def get_bilibili_danmaku_endpoint(
     room_id: str,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    can_bilibili: bool = BilibiliAccess,
     db: AsyncSession = Depends(get_async_db),
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="请先登录")
  
-    if not await has_permission(current_user.id, "bilibili", "access", db):
+    if not can_bilibili:
         raise HTTPException(status_code=403, detail="需要 B 站访问权限")
  
     if not settings.enable_danmaku:
