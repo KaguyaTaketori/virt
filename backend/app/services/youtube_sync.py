@@ -1,17 +1,3 @@
-# backend/app/services/youtube_sync.py
-"""
-YouTube 视频元数据低消耗同步模块（重构版）。
-
-核心策略：
-  1. 频道 ID UCxxx → 上传播放列表 UUxxx
-  2. PlaylistItems.list 翻页拉取视频 ID（1 配额 / 50 条）
-  3. Videos.list 批量拉取详情（1 配额 / 50 条）
-  4. Python 层 Upsert，兼容 SQLite 和 PostgreSQL
-
-对外暴露：
-  - sync_channel_videos()           — 频道级全量/增量同步
-  - fetch_and_upsert_single_video() — WebSub 推送后单条更新
-"""
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
 from app.models.models import Channel, Video
-from app.services.youtube_utils import parse_video_item  # ← 共享工具
+from app.services.youtube_utils import parse_video_item
 
 _YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 _BATCH_SIZE  = 50
@@ -37,6 +23,23 @@ def _uc_to_uu(channel_id: str) -> Optional[str]:
     """将频道 ID（UCxxx）转为上传播放列表 ID（UUxxx）。"""
     if channel_id and channel_id.startswith("UC"):
         return "UU" + channel_id[2:]
+    return None
+
+async def _get_real_uploads_playlist_id(client: httpx.AsyncClient, api_key: str, channel_id: str) -> Optional[str]:
+    params = {
+        "key": api_key,
+        "part": "contentDetails",
+        "id": channel_id,
+    }
+    try:
+        resp = await client.get(f"{_YT_API_BASE}/channels", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("items", [])
+        if items:
+            return items[0].get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+    except Exception as e:
+        logger.error("获取频道详情失败: {}", e)
     return None
 
 
@@ -129,7 +132,7 @@ async def _fetch_playlist_page(
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        logger.error("PlaylistItems.list HTTP {}: {}", e.response.status_code, e.response.text[:200])
+        logger.error("Failed ID: {}", playlist_id)
         return [], None
     except httpx.RequestError as e:
         logger.error("PlaylistItems.list 网络错误: {}", e)

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database_async import AsyncSessionFactory
-from app.models.models import Channel, Stream, StreamStatus, Platform
+from app.models.models import Channel, Stream, StreamStatus, Platform, Video
 from app.services.youtube_fetcher import (
     get_videos_details,
     parse_youtube_stream,
