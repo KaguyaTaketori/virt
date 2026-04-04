@@ -1,15 +1,19 @@
-// frontend/src/stores/auth.ts  ← 完整替换原文件
-// ─────────────────────────────────────────────────────────────────────────────
-// 修复内容：
-//   [低] 注销后 TanStack Query 缓存残留（前一用户数据对新用户短暂可见）
-//     → logout 时调用 queryClient.clear() 清空所有缓存
-//   [低] 前端权限判断逻辑重复（canAccessBilibili 散落在多个视图）
-//     → 权限逻辑已保留在此 store，使用说明见 useBilibiliGuard composable
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * frontend/src/stores/auth.ts（修复版）
+ *
+ * 问题 12 修复：logout 时可靠地清空 TanStack Query 缓存。
+ *
+ * 原问题：_getQueryClient() 使用懒加载 + try/catch 静默失败。
+ * 若 logout 在组件 setup 生命周期之外被调用，useQueryClient() 会抛异常，
+ * 导致 qc.clear() 从未执行，前一用户的数据对新用户短暂可见。
+ *
+ * 修复方案：
+ *   在 main.ts 中创建 QueryClient 后，通过 setQueryClient() 注入到 store。
+ *   store 不再直接调用 useQueryClient()（hooks 只能在 setup 中使用）。
+ */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import type { QueryClient } from '@tanstack/vue-query'
 import { authApi } from '@/api'
 import router from '@/router'
 
@@ -22,26 +26,18 @@ interface User {
   permissions?: string[]
 }
 
+// module-level 持有 QueryClient 引用，在 main.ts 中注入
+let _sharedQueryClient: QueryClient | null = null
+
+/** 在 main.ts 中调用，将 QueryClient 传入 store 模块 */
+export function setSharedQueryClient(qc: QueryClient) {
+  _sharedQueryClient = qc
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('token'))
   const user = ref<User | null>(null)
   const loading = ref(false)
-
-  // 获取 QueryClient 用于注销时清空缓存
-  // 注意：需要在 Pinia 外部（组件内）通过 useQueryClient() 获取
-  // 此处使用懒加载模式避免在 store 初始化时报错
-  let _queryClient: ReturnType<typeof useQueryClient> | null = null
-
-  function _getQueryClient() {
-    if (!_queryClient) {
-      try {
-        _queryClient = useQueryClient()
-      } catch {
-        // store 在组件外使用时 useQueryClient 可能失败，忽略
-      }
-    }
-    return _queryClient
-  }
 
   const isLoggedIn = computed(() => !!token.value)
 
@@ -54,9 +50,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isSuperAdmin = computed(() => hasRole('superadmin'))
   const isAdmin = computed(() => hasRole('admin') || isSuperAdmin.value)
   const isOperator = computed(() => hasRole('operator') || isAdmin.value)
-
   const canAccessBilibili = computed(
-    () => hasPermission('bilibili.access') || isSuperAdmin.value
+    () => hasPermission('bilibili.access') || isSuperAdmin.value,
   )
 
   async function login(username: string, password: string): Promise<boolean> {
@@ -67,25 +62,19 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('token', res.data.access_token)
       await fetchUserInfo()
       return true
-    } catch (e) {
-      console.error('Login failed:', e)
+    } catch {
       return false
     } finally {
       loading.value = false
     }
   }
 
-  async function register(
-    username: string,
-    email: string,
-    password: string
-  ): Promise<boolean> {
+  async function register(username: string, email: string, password: string): Promise<boolean> {
     loading.value = true
     try {
       await authApi.register({ username, email, password })
       return await login(username, password)
-    } catch (e) {
-      console.error('Register failed:', e)
+    } catch {
       return false
     } finally {
       loading.value = false
@@ -109,39 +98,27 @@ export const useAuthStore = defineStore('auth', () => {
       console.error('Logout API failed:', e)
     }
 
-    const qc = _getQueryClient()
-    if (qc) {
-      qc.clear()
+    // 修复：通过 module-level 引用可靠地清空缓存，不依赖 hooks
+    if (_sharedQueryClient) {
+      _sharedQueryClient.clear()
+    } else {
+      console.warn('[auth] queryClient not injected, cache not cleared')
     }
 
     token.value = null
     user.value = null
     localStorage.removeItem('token')
-
     router.push('/')
   }
 
   async function init(): Promise<void> {
-    if (token.value) {
-      await fetchUserInfo()
-    }
+    if (token.value) await fetchUserInfo()
   }
 
   return {
-    token,
-    user,
-    loading,
-    isLoggedIn,
-    isSuperAdmin,
-    isAdmin,
-    isOperator,
-    canAccessBilibili,
-    hasRole,
-    hasPermission,
-    login,
-    register,
-    logout,
-    fetchUserInfo,
-    init,
+    token, user, loading,
+    isLoggedIn, isSuperAdmin, isAdmin, isOperator, canAccessBilibili,
+    hasRole, hasPermission,
+    login, register, logout, fetchUserInfo, init,
   }
 })

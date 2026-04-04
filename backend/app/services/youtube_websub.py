@@ -132,23 +132,27 @@ def _verify_hmac_signature(
     body: bytes, signature_header: Optional[str], secret: str
 ) -> bool:
     if not secret:
-        if not signature_header:
+        if signature_header:
             logger.warning(
-                "WebSub received push without HMAC signature. "
-                "Set WEBSUB_SECRET in production to enforce signature validation."
+                "收到签名头但 WEBSUB_SECRET 未配置，建议在生产环境设置 secret。"
+                " signature={}", signature_header[:20]
             )
-            return True
         return True
-
+ 
     if not signature_header:
+        logger.warning("HMAC secret 已配置但请求缺少 X-Hub-Signature 头，拒绝")
         return False
  
     algo, _, sig_hex = signature_header.partition("=")
     if algo != "sha1":
+        logger.warning("不支持的签名算法: {}", algo)
         return False
  
     expected = hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
-    return hmac.compare_digest(expected, sig_hex)
+    result = hmac.compare_digest(expected, sig_hex)
+    if not result:
+        logger.warning("HMAC 签名不匹配，拒绝推送")
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

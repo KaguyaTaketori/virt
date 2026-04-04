@@ -1,3 +1,6 @@
+import time
+from typing import List
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
 import httpx
@@ -119,7 +122,7 @@ async def update_youtube_streams():
 
         await db.commit()
         logger.info(
-            "刷新 {} 条 | 配额剩余 {}", len(active), await quota_status()["remaining"]
+            "刷新 {} 条 | 配额剩余 {}", len(active), (await quota_status())["remaining"]
         )
 
 
@@ -293,59 +296,51 @@ async def refresh_channel_details():
         logger.info("完成")
 
 
-async def sync_youtube_videos_bulk(limit: int = 50):
-    """批量同步历史视频 - 每次处理limit个频道，轮流处理所有频道"""
-    if not settings.youtube_api_key:
+async def sync_youtube_videos_bulk(limit: int = 50) -> None:
+    api_key = settings.youtube_api_key
+    if not api_key:
         return
-
-    from app.services.youtube_sync import sync_channel_videos
-
-    # 获取当前是第几轮（基于时间）
-    import time
-
-    round_num = int(time.time()) // 3600 % 10  # 每小时换一轮，最多记住10小时
-
-    async with AsyncSessionFactory() as db:
-        # 获取频道总数
-        result = await db.execute(
+ 
+    round_num = int(time.time()) // 3600 % 10
+ 
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
-                Channel.is_active == True,
+                Channel.is_active.is_(True),
             )
         )
-        all_channels = result.scalars().all()
-        total_channels = len(all_channels)
-
-        if total_channels == 0:
-            return
-
-        # 计算偏移量，实现轮流处理
-        offset = (round_num * limit) % total_channels
-        channels = all_channels[offset : offset + limit]
-        if len(channels) < limit:
-            channels.extend(all_channels[: limit - len(channels)])
-
-        if not channels:
-            return
-
-        logger.info(
-            "开始批量同步 {} 个频道的视频 (round={}, offset={})",
-            len(channels),
-            round_num,
-            offset,
-        )
-
-        for ch in channels:
+        all_channels: List[Channel] = result.scalars().all()
+ 
+    if not all_channels:
+        return
+ 
+    total = len(all_channels)
+    offset = (round_num * limit) % total
+    batch = all_channels[offset: offset + limit]
+    if len(batch) < limit:
+        # 末尾不足时从头补齐
+        batch += all_channels[: limit - len(batch)]
+ 
+    logger.info("bulk sync: {} channels (round={}, offset={})", len(batch), round_num, offset)
+ 
+    # ── 关键修复：复用单一 session，按频道粒度 commit ──────────────────────
+    async with AsyncSessionFactory() as session:
+        for ch in batch:
             try:
-                await sync_channel_videos(
-                    db, ch, settings.youtube_api_key, full_refresh=False
-                )
+                # 重新从本 session 加载对象，避免跨 session 引用
+                ch_obj = await session.get(Channel, ch.id)
+                if not ch_obj:
+                    continue
+                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
+                # 每个频道单独 commit，减少单次事务锁持有时长
+                await session.commit()
                 await asyncio.sleep(0.5)
             except Exception as e:
-                logger.warning(f"{ch.name}: {e}")
-
-        logger.info("批量同步完成")
-
+                await session.rollback()
+                logger.warning("bulk sync error for channel_id={}: {}", ch.id, e)
+ 
+    logger.info("bulk sync done: {} channels processed", len(batch))
 
 async def discover_yive_streams_from_videos():
     """从频道视频列表发现 live/upcoming  streams（无搜索API时的备选方案）"""

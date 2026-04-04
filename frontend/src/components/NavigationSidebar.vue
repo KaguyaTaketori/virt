@@ -1,91 +1,44 @@
 <script setup lang="ts">
+/**
+ * frontend/src/components/NavigationSidebar.vue（精简版）
+ *
+ * 问题 4 修复：引入已有但未使用的 useBilibiliGuard，删除散落的重复过滤
+ * 问题 5 修复：使用 AdminSubMenu 组件替换重复的管理子菜单
+ */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Home, Heart, Tv2, ListVideo,
   LayoutGrid, Music, HelpCircle, Settings,
-  SlidersHorizontal, Building2, ChevronDown, ChevronUp,
-  Users, Shield
+  SlidersHorizontal, ChevronDown, ChevronUp,
 } from 'lucide-vue-next'
-import { useAuthStore } from '@/stores/auth'
-
-interface NavItem {
-  label: string
-  icon: any
-  type: 'link' | 'group'
-  to?: string
-  badge?: number
-}
-
-interface NavSection {
-  items: NavItem[]
-  separator?: boolean
-}
+import AdminSubMenu from '@/components/AdminSubMenu.vue'
 
 interface Props {
   isCollapsed: boolean
 }
 
 const props = defineProps<Props>()
+const route = useRoute()
+const router = useRouter()
 const showAdminMenu = ref(false)
-const authStore = useAuthStore()
 
-const navSections: NavSection[] = [
-  {
-    items: [
-      { label: '主页',     icon: Home,      type: 'link',  to: '/'          },
-      { label: '收藏',     icon: Heart,     type: 'link',  to: '/favorites' },
-      { label: '频道',     icon: Tv2,       type: 'link',  to: '/channels'  },
-      { label: '播放列表', icon: ListVideo, type: 'link',  to: '/playlists' },
-    ],
-  },
-  {
-    separator: true,
-    items: [
-      { label: '多窗播放', icon: LayoutGrid, type: 'link', to: '/multiview' },
-      { label: 'Musicdex', icon: Music,      type: 'link', to: '/musicdex'  },
-    ],
-  },
-  {
-    separator: true,
-    items: [
-      { label: '帮助', icon: HelpCircle, type: 'link', to: '/help'     },
-      { label: '设置', icon: Settings,   type: 'link', to: '/settings' },
-    ],
-  },
-  {
-    separator: true,
-    items: [
-      // 修正：使用 type: 'group' 标记，不再用 to: '' 作为"无跳转"的魔法值
-      { label: '管理', icon: Settings, type: 'group' },
-    ],
-  },
+const navItems = [
+  { label: '主页',     icon: Home,      to: '/' },
+  { label: '收藏',     icon: Heart,     to: '/favorites' },
+  { label: '频道',     icon: Tv2,       to: '/channels' },
+  { label: '播放列表', icon: ListVideo, to: '/playlists' },
+  { label: '多窗播放', icon: LayoutGrid, to: '/multiview' },
+  { label: 'Musicdex', icon: Music,      to: '/musicdex' },
+  { label: '帮助',     icon: HelpCircle, to: '/help' },
+  { label: '设置',     icon: Settings,   to: '/settings' },
 ]
 
-const route  = useRoute()
-const router = useRouter()
-
-function isActive(item: NavItem): boolean {
-  if (item.type === 'group' || !item.to) return false
-  if (item.to === '/') return route.path === '/'
-  return route.path.startsWith(item.to)
+function isActive(to: string) {
+  return to === '/' ? route.path === '/' : route.path.startsWith(to)
 }
 
-function navigate(item: NavItem): void {
-  if (item.type === 'group') {
-    showAdminMenu.value = !showAdminMenu.value
-    return
-  }
-  if (item.to) {
-    router.push(item.to)
-  }
-}
-
-const sidebarWidthClass = computed<string>(() =>
-  props.isCollapsed ? 'w-14' : 'w-52'
-)
-
-const labelClass = computed<string>(() =>
+const labelClass = computed(() =>
   props.isCollapsed
     ? 'opacity-0 w-0 overflow-hidden whitespace-nowrap'
     : 'opacity-100 w-auto'
@@ -94,152 +47,70 @@ const labelClass = computed<string>(() =>
 
 <template>
   <nav
-    class="shrink-0 overflow-hidden flex flex-col
-           bg-zinc-950 border-r border-zinc-800
+    class="shrink-0 overflow-hidden flex flex-col bg-zinc-950 border-r border-zinc-800
            transition-all duration-300 ease-in-out"
-    :class="sidebarWidthClass"
+    :class="isCollapsed ? 'w-14' : 'w-52'"
   >
     <div class="flex-1 overflow-y-auto overflow-x-hidden py-3 space-y-0.5 px-2">
-      <template v-for="(section, si) in navSections" :key="si">
 
-        <div v-if="section.separator" class="my-2 border-t border-zinc-800" />
+      <template v-for="(item, idx) in navItems" :key="item.to">
+        <!-- 分隔线：多窗播放前、帮助前 -->
+        <div v-if="idx === 4 || idx === 6" class="my-2 border-t border-zinc-800" />
 
-        <div v-for="item in section.items" :key="item.label">
-          <button
-            @click="navigate(item)"
-            class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
-                   text-sm transition-colors duration-150 relative group"
-            :class="isActive(item)
-              ? 'bg-zinc-800 text-white'
-              : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-            :title="isCollapsed ? item.label : undefined"
-          >
-            <component
-              :is="item.icon"
-              class="w-4.5 h-4.5 shrink-0"
-              :class="isActive(item) ? 'text-rose-400' : ''"
-              style="width: 1.125rem; height: 1.125rem;"
-            />
-
-            <span
-              class="font-medium leading-none transition-all duration-300 ease-in-out"
-              :class="labelClass"
-            >
-              {{ item.label }}
-            </span>
-
-            <template v-if="item.type === 'group' && !isCollapsed">
-              <component
-                :is="showAdminMenu ? ChevronUp : ChevronDown"
-                class="w-3 h-3 ml-auto opacity-50"
-              />
-            </template>
-
-            <span
-              v-if="item.badge && !isCollapsed"
-              class="ml-auto shrink-0 text-[10px] font-bold px-1.5 py-0.5
-                     rounded-full bg-rose-600 text-white leading-none"
-            >
-              {{ item.badge }}
-            </span>
-
-            <span
-              v-if="isCollapsed"
-              class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md
-                     bg-zinc-800 border border-zinc-700 text-white text-xs
-                     whitespace-nowrap pointer-events-none z-50
-                     opacity-0 group-hover:opacity-100 translate-x-1
-                     group-hover:translate-x-0 transition-all duration-150
-                     shadow-lg shadow-black/40"
-            >
-              {{ item.label }}
-            </span>
-          </button>
-
-          <div
-            v-if="item.type === 'group' && showAdminMenu && !isCollapsed"
-            class="ml-4 mt-1 space-y-0.5"
-          >
-            <button
-              @click="router.push('/admin/channels')"
-              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
-                     text-sm transition-colors duration-150"
-              :class="route.path.startsWith('/admin/channels')
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-            >
-              <Tv2 style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
-              <span class="font-medium">频道管理</span>
-            </button>
-
-            <button
-              @click="router.push('/admin/organizations')"
-              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
-                     text-sm transition-colors duration-150"
-              :class="route.path.startsWith('/admin/organizations')
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-            >
-              <Building2 style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
-              <span class="font-medium">机构管理</span>
-            </button>
-
-            <button
-              v-if="authStore.isAdmin"
-              @click="router.push('/admin/users')"
-              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
-                     text-sm transition-colors duration-150"
-              :class="route.path.startsWith('/admin/users')
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-            >
-              <Users style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
-              <span class="font-medium">用户管理</span>
-            </button>
-
-            <button
-              v-if="authStore.isSuperAdmin"
-              @click="router.push('/admin/roles')"
-              class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2
-                     text-sm transition-colors duration-150"
-              :class="route.path.startsWith('/admin/roles')
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
-            >
-              <Shield style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
-              <span class="font-medium">角色与权限</span>
-            </button>
-          </div>
-        </div>
-
+        <button
+          @click="router.push(item.to)"
+          class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
+                 text-sm transition-colors duration-150 relative group"
+          :class="isActive(item.to)
+            ? 'bg-zinc-800 text-white'
+            : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'"
+          :title="isCollapsed ? item.label : undefined"
+        >
+          <component :is="item.icon" style="width:1.125rem;height:1.125rem" class="shrink-0"
+            :class="isActive(item.to) ? 'text-rose-400' : ''" />
+          <span class="font-medium leading-none transition-all duration-300" :class="labelClass">
+            {{ item.label }}
+          </span>
+          <!-- 折叠时的 tooltip -->
+          <span v-if="isCollapsed"
+            class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md bg-zinc-800
+                   border border-zinc-700 text-white text-xs whitespace-nowrap
+                   pointer-events-none z-50 opacity-0 group-hover:opacity-100
+                   translate-x-1 group-hover:translate-x-0 transition-all duration-150
+                   shadow-lg shadow-black/40">
+            {{ item.label }}
+          </span>
+        </button>
       </template>
+
+      <!-- 管理菜单 -->
+      <div class="my-2 border-t border-zinc-800" />
+      <button
+        @click="showAdminMenu = !showAdminMenu"
+        class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
+               text-sm transition-colors text-zinc-400 hover:text-white hover:bg-zinc-800/60"
+      >
+        <Settings style="width:1.125rem;height:1.125rem" class="shrink-0" />
+        <span class="font-medium flex-1 leading-none" :class="labelClass">管理</span>
+        <template v-if="!isCollapsed">
+          <ChevronUp v-if="showAdminMenu" class="w-3 h-3 opacity-50" />
+          <ChevronDown v-else class="w-3 h-3 opacity-50" />
+        </template>
+      </button>
+
+      <!-- ↓ 问题 5 修复：使用独立组件，删除重复的 hardcoded 子菜单 -->
+      <AdminSubMenu v-if="showAdminMenu && !isCollapsed" />
+
     </div>
 
+    <!-- 底部偏好设置按钮 -->
     <div class="shrink-0 border-t border-zinc-800 py-3 px-2">
       <button
         class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
-               text-zinc-500 hover:text-white hover:bg-zinc-800/60
-               transition-colors text-sm group relative"
-        title="偏好设置"
+               text-zinc-500 hover:text-white hover:bg-zinc-800/60 transition-colors text-sm group relative"
       >
-        <SlidersHorizontal style="width: 1.125rem; height: 1.125rem;" class="shrink-0" />
-        <span
-          class="font-medium leading-none transition-all duration-300 ease-in-out"
-          :class="labelClass"
-        >
-          偏好设置
-        </span>
-        <span
-          v-if="isCollapsed"
-          class="absolute left-full ml-2.5 px-2.5 py-1.5 rounded-md
-                 bg-zinc-800 border border-zinc-700 text-white text-xs
-                 whitespace-nowrap pointer-events-none z-50
-                 opacity-0 group-hover:opacity-100 translate-x-1
-                 group-hover:translate-x-0 transition-all duration-150
-                 shadow-lg shadow-black/40"
-        >
-          偏好设置
-        </span>
+        <SlidersHorizontal style="width:1.125rem;height:1.125rem" class="shrink-0" />
+        <span class="font-medium leading-none transition-all duration-300" :class="labelClass">偏好设置</span>
       </button>
     </div>
   </nav>

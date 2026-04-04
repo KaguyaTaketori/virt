@@ -1,301 +1,148 @@
+from __future__ import annotations
+
 import asyncio
-from app.loguru_config import logger
-import threading
-import time
 from typing import Dict, Optional, Set
-from yt_chat_downloader import YouTubeChatDownloader
+
+from app.loguru_config import logger
 from app.services.connection_manager import manager
-from app.config import settings
+
+try:
+    from yt_chat_downloader import YouTubeChatDownloader
+    _YT_DOWNLOADER_AVAILABLE = True
+except ImportError:
+    _YT_DOWNLOADER_AVAILABLE = False
+    YouTubeChatDownloader = None
 
 
 class DanmakuPoller:
-    """YouTube弹幕轮询器，为每个视频维护一个轮询任务"""
 
-    def __init__(self):
-        self.pollers: Dict[str, "VideoPoller"] = {}
-        self.lock = threading.Lock()
+    def __init__(self) -> None:
+        self._tasks: Dict[str, asyncio.Task] = {}
 
-    def start_polling(self, video_id: str):
-        """启动指定视频的轮询任务"""
-        with self.lock:
-            if video_id in self.pollers:
-                return
-            
-            loop = asyncio.get_event_loop()
-            poller = VideoPoller(video_id, loop)
-            self.pollers[video_id] = poller
-            poller.start()
+    def start_polling(self, video_id: str) -> None:
+        if video_id in self._tasks and not self._tasks[video_id].done():
+            return
+        task = asyncio.create_task(
+            self._poll_video(video_id),
+            name=f"danmaku_poll_{video_id}",
+        )
+        task.add_done_callback(lambda t: self._on_task_done(video_id, t))
+        self._tasks[video_id] = task
+        logger.info("danmaku poll started: {}", video_id)
 
-    def stop_polling(self, video_id: str):
-        """停止指定视频的轮询任务"""
-        with self.lock:
-            if video_id in self.pollers:
-                self.pollers[video_id].stop()
-                del self.pollers[video_id]
+    def stop_polling(self, video_id: str) -> None:
+        task = self._tasks.pop(video_id, None)
+        if task and not task.done():
+            task.cancel()
+            logger.info("danmaku poll cancelled: {}", video_id)
 
     def get_active_videos(self) -> Set[str]:
-        """获取当前正在轮询的视频ID列表"""
-        with self.lock:
-            return set(self.pollers.keys())
+        return {vid for vid, t in self._tasks.items() if not t.done()}
 
+    def _on_task_done(self, video_id: str, task: asyncio.Task) -> None:
+        self._tasks.pop(video_id, None)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("danmaku poll error for {}: {}", video_id, exc)
 
-class VideoPoller:
-    """单个视频的轮询器"""
-
-    def __init__(self, video_id: str, loop: asyncio.AbstractEventLoop):
-        self.video_id = video_id
-        self.downloader = YouTubeChatDownloader()
-        self.continuation: Optional[str] = None
-        self.api_key: Optional[str] = None
-        self.version: Optional[str] = None
-        self.is_live_stream = False
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.last_message_ids: Set[str] = set()
-        self._initialized = False
-        self.loop = loop
-
-    def _initialize(self):
-        """初始化：获取视频信息和continuation token"""
-        if self._initialized:
+    async def _poll_video(self, video_id: str) -> None:
+        if not _YT_DOWNLOADER_AVAILABLE:
+            logger.warning("yt_chat_downloader not available, skipping poll for {}", video_id)
             return
 
+        downloader = YouTubeChatDownloader()
+        continuation: Optional[str] = None
+        api_key: Optional[str] = None
+        version: Optional[str] = None
+        is_live = False
+        seen_ids: Set[str] = set()
+
         try:
-            video_info = self.downloader.get_video_info(self.video_id)
-            self.is_live_stream = video_info.get("is_live", False)
+            info = await asyncio.to_thread(downloader.get_video_info, video_id)
+            is_live = info.get("is_live", False)
 
-            html = self.downloader.fetch_html(
-                f"https://www.youtube.com/watch?v={self.video_id}"
+            html = await asyncio.to_thread(
+                downloader.fetch_html,
+                f"https://www.youtube.com/watch?v={video_id}",
             )
-            self.api_key, self.version, yid = self.downloader.extract_innertube_params(
-                html
+            api_key, version, yid = await asyncio.to_thread(
+                downloader.extract_innertube_params, html
             )
-
             if yid:
-                self.continuation = self.downloader.find_continuation(yid)
-
-            self._initialized = True
-            logger.info(
-                f"Initialized poller for {self.video_id}: live={self.is_live_stream}, continuation={bool(self.continuation)}"
-            )
+                continuation = await asyncio.to_thread(downloader.find_continuation, yid)
+            logger.info("poll init ok: {} live={} cont={}", video_id, is_live, bool(continuation))
         except Exception as e:
-            logger.error("Failed to initialize poller for {}: {}", self.video_id, e)
-
-    def start(self):
-        """启动轮询线程"""
-        if self.running:
-            return
-        self.running = True
-        self.thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self.thread.start()
-
-    def stop(self):
-        """停止轮询"""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=2)
-
-    def _poll_loop(self):
-        """轮询循环"""
-        self._initialize()
-
-        if not self.continuation:
-            self._fetch_replay_once()
-            self.running = False
+            logger.error("poll init failed for {}: {}", video_id, e)
             return
 
-        while self.running:
+        if not continuation:
+            return
+
+        if not is_live:
+            await self._fetch_and_send(downloader, video_id, api_key, version,
+                                       continuation, is_live, seen_ids)
+            return
+
+        while True:
+            if not manager.active_connections.get(video_id):
+                logger.info("no subscribers for {}, stopping poll", video_id)
+                return
+
             try:
-                messages = self._fetch_new_messages()
-                if messages:
-                    new_messages = self._filter_new_messages(messages)
-                    if new_messages:
-                        future = asyncio.run_coroutine_threadsafe(
-                            self._send_messages(new_messages),
-                            self.loop
-                        )
-                        try:
-                            future.result(timeout=5)
-                        except Exception as e:
-                            logger.error("发送弹幕失败: {}", e)
-
-                time.sleep(1.0)
-            except Exception as e:
-                logger.error("Polling error for {}: {}", self.video_id, e)
-                time.sleep(5)
-
-    def _fetch_new_messages(self):
-        """获取新消息"""
-        if not self.continuation or not self.api_key:
-            return []
-
-        try:
-            chat_data = self.downloader.get_live_chat_data(
-                self.api_key,
-                self.version,
-                self.continuation,
-                is_live=self.is_live_stream,
-            )
-
-            messages, _ = self.downloader.parse_live_chat_messages(chat_data)
-
-            sticker_messages = self._parse_sticker_messages(chat_data)
-            messages.extend(sticker_messages)
-
-            next_cont = self.downloader.extract_next_continuation(chat_data)
-            if next_cont:
-                self.continuation = next_cont
-
-            return messages
-        except Exception as e:
-            logger.error("Error fetching messages: {}", e)
-            return []
-
-    def _parse_sticker_messages(self, chat_data: dict) -> list:
-        """解析 sticker 消息"""
-        messages = []
-
-        try:
-            actions = None
-            if "actions" in chat_data:
-                actions = chat_data["actions"]
-            elif "continuationContents" in chat_data:
-                actions = chat_data["continuationContents"]["liveChatContinuation"].get(
-                    "actions", []
+                continuation = await self._fetch_and_send(
+                    downloader, video_id, api_key, version,
+                    continuation, is_live, seen_ids
                 )
-            elif "contents" in chat_data:
-                actions = chat_data["contents"]["liveChatRenderer"].get("actions", [])
+                if not continuation:
+                    logger.info("no more continuation for {}", video_id)
+                    return
+            except Exception as e:
+                logger.error("poll loop error for {}: {}", video_id, e)
+                await asyncio.sleep(5)
+                continue
 
-            if not actions:
-                return messages
+            await asyncio.sleep(1.0)
 
-            for action in actions:
-                if "replayChatItemAction" in action:
-                    replay_action = action["replayChatItemAction"]
-                    video_offset = replay_action.get("videoOffsetTimeMsec", "0")
-                    chat_actions = replay_action.get("actions", [])
-                    if chat_actions and "addChatItemAction" in chat_actions[0]:
-                        item = chat_actions[0]["addChatItemAction"]["item"]
-                        sticker_msg = self._extract_sticker_from_item(
-                            item, video_offset
-                        )
-                        if sticker_msg:
-                            messages.append(sticker_msg)
-
-                elif "addChatItemAction" in action:
-                    item = action["addChatItemAction"]["item"]
-                    video_offset = "0"
-                    if "timestampUsec" in action.get("addChatItemAction", {}):
-                        video_offset = str(
-                            int(action["addChatItemAction"]["timestampUsec"]) // 1000
-                        )
-                    sticker_msg = self._extract_sticker_from_item(item, video_offset)
-                    if sticker_msg:
-                        messages.append(sticker_msg)
-
-        except Exception as e:
-            logger.error("Error parsing sticker messages: {}", e)
-
-        return messages
-
-    def _extract_sticker_from_item(
-        self, item: dict, video_offset: str = "0"
-    ) -> Optional[dict]:
-        """从 item 中提取 sticker 信息"""
+    async def _fetch_and_send(
+        self,
+        downloader,
+        video_id: str,
+        api_key: str,
+        version: str,
+        continuation: str,
+        is_live: bool,
+        seen_ids: Set[str],
+    ) -> Optional[str]:
         try:
-            if "liveChatStickerRenderer" not in item:
-                return None
-
-            renderer = item["liveChatStickerRenderer"]
-
-            sticker = renderer.get("sticker", {})
-            thumbnails = sticker.get("thumbnails", [])
-            img_url = thumbnails[0].get("url", "") if thumbnails else ""
-
-            if not img_url:
-                return None
-
-            accessibility = sticker.get("accessibility", {})
-            alt_text = accessibility.get("accessibilityData", {}).get(
-                "label", "Sticker"
+            chat_data = await asyncio.to_thread(
+                downloader.get_live_chat_data,
+                api_key, version, continuation, is_live=is_live,
             )
-
-            author = renderer.get("authorName", {})
-            author_name = author.get("simpleText", "").strip() if author else ""
-            author_id = renderer.get("authorExternalChannelId", "")
-
-            return {
-                "user_id": author_id,
-                "user_display_name": author_name,
-                "user_handle": author_name,
-                "datetime": "",
-                "timestamp": "0:00",
-                "comment": alt_text,
-                "message_type": "sticker",
-                "badges": [],
-                "message_id": renderer.get("id", ""),
-                "purchase_amount": "",
-                "video_offset_ms": video_offset,
-                "sticker_url": img_url,
-                "alt_text": alt_text,
-                "rank_number": None,
-                "rank_badge_icon": None,
-                "rank_badge_color": None,
-            }
+            messages, _ = await asyncio.to_thread(
+                downloader.parse_live_chat_messages, chat_data
+            )
+            next_cont = await asyncio.to_thread(
+                downloader.extract_next_continuation, chat_data
+            )
         except Exception as e:
-            logger.error("Error extracting sticker: {}", e)
-            return None
+            logger.error("fetch error for {}: {}", video_id, e)
+            return continuation
 
-    def _fetch_replay_once(self):
-        """获取录播弹幕（一次性）"""
-        if not self._initialized:
-            self._initialize()
+        new_msgs = [
+            m for m in messages
+            if (mid := m.get("message_id", "")) and mid not in seen_ids
+        ]
+        seen_ids.update(m.get("message_id", "") for m in new_msgs)
 
-        if not self.continuation:
-            return
+        if len(new_msgs) > 50:
+            new_msgs = new_msgs[-50:]
 
-        try:
-            all_messages = []
-            while self.continuation:
-                messages = self._fetch_new_messages()
-                all_messages.extend(messages)
-                if not self.continuation:
-                    break
+        if new_msgs:
+            await manager.send_message(video_id, {"type": "danmaku", "data": new_msgs})
 
-            if all_messages:
-                new_messages = self._filter_new_messages(all_messages)
-                if new_messages:
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._send_messages(new_messages),
-                        self.loop
-                    )
-                    future.result(timeout=10)
-        except Exception as e:
-            logger.error("Error fetching replay: {}", e)
-
-    def _filter_new_messages(self, messages):
-        """过滤出新消息"""
-        new_messages = []
-        for msg in messages:
-            msg_id = msg.get("message_id", "")
-            if msg_id and msg_id not in self.last_message_ids:
-                self.last_message_ids.add(msg_id)
-                new_messages.append(msg)
-
-        if len(new_messages) > 50:
-            new_messages = new_messages[-50:]
-
-        return new_messages
-
-    async def _send_messages(self, messages):
-        """通过WebSocket发送消息"""
-        await manager.send_message(
-            self.video_id,
-            {
-                "type": "danmaku",
-                "data": messages,
-            },
-        )
+        return next_cont
 
 
 poller = DanmakuPoller()

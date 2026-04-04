@@ -1,3 +1,5 @@
+from typing import Type, TypeVar
+
 from app.loguru_config import logger
 from app.database import SessionLocal, engine, Base
 from app.models.models import (
@@ -13,6 +15,17 @@ from app.config import settings
 from app.auth import get_password_hash
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+
+T = TypeVar("T")
+
+def _get_or_create(db: Session, model: Type[T], defaults: dict, **kwargs) -> tuple[T, bool]:
+    instance = db.query(model).filter_by(**kwargs).first()
+    if instance:
+        return instance, False
+    instance = model(**kwargs, **defaults)
+    db.add(instance)
+    db.flush()
+    return instance, True
 
 
 def seed_data():
@@ -96,127 +109,86 @@ def seed_data():
         db.close()
 
 
-def seed_roles_and_permissions():
+def seed_roles_and_permissions() -> None:
     db = SessionLocal()
     try:
-        if db.query(Role).count() > 0:
-            logger.info("Roles already exist, skipping role seed")
-            return
-
         roles_data = [
             {"name": "superadmin", "description": "超级管理员 - 全部权限"},
-            {"name": "admin", "description": "管理员 - 用户管理、频道管理"},
-            {"name": "operator", "description": "运营 - 特定频道/组织的内容管理"},
-            {"name": "user", "description": "注册用户 - 基本使用权限"},
+            {"name": "admin",      "description": "管理员 - 用户管理、频道管理"},
+            {"name": "operator",   "description": "运营 - 特定频道/组织的内容管理"},
+            {"name": "user",       "description": "注册用户 - 基本使用权限"},
         ]
-
-        role_map = {}
+ 
+        role_map: dict[str, int] = {}
         for rd in roles_data:
-            role = Role(**rd, created_at=datetime.now(timezone.utc))
-            db.add(role)
-            db.flush()
+            role, created = _get_or_create(
+                db, Role,
+                defaults={"description": rd["description"], "created_at": datetime.now(timezone.utc)},
+                name=rd["name"],
+            )
+            if created:
+                logger.info("created role: {}", rd["name"])
             role_map[rd["name"]] = role.id
-
+ 
         permissions_data = [
-            {
-                "name": "system.manage",
-                "description": "系统管理",
-                "resource": "system",
-                "action": "manage",
-            },
-            {
-                "name": "user.manage",
-                "description": "用户管理",
-                "resource": "user",
-                "action": "manage",
-            },
-            {
-                "name": "user.read",
-                "description": "查看用户",
-                "resource": "user",
-                "action": "read",
-            },
-            {
-                "name": "channel.manage",
-                "description": "频道管理",
-                "resource": "channel",
-                "action": "manage",
-            },
-            {
-                "name": "channel.create",
-                "description": "创建频道",
-                "resource": "channel",
-                "action": "create",
-            },
-            {
-                "name": "channel.read",
-                "description": "查看频道",
-                "resource": "channel",
-                "action": "read",
-            },
-            {
-                "name": "organization.manage",
-                "description": "组织管理",
-                "resource": "organization",
-                "action": "manage",
-            },
-            {
-                "name": "content.manage",
-                "description": "内容管理",
-                "resource": "content",
-                "action": "manage",
-            },
-            {
-                "name": "bilibili.access",
-                "description": "B站功能访问",
-                "resource": "bilibili",
-                "action": "access",
-            },
+            {"name": "system.manage",       "resource": "system",       "action": "manage",   "description": "系统管理"},
+            {"name": "user.manage",         "resource": "user",         "action": "manage",   "description": "用户管理"},
+            {"name": "user.read",           "resource": "user",         "action": "read",     "description": "查看用户"},
+            {"name": "channel.manage",      "resource": "channel",      "action": "manage",   "description": "频道管理"},
+            {"name": "channel.create",      "resource": "channel",      "action": "create",   "description": "创建频道"},
+            {"name": "channel.read",        "resource": "channel",      "action": "read",     "description": "查看频道"},
+            {"name": "organization.manage", "resource": "organization", "action": "manage",   "description": "组织管理"},
+            {"name": "content.manage",      "resource": "content",      "action": "manage",   "description": "内容管理"},
+            {"name": "bilibili.access",     "resource": "bilibili",     "action": "access",   "description": "B站功能访问"},
         ]
-
-        perm_map = {}
+ 
+        perm_map: dict[str, int] = {}
         for pd in permissions_data:
-            perm = Permission(**pd, created_at=datetime.now(timezone.utc))
-            db.add(perm)
-            db.flush()
+            perm, created = _get_or_create(
+                db, Permission,
+                defaults={
+                    "description": pd["description"],
+                    "resource": pd["resource"],
+                    "action": pd["action"],
+                    "created_at": datetime.now(timezone.utc),
+                },
+                name=pd["name"],
+            )
+            if created:
+                logger.info("created permission: {}", pd["name"])
             perm_map[pd["name"]] = perm.id
-
-        role_perms = {
-            "superadmin": list(perm_map.values()),
+ 
+        role_perms: dict[str, list[str]] = {
+            "superadmin": list(perm_map.keys()),
             "admin": [
-                "user.manage",
-                "user.read",
-                "channel.manage",
-                "channel.create",
-                "channel.read",
-                "organization.manage",
-                "content.manage",
-                "bilibili.access",
+                "user.manage", "user.read", "channel.manage",
+                "channel.create", "channel.read", "organization.manage",
+                "content.manage", "bilibili.access",
             ],
             "operator": ["channel.read", "content.manage"],
             "user": ["channel.read"],
         }
-
-        for role_name, perms in role_perms.items():
+ 
+        for role_name, perm_names in role_perms.items():
             role_id = role_map.get(role_name)
             if not role_id:
                 continue
-            for perm_name in perms:
+            for perm_name in perm_names:
                 perm_id = perm_map.get(perm_name)
-                if perm_id:
-                    rp = RolePermission(
-                        role_id=role_id,
-                        permission_id=perm_id,
-                        created_at=datetime.now(timezone.utc),
-                    )
-                    db.add(rp)
-
+                if not perm_id:
+                    continue
+                _get_or_create(
+                    db, RolePermission,
+                    defaults={"created_at": datetime.now(timezone.utc)},
+                    role_id=role_id,
+                    permission_id=perm_id,
+                )
+ 
         db.commit()
-        logger.info("Seeded roles and permissions")
-
+        logger.info("seed_roles_and_permissions done")
     except Exception as e:
         db.rollback()
-        logger.error("Role seed error: {}", e)
+        logger.error("seed error: {}", e)
         raise
     finally:
         db.close()

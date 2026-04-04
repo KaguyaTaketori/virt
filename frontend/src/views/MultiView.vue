@@ -1,18 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-
-// 导入布局树引擎核心方法
-import { 
-  LayoutNode, 
-  Channel, 
-  createEmptyLeaf, 
-  createLeaf, 
-  addChannelToTree, 
-  removeNodeAndMerge, 
-  getActiveChannels 
-} from '@/utils/layoutEngine'
 import { X, LayoutGrid } from 'lucide-vue-next'
+
+// 导入 Store
+import { useMultiviewStore } from '@/stores/multiview'
+import { useThemeStore } from '@/stores/theme'
+
+// 导入常量与类型
+import { type Channel } from '@/utils/layoutEngine'
+import { PRESET_GROUPS, PRESET_META, type PresetId } from '@/utils/presetLayouts'
 
 // 导入组件
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
@@ -20,16 +17,14 @@ import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
 import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
 import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
 import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
-import { useThemeStore } from '@/stores/theme'
-import { getPresetMeta } from '@/utils/layoutEngine'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
+const store = useMultiviewStore()
+
+// === UI 状态管理 ===
 const isLibraryOpen = ref(false)
-
-
-// === 状态管理 ===
 const isCollapsed = ref(false)
 const isDrawerOpen = ref(false)
 const isAddModalOpen = ref(false)
@@ -37,7 +32,7 @@ const showDanmaku = ref(false)
 const showDanmakuSettings = ref(false)
 const replaceTargetNodeId = ref<string | null>(null)
 
-// === 弹幕设置逻辑 ===
+// === 弹幕设置逻辑 (UI 局部状态) ===
 const defaultDanmakuSettings = {
   fontSize: 24,
   speed: 2,
@@ -47,7 +42,6 @@ const defaultDanmakuSettings = {
   strokeColor: '#000000',
   strokeWidth: 2
 }
-
 const danmakuSettings = reactive({ ...defaultDanmakuSettings })
 
 function loadDanmakuSettings() {
@@ -61,13 +55,7 @@ function saveDanmakuSettings() {
   localStorage.setItem('danmaku_settings', JSON.stringify(danmakuSettings))
 }
 
-const layoutTree = ref<LayoutNode>(createEmptyLeaf())
-
-const activeChannels = computed(() => getActiveChannels(layoutTree.value))
-
-function saveTreeState() {
-  localStorage.setItem('multiview_tree', JSON.stringify(layoutTree.value))
-}
+// === 业务逻辑转发至 Store ===
 
 function openAddModal() {
   replaceTargetNodeId.value = null
@@ -81,123 +69,41 @@ function openReplaceModal(nodeId: string) {
 
 function handleAddChannel(channel: Channel) {
   if (replaceTargetNodeId.value) {
-    function replace(node: LayoutNode) {
-      if (node.id === replaceTargetNodeId.value) { node.channel = channel }
-      else if (node.children) { replace(node.children[0]); replace(node.children[1]) }
-    }
-    replace(layoutTree.value)
+    store.replaceChannel(replaceTargetNodeId.value, channel)
   } else {
-    addChannelToTree(layoutTree.value, channel)
-  }
-  saveTreeState()
-}
-
-function clearChannel(nodeId: string) {
-  function clear(node: LayoutNode) {
-    if (node.id === nodeId && node.type === 'leaf') { 
-      node.channel = { platform: 'empty', id: `empty-${Date.now()}` } 
-    }
-    else if (node.children) { 
-      clear(node.children[0]); clear(node.children[1]) 
-    }
-  }
-  clear(layoutTree.value)
-  saveTreeState()
-}
-
-function closeChannel(nodeId: string) {
-  removeNodeAndMerge(layoutTree.value, nodeId)
-  saveTreeState()
-}
-
-function removeChannelByPlatformId(platform: string, id: string) {
-  function findAndRemove(node: LayoutNode): boolean {
-    if (node.type === 'leaf' && node.channel?.platform === platform && node.channel?.id === id) {
-      closeChannel(node.id)
-      return true
-    }
-    if (node.children) return findAndRemove(node.children[0]) || findAndRemove(node.children[1])
-    return false
-  }
-  findAndRemove(layoutTree.value)
-}
-
-function shareUrl(): void {
-  const code = btoa(activeChannels.value.map(c => `${c.platform}_${c.id}`).join(','))
-  const url  = `${window.location.origin}/multiview?c=${code}`
-  navigator.clipboard.writeText(url).then(() => alert('分享链接已复制 ✓'))
-}
-
-
-const L = (v: Channel[], i: number) => createLeaf(v[i] || { platform: 'empty', id: `e-${i}` })
-
-const PRESET_LIBRARY: Record<string, (v: Channel[]) => LayoutNode> = {
-  '1-s': (v) => L(v, 0),
-  '2-h': (v) => ({ id: 'r', type: 'split', direction: 'horizontal', ratio: 0.5, children: [L(v, 0), L(v, 1)] }),
-  '2-v': (v) => ({ id: 'r', type: 'split', direction: 'vertical', ratio: 0.5, children: [L(v, 0), L(v, 1)] }),
-  '3-1+2': (v) => ({ id: 'r', type: 'split', direction: 'horizontal', ratio: 0.65, children: [
-    L(v, 0), 
-    { id: 's', type: 'split', direction: 'vertical', ratio: 0.5, children: [L(v, 1), L(v, 2)] }
-  ]}),
-  '3-cols': (v) => ({ id: 'r', type: 'split', direction: 'horizontal', ratio: 0.33, children: [
-    L(v, 0), 
-    { id: 's', type: 'split', direction: 'horizontal', ratio: 0.5, children: [L(v, 1), L(v, 2)] }
-  ]}),
-  '4-grid': (v) => ({ id: 'r', type: 'split', direction: 'horizontal', ratio: 0.5, children: [
-    { id: 'l', type: 'split', direction: 'vertical', ratio: 0.5, children: [L(v, 0), L(v, 2)] },
-    { id: 'r', type: 'split', direction: 'vertical', ratio: 0.5, children: [L(v, 1), L(v, 3)] }
-  ]}),
-  '4-1+3': (v) => ({ id: 'r', type: 'split', direction: 'horizontal', ratio: 0.75, children: [
-    L(v, 0),
-    { id: 's1', type: 'split', direction: 'vertical', ratio: 0.33, children: [
-      L(v, 1),
-      { id: 's2', type: 'split', direction: 'vertical', ratio: 0.5, children: [L(v, 2), L(v, 3)] }
-    ]}
-  ]})
-}
-
-const PRESET_GROUPS = [
-  { label: '1本视频', items: ['1-s'] },
-  { label: '2本视频', items: ['2-h', '2-v'] },
-  { label: '3本视频', items: ['3-1+2', '3-cols'] },
-  { label: '4本视频', items: ['4-grid', '4-1+3'] }
-]
-
-function applyPreset(id: string) {
-  const generator = PRESET_LIBRARY[id]
-  if (generator) {
-    layoutTree.value = generator(activeChannels.value)
-    saveTreeState()
+    store.addChannel(channel)
   }
 }
 
-// === 生命周期与初始化 ===
+async function handleShare() {
+  await store.copyShareUrl()
+  alert('分享链接已复制 ✓')
+}
+
+function handleApplyPreset(id: PresetId) {
+  store.applyPreset(id)
+  isLibraryOpen.value = false
+}
+
+// === 生命周期 ===
 onMounted(() => {
   loadDanmakuSettings()
   
-  // 检查是否有分享链接参数
-  const share = Array.isArray(route.query.c) ? route.query.c[0] : route.query.c
-  if (share) {
-    try {
-      const list = atob(share).split(',')
-        .map(item => { const [platform, id] = item.split('_'); return { platform, id } as Channel })
-        .filter(c => c.platform && c.id)
-      
-      if (list.length) { 
-        layoutTree.value = createEmptyLeaf()
-        list.forEach(ch => addChannelToTree(layoutTree.value, ch))
-        router.replace({ name: 'MultiView' }) 
-      }
-    } catch { /**/ }
-  } else {
-    // 加载本地存储的布局树
-    try {
-      const saved = localStorage.getItem('multiview_tree')
-      if (saved) layoutTree.value = JSON.parse(saved)
-    } catch { /**/ }
+  // 1. 优先检查分享参数
+  const shareCode = route.query.c as string
+  if (shareCode) {
+    const success = store.loadFromShareParam(shareCode)
+    if (success) {
+      router.replace({ name: 'MultiView' }) // 清理 URL
+      return
+    }
   }
+
+  // 2. 否则初始化本地缓存
+  store.init()
 })
 </script>
+
 
 <template>
   <div class="h-full w-full flex flex-col overflow-hidden bg-zinc-950 text-white">
@@ -207,36 +113,37 @@ onMounted(() => {
       :is-dark="themeStore.isDark"
       :current-theme-id="themeStore.currentThemeId"
       :themes="themeStore.themes"
-      @toggle-dark="() => themeStore.toggleDark()"
-      @set-theme="(id: string) => themeStore.setTheme(id)"
+      @toggle-dark="themeStore.toggleDark()"
+      @set-theme="themeStore.setTheme"
     />
 
     <!-- 顶部工具栏 -->
     <CollapsibleHeader
       :is-collapsed="isCollapsed"
-      :channels="activeChannels"
+      :channels="store.activeChannels"
       :show-danmaku="showDanmaku"
       @toggle-drawer="isDrawerOpen = !isDrawerOpen"
       @toggle-collapse="isCollapsed = !isCollapsed"
       @open-add-modal="openAddModal"
-      @remove-channel-by-platform-id="removeChannelByPlatformId"
-      @apply-preset="applyPreset"
+      @remove-channel-by-platform-id="store.removeByPlatformId"
+      @apply-preset="handleApplyPreset"
       @open-preset-library="isLibraryOpen = true" 
-      @share="shareUrl"
+      @share="handleShare"
       @update:show-danmaku="showDanmaku = $event"
       @open-settings="showDanmakuSettings = true"
     />
 
+
     <!-- 核心网格视图 (递归树结构) -->
     <VideoGrid
-      :layout-tree="layoutTree"
+      :layout-tree="store.tree"
       :show-danmaku="showDanmaku"
       :danmaku-settings="danmakuSettings"
       @request-add="openAddModal"
       @request-replace="openReplaceModal"
-      @clear-channel="clearChannel"
-      @close-channel="closeChannel"
-      @update-tree="saveTreeState"
+      @clear-channel="store.clearChannel"
+      @close-channel="store.closeChannel"
+      @update-tree="store.saveTree"
     />
 
     <!-- 添加视频模态框 -->
@@ -259,21 +166,21 @@ onMounted(() => {
 
             <div class="flex-1 overflow-y-auto p-8 grid grid-cols-1 gap-10">
               <div v-for="group in PRESET_GROUPS" :key="group.label">
-                <h3 class="text-xs font-black text-zinc-600 uppercase tracking-[0.3em] mb-6 border-l-2 border-rose-500 pl-3">{{ group.label }}</h3>
+                <h3 class="text-xs font-black text-zinc-600 uppercase tracking-[0.3em] mb-6 border-l-2 border-rose-500 pl-3">
+                  {{ group.label }}
+                </h3>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
                   <button 
                     v-for="id in group.items" 
                     :key="id" 
-                    @click="applyPreset(id); isLibraryOpen = false" 
-                    class="group flex flex-col gap-3"
+                    @click="handleApplyPreset(id)" 
+                    class="group flex flex-col gap-3 text-center"
                   >
-                    <!-- 使用 SVG 缩略图组件 -->
                     <div class="aspect-video w-full p-1 bg-zinc-800 rounded-xl border-2 border-transparent group-hover:border-rose-500 transition-all">
                       <LayoutThumbnail :type="id" />
                     </div>
-                    
-                    <div class="flex flex-col items-center">
-                      <span class="text-xs font-bold text-zinc-400 group-hover:text-white">{{ getPresetMeta(id).label }}</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs font-bold text-zinc-400 group-hover:text-white">{{ PRESET_META[id].label }}</span>
                       <span class="text-[9px] text-zinc-600 mt-0.5 tracking-widest uppercase">{{ id }}</span>
                     </div>
                   </button>
@@ -285,7 +192,7 @@ onMounted(() => {
       </Transition>
     </Teleport>
 
-    <!-- 弹幕设置模态框 (完整还原) -->
+    <!-- 弹幕设置模态框 -->
     <Teleport to="body">
       <div
         v-if="showDanmakuSettings"

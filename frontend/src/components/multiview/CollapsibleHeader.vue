@@ -1,4 +1,4 @@
-<script setup lang="ts">
+  <script setup lang="ts">
 import { computed } from 'vue'
 import { 
   Menu, Plus, X, ChevronUp, ChevronDown, 
@@ -6,6 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { NPopover } from 'naive-ui'
 import { Channel } from '@/utils/layoutEngine'
+import { type PresetId, PRESET_META as GLOBAL_PRESET_META } from '@/utils/presetLayouts'
 
 interface Props {
   isCollapsed: boolean
@@ -20,38 +21,40 @@ const emit = defineEmits<{
   (e: 'toggleCollapse'): void
   (e: 'openAddModal'): void
   (e: 'removeChannelByPlatformId', platform: string, id: string): void
-  (e: 'applyPreset', type: string): void
-  (e: 'openPresetLibrary'): void // 打开全量预设 Modal
+  (e: 'applyPreset', type: PresetId): void
+  (e: 'openPresetLibrary'): void 
   (e: 'openSettings'): void
   (e: 'share'): void
   (e: 'update:showDanmaku', val: boolean): void
 }>()
 
-// --- 预设元数据定义 (用于图标展示) ---
-const PRESET_META: Record<string, { label: string; icon: string }> = {
-  '1-s': { label: '单窗口', icon: '1' },
-  '2-h': { label: '左右对半', icon: '2h' },
-  '2-v': { label: '上下对半', icon: '2v' },
-  '3-1+2': { label: '1大🎞️ + 2小', icon: '3-12' },
-  '3-cols': { label: '三列并行', icon: '3c' },
-  '4-grid': { label: '2 × 2 田字格', icon: '4g' },
-  '4-1+3': { label: '1大🎞️ + 3小', icon: '4-13' }
+const LOCAL_ICONS: Record<PresetId, string> = {
+  '1-s': '1',
+  '2-h': '2h',
+  '2-v': '2v',
+  '3-1+2': '3-12',
+  '3-cols': '3c',
+  '4-grid': '4g',
+  '4-1+3': '4-13'
 }
 
-// 根据当前视频数量推荐预设
+
 const currentRecommendations = computed(() => {
   const count = props.channels.length
-  let ids: string[] = []
+  let ids: PresetId[] = []
   
   if (count <= 1) ids = ['1-s']
   else if (count === 2) ids = ['2-h', '2-v']
   else if (count === 3) ids = ['3-1+2', '3-cols']
   else ids = ['4-grid', '4-1+3']
 
-  return ids.map(id => ({ id, ...PRESET_META[id] }))
+  return ids.map(id => ({ 
+    id, 
+    label: GLOBAL_PRESET_META[id].label, 
+    icon: LOCAL_ICONS[id] 
+  }))
 })
 </script>
-
 
 <template>
   <div class="relative">

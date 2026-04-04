@@ -49,71 +49,58 @@ async def get_youtube_danmaku_from_file(
     video_id: str = FPath(..., pattern=r"^[a-zA-Z0-9_\-]{11}$"),
     _: User = Depends(get_current_user),
 ):
-    """从本地文件获取YouTube弹幕"""
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
-
-    messages = get_chat_from_file(video_id)
+    messages = get_chat_from_file(video_id) if get_chat_from_file else []
     return {"messages": messages, "enabled": True, "source": "file"}
+ 
 
 
 @router.get("/youtube/db/{stream_id}")
 async def get_youtube_danmaku_from_db(
-    stream_id: int, 
+    stream_id: int,
     db: AsyncSession = Depends(get_async_db),
     _: User = Depends(get_current_user),
 ):
-    """从数据库获取YouTube弹幕"""
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
-
-    messages = await get_chat_from_db(db, stream_id)
+    messages = await get_chat_from_db(db, stream_id) if get_chat_from_db else []
     return {"messages": messages, "enabled": True, "source": "db"}
 
 
 @router.post("/youtube/download/{video_id}")
 async def download_youtube_danmaku(
     video_id: str,
-    stream_id: int = None,
+    stream_id: Optional[int] = None,
     db: AsyncSession = Depends(get_async_db),
     _: User = Depends(get_current_user),
 ):
-    if not settings.enable_danmaku:
+    if not settings.enable_danmaku or not download_chat:
         return {"success": False, "enabled": False}
- 
     messages = download_chat(video_id)
     if not messages:
         return {"success": False, "error": "Failed to download chat"}
- 
     result = {"success": True, "message_count": len(messages), "source": "file"}
- 
-    if stream_id:
+    if stream_id and save_to_db:
         await save_to_db(db, stream_id, video_id, messages)
-        result["source"] = "db"
-        result["saved_to_db"] = True
- 
+        result.update(source="db", saved_to_db=True)
     return result
 
 
+
 @router.get("/youtube/{live_chat_id}")
-async def get_youtube_danmaku(live_chat_id: str, page_token: str = None):
-    """
-    获取YouTube直播弹幕/聊天消息
-    需要传入 live_chat_id（从 streams 表获取）
-    """
+async def get_youtube_danmaku(live_chat_id: str, page_token: Optional[str] = None):
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
-
     if not settings.youtube_api_key:
         return {"messages": [], "error": "YouTube API key not configured"}
-
     async with httpx.AsyncClient(timeout=30.0) as client:
         result = await get_live_chat_messages(client, live_chat_id, page_token)
-        return {
-            "messages": result["messages"],
-            "next_page_token": result["next_page_token"],
-            "enabled": True,
-        }
+    return {
+        "messages": result["messages"],
+        "next_page_token": result["next_page_token"],
+        "enabled": True,
+    }
 
 
 @router.get("/bilibili/{room_id}")
@@ -125,6 +112,6 @@ async def get_bilibili_danmaku_endpoint(
  
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
- 
     messages = await get_bilibili_danmaku(room_id)
     return {"messages": messages, "enabled": True}
+ 

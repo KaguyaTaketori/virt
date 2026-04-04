@@ -1,5 +1,5 @@
+from app.loguru_config import logger
 import time
-
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,7 +10,6 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 
-from app.loguru_config import logger
 from app.config import settings
 from app.routers import (
     streams,
@@ -57,74 +56,80 @@ def _assert_production_secrets() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _assert_production_secrets()
- 
-    from app.services.youtube_websub import subscribe_all_active_channels
-    from app.database_async import AsyncSessionFactory, create_all_tables
-    from app.database import engine, Base
-    from sqlalchemy import select, func
-    from app.models.models import WebSubSubscription
- 
-    Base.metadata.create_all(bind=engine)
-    await create_all_tables()
- 
-    from app.services.token_blacklist import token_blacklist
     try:
-        async with AsyncSessionFactory() as session:
-
-            await session.execute(text("""
-                CREATE TABLE IF NOT EXISTS blacklisted_tokens (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    jti VARCHAR(64) UNIQUE NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    expired_at DATETIME NOT NULL,
-                    revoked_at DATETIME NOT NULL
-                )
-            """))
-            await session.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti ON blacklisted_tokens (jti)"
-            ))
-            await session.commit()
-            # 预热内存缓存
-            await token_blacklist.warm_up(session)
-    except Exception as e:
-        logger.error("Token blacklist warmup failed: {}", e)
- 
-    callback_url = settings.websub_callback_url
-    if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
-        logger.info("未配置回调 URL，跳过首次订阅")
-    else:
-        async with AsyncSessionFactory() as session:
-            result = await session.execute(select(func.count(WebSubSubscription.id)))
-            has_subscriptions = result.scalar() > 0
-        if not has_subscriptions:
-            try:
-                await subscribe_all_active_channels(callback_url)
-            except Exception as e:
-                logger.error("首次订阅失败: {}", e)
- 
-    from app.scheduler_tasks import start_scheduler, scheduler
-    start_scheduler()
- 
-    async def _cleanup_blacklist():
+        _assert_production_secrets()
+    
+        from app.services.youtube_websub import subscribe_all_active_channels
+        from app.database_async import AsyncSessionFactory, create_all_tables
+        from app.database import engine, Base
+        from sqlalchemy import select, func
+        from app.models.models import WebSubSubscription
+    
+        Base.metadata.create_all(bind=engine)
+        await create_all_tables()
+    
+        from app.services.token_blacklist import token_blacklist
         try:
             async with AsyncSessionFactory() as session:
-                count = await token_blacklist.cleanup_expired(session)
-                if count:
-                    logger.info("Cleaned {} expired blacklist entries", count)
+
+                await session.execute(text("""
+                    CREATE TABLE IF NOT EXISTS blacklisted_tokens (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        jti VARCHAR(64) UNIQUE NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        expired_at DATETIME NOT NULL,
+                        revoked_at DATETIME NOT NULL
+                    )
+                """))
+                await session.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti ON blacklisted_tokens (jti)"
+                ))
+                await session.commit()
+                # 预热内存缓存
+                await token_blacklist.warm_up(session)
         except Exception as e:
-            logger.error("Blacklist cleanup error: {}", e)
- 
-    scheduler.add_job(
-        _cleanup_blacklist,
-        "cron",
-        hour=3,
-        minute=30,
-        id="blacklist_cleanup",
-        replace_existing=True,
-    )
- 
-    yield
+            logger.error("Token blacklist warmup failed: {}", e)
+    
+        callback_url = settings.websub_callback_url
+        if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
+            logger.info("未配置回调 URL，跳过首次订阅")
+        else:
+            async with AsyncSessionFactory() as session:
+                result = await session.execute(select(func.count(WebSubSubscription.id)))
+                has_subscriptions = result.scalar() > 0
+            if not has_subscriptions:
+                try:
+                    await subscribe_all_active_channels(callback_url)
+                except Exception as e:
+                    logger.error("首次订阅失败: {}", e)
+    
+        from app.scheduler_tasks import start_scheduler, scheduler
+        start_scheduler()
+    
+        async def _cleanup_blacklist():
+            try:
+                async with AsyncSessionFactory() as session:
+                    count = await token_blacklist.cleanup_expired(session)
+                    if count:
+                        logger.info("Cleaned {} expired blacklist entries", count)
+            except Exception as e:
+                logger.error("Blacklist cleanup error: {}", e)
+    
+        scheduler.add_job(
+            _cleanup_blacklist,
+            "cron",
+            hour=3,
+            minute=30,
+            id="blacklist_cleanup",
+            replace_existing=True,
+        )
+    
+        yield
+        logger.info("Application shutting down...")
+    except Exception as e:
+        logger.critical("Application startup failed: {}", e)
+        logger.exception(e)
+        raise e
 
 
 limiter = Limiter(key_func=get_remote_address)
