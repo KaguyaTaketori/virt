@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.deps.guards import AdminUser
 from app.models.models import User
-from app.scheduler_tasks import (
+from app.schedulers.bilibili import (
     update_bilibili_streams,
     sync_bilibili_channels,
 )
