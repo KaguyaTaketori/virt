@@ -33,7 +33,9 @@
               </n-tag>
               <span class="ml-2 text-gray-400">{{ role.description }}</span>
             </div>
-            <n-button size="small" @click="openAssignPermModal(role)">分配权限</n-button>
+            <n-button size="small" :disabled="role.name === 'superadmin'" @click="openAssignPermModal(role)">
+              {{ role.name === 'superadmin' ? '拥有全部权限' : '分配权限' }}
+            </n-button>
           </div>
         </n-card>
       </n-space>
@@ -222,9 +224,15 @@ async function createPermission() {
   }
 }
 
-function openAssignPermModal(role: Role) {
+async function openAssignPermModal(role: Role) {
+  if (role.name === 'superadmin') return
   selectedRole.value = role
-  selectedPermIds.value = []
+  try {
+    const { data } = await adminPermissionsApi.getRolePermissions(role.id)
+    selectedPermIds.value = data
+  } catch (e) {
+    selectedPermIds.value = []
+  }
   showAssignPermModal.value = true
 }
 

@@ -60,18 +60,19 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUserInfo() {
     if (!token.value) return
     try {
-      const res = await fetch('/api/admin/permissions/users/me', {
-        headers: { Authorization: `Bearer ${token.value}` }
-      })
-      if (res.ok) {
-        user.value = await res.json()
-      }
+      const res = await authApi.getUserInfo()
+      user.value = res.data
     } catch (e) {
       console.error('Failed to fetch user info:', e)
     }
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await authApi.logout()
+    } catch (e) {
+      console.error('Logout API failed:', e)
+    }
     token.value = null
     user.value = null
     localStorage.removeItem('token')

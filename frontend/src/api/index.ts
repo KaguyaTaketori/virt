@@ -5,6 +5,7 @@ import type { AxiosInstance, AxiosError } from 'axios'
 const api: AxiosInstance = axios.create({
   baseURL: '',
   timeout: 15000,
+  withCredentials: true,
 })
 
 api.interceptors.request.use((config) => {
@@ -22,18 +23,13 @@ api.interceptors.response.use(
     const status = error.response?.status
 
     if (status === 401) {
-      // Token 过期或未登录，清除本地状态
-      localStorage.removeItem('token')
-      // 若需要跳转登录页，在此处理：
-      // window.location.href = '/login'
-      console.warn('[API] 401 未授权，Token 已清除')
+      console.warn('[API] 401 未授权')
     } else if (status === 403) {
       console.error('[API] 403 权限不足')
     } else if (status && status >= 500) {
       const detail = (error.response?.data as any)?.detail ?? '服务器内部错误'
       console.error(`[API] ${status} 服务器错误:`, detail)
     } else if (!error.response) {
-      // 网络超时 / 断网
       console.error('[API] 网络连接失败，请检查网络或稍后重试')
     }
 
@@ -157,13 +153,17 @@ export const orgApi = {
 
 export const authApi = {
   login: (username: string, password: string) =>
-    api.post<{ access_token: string; token_type: string }>(
+    api.post(
       '/api/auth/login',
       new URLSearchParams({ username, password }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     ),
+  logout: () =>
+    api.post('/api/auth/logout'),
   register: (data: { username: string; email?: string; password: string }) =>
     api.post('/api/auth/register', data),
+  getUserInfo: () =>
+    api.get('/api/admin/permissions/users/me'),
 }
 
 export const userChannelApi = {
@@ -231,6 +231,8 @@ export const adminPermissionsApi = {
   getRoles: () => api.get<Role[]>('/api/admin/permissions/roles'),
   createRole: (data: { name: string; description?: string }) =>
     api.post<Role>('/api/admin/permissions/roles', data),
+  getRolePermissions: (roleId: number) =>
+    api.get<number[]>(`/api/admin/permissions/roles/${roleId}/permissions`),
   getPermissions: () => api.get<Permission[]>('/api/admin/permissions/permissions'),
   createPermission: (data: { name: string; description?: string; resource: string; action: string }) =>
     api.post<Permission>('/api/admin/permissions/permissions', data),

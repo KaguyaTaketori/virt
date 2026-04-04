@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
 from app.deps import get_db
 from app.models.models import (
     User,
@@ -18,25 +18,9 @@ from app.schemas.schemas import (
 )
 from app.auth import get_current_user
 from app.services.permissions import get_user_roles, has_permission
+from app.deps.permissions import AdminUser, SuperAdminUser
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
-
-
-def require_superadmin(db: Session, current_user: User):
-    roles = get_user_roles(current_user.id, db)
-    if "superadmin" not in roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Superadmin permission required",
-        )
-
-
-def require_admin(db: Session, current_user: User):
-    roles = get_user_roles(current_user.id, db)
-    if "superadmin" not in roles and "admin" not in roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Admin permission required"
-        )
 
 
 @router.get("/users/me", response_model=UserResponse)
@@ -60,9 +44,8 @@ def get_current_user_info(
 @router.get("/roles", response_model=List[RoleResponse])
 def list_roles(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = SuperAdminUser,
 ):
-    require_superadmin(db, current_user)
     return db.query(Role).all()
 
 
@@ -70,10 +53,8 @@ def list_roles(
 def create_role(
     role: RoleResponse,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = SuperAdminUser,
 ):
-    require_superadmin(db, current_user)
-
     existing = db.query(Role).filter(Role.name == role.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Role already exists")
@@ -85,12 +66,26 @@ def create_role(
     return db_role
 
 
+@router.get("/roles/{role_id}/permissions", response_model=List[int])
+def get_role_permissions(
+    role_id: int,
+    db: Session = Depends(get_db),
+    _: User = AdminUser,
+):
+    """获取角色已分配的权限ID列表"""
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    perms = db.query(RolePermission).filter(RolePermission.role_id == role_id).all()
+    return [rp.permission_id for rp in perms]
+
+
 @router.get("/permissions", response_model=List[PermissionResponse])
 def list_permissions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = AdminUser,
 ):
-    require_admin(db, current_user)
     return db.query(Permission).all()
 
 
@@ -98,10 +93,8 @@ def list_permissions(
 def create_permission(
     permission: PermissionResponse,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = SuperAdminUser,
 ):
-    require_superadmin(db, current_user)
-
     existing = db.query(Permission).filter(Permission.name == permission.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Permission already exists")
@@ -123,10 +116,8 @@ def assign_permissions_to_role(
     role_id: int,
     permission_ids: List[int],
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = SuperAdminUser,
 ):
-    require_superadmin(db, current_user)
-
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -156,12 +147,10 @@ def assign_permissions_to_role(
 @router.get("/users", response_model=List[UserResponse])
 def list_users(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = AdminUser,
 ):
-    require_admin(db, current_user)
-
     users = db.query(User).offset(skip).limit(limit).all()
     result = []
     for user in users:
@@ -175,10 +164,8 @@ def list_users(
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = AdminUser,
 ):
-    require_admin(db, current_user)
-
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -193,10 +180,8 @@ def update_user_roles(
     user_id: int,
     role_update: UserRoleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = SuperAdminUser,
 ):
-    require_superadmin(db, current_user)
-
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -220,10 +205,8 @@ def create_resource_acl(
     resource_id: int,
     access: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = AdminUser,
 ):
-    require_admin(db, current_user)
-
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -254,10 +237,8 @@ def create_resource_acl(
 def delete_resource_acl(
     acl_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = AdminUser,
 ):
-    require_admin(db, current_user)
-
     acl = db.query(ResourceACL).filter(ResourceACL.id == acl_id).first()
     if not acl:
         raise HTTPException(status_code=404, detail="ACL not found")
