@@ -10,12 +10,12 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
+from app.loguru_config import logger
 from app.database_async import get_async_session, AsyncSessionFactory
 from app.models.models import Channel, User, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 from app.config import settings
 from app.deps.guards import AdminUser, validate_websub_callback
-from app.loguru_config import logger
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
@@ -133,8 +133,7 @@ def _verify_hmac_signature(
 ) -> bool:
     if not secret:
         if not signature_header:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "WebSub received push without HMAC signature. "
                 "Set WEBSUB_SECRET in production to enforce signature validation."
             )

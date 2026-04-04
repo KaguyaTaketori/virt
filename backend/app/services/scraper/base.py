@@ -1,14 +1,12 @@
 import re
 import html
-import logging
 import httpx
 from dataclasses import dataclass
 from typing import Optional
 from bs4 import BeautifulSoup
 
 from app.config import settings
-
-logger = logging.getLogger(__name__)
+from app.loguru_config import logger
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 

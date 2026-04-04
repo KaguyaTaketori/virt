@@ -12,6 +12,7 @@ engine = create_engine(
         "timeout": 30,  # 等锁最多 30 秒再报错
     },
     poolclass=StaticPool,
+    echo=False
 )
 
 

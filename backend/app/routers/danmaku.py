@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.deps import get_async_db
 from app.deps.guards import BilibiliAccess
+from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.services.danmaku import get_live_chat_messages
 from app.services.danmaku_bilibili import get_bilibili_danmaku
 from app.config import settings
@@ -118,15 +119,9 @@ async def get_youtube_danmaku(live_chat_id: str, page_token: str = None):
 @router.get("/bilibili/{room_id}")
 async def get_bilibili_danmaku_endpoint(
     room_id: str,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
-    db: AsyncSession = Depends(get_async_db),
+    ctx: PlatformContext = PlatformGuardDep,
 ):
-    if current_user is None:
-        raise HTTPException(status_code=401, detail="请先登录")
- 
-    if not can_bilibili:
-        raise HTTPException(status_code=403, detail="需要 B 站访问权限")
+    ctx.assert_bilibili_access()
  
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}

@@ -173,7 +173,8 @@ async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
-    logger.info(
+    
+    logger.bind(access=True).info(
         "Request: {} {} | Status: {} | Time: {:.2f}ms",
         request.method,
         request.url.path,

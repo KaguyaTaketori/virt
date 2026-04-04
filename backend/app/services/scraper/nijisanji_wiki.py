@@ -1,11 +1,8 @@
-import re
-import logging
+from app.loguru_config import logger
 from typing import Optional
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from .base import BaseWikiScraper, VtuberChannel
-
-logger = logging.getLogger(__name__)
 
 NIJISANJI_WIKI_URL = (
     "https://wikiwiki.jp/nijisanji/%E6%B4%BB%E5%8B%95%E5%A0%B4%E6%89%80/YouTube"

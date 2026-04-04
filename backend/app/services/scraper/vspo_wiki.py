@@ -1,11 +1,8 @@
-import re
-import logging
 from typing import Optional
 from bs4 import BeautifulSoup, Tag
 
 from .base import BaseWikiScraper, VtuberChannel
-
-logger = logging.getLogger(__name__)
+from app.loguru_config import logger
 
 VSPO_WIKI_URL = "https://wikiwiki.jp/vspo/%E9%85%8D%E4%BF%A1%E3%83%81%E3%83%A3%E3%83%B3%E3%83%8D%E3%83%AB%E4%B8%80%E8%A6%A7"
 VSPO_ORG_NAME = "VSPO!"

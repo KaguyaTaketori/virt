@@ -5,7 +5,6 @@
       <p class="text-gray-400 text-sm">VTuber 频道直播状态</p>
     </div>
 
-    <!-- 机构筛选 -->
     <div v-if="orgStore.organizations.length > 0" class="mb-4 flex flex-wrap gap-2 items-center">
       <button
         @click="store.setOrg(null)"
@@ -37,7 +36,6 @@
       </button>
     </div>
 
-    <!-- Status 标签 -->
     <div class="mb-6 flex flex-wrap gap-2">
       <button
         v-for="s in statuses"
@@ -53,7 +51,6 @@
       </button>
     </div>
 
-    <!-- 加载 / 错误 / 空状态 -->
     <div v-if="store.loading" class="flex justify-center py-16">
       <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-pink-500"></div>
     </div>
@@ -75,7 +72,7 @@
         v-for="(stream, index) in filteredStreams"
         :key="stream.id ?? `stream-${index}`"
         :stream="stream"
-        @click="openMultiView"
+        @click="openMultiView(stream)"
       />
     </div>
   </div>
@@ -88,6 +85,8 @@ import { useStreamStore, type StreamStatus, type Stream } from '@/stores/stream'
 import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
 import StreamCard from '@/components/StreamCard.vue'
+
+import { createLeaf, addChannelToTree } from '@/utils/layoutEngine'
 
 const store    = useStreamStore()
 const orgStore = useOrgStore()
@@ -149,8 +148,28 @@ onMounted(async () => {
 
 function openMultiView(stream: Stream) {
   if (!stream?.video_id) return
-  const channels = [{ platform: stream.platform, id: stream.video_id }]
-  localStorage.setItem('multiview_channels', JSON.stringify(channels))
+
+  const newChannel = { 
+    platform: stream.platform, 
+    id: stream.video_id 
+  }
+
+  let tree: any = null
+  const saved = localStorage.getItem('multiview_tree')
+  
+  try {
+    if (saved) {
+      tree = JSON.parse(saved)
+      addChannelToTree(tree, newChannel)
+    } else {
+      tree = createLeaf(newChannel)
+    }
+  } catch (e) {
+    tree = createLeaf(newChannel)
+  }
+
+  localStorage.setItem('multiview_tree', JSON.stringify(tree))
+  
   router.push({ name: 'MultiView' })
 }
 </script>

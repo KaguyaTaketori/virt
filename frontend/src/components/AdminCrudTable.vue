@@ -5,7 +5,7 @@
         <h1 class="text-3xl font-bold mb-2">{{ title }}</h1>
         <p class="text-gray-400">{{ description }}</p>
       </div>
-      <n-button type="primary" @click="$emit('add')">
+      <n-button v-if="addLabel" type="primary" @click="$emit('add')">
         {{ addLabel }}
       </n-button>
     </div>
@@ -19,6 +19,8 @@
       :row-key="rowKey"
       :pagination="pagination"
       :bordered="false"
+      :checked-row-keys="checkedRowKeys"
+      @update:checked-row-keys="(keys: DataTableRowKey[]) => $emit('update:checkedRowKeys', keys)"
     />
 
     <n-modal
@@ -55,22 +57,24 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { DataTableColumns } from 'naive-ui'
+import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 
 defineProps<{
   title: string
   description: string
-  addLabel: string
+  addLabel?: string
   columns: DataTableColumns<any>
   data: any[]
   loading: boolean
   rowKey: (row: any) => any
   pagination?: object
+  checkedRowKeys?: any[]
 }>()
 
 defineEmits<{
   (e: 'add'): void
   (e: 'submit', mode: 'add' | 'edit'): void
+  (e: 'update:checkedRowKeys', keys: DataTableRowKey[]): void 
 }>()
 
 const showAddModal = ref(false)

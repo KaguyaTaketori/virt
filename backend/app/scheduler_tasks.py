@@ -119,7 +119,7 @@ async def update_youtube_streams():
 
         await db.commit()
         logger.info(
-            "刷新 {} 条 | 配额剩余 {}", len(active), quota_status()["remaining"]
+            "刷新 {} 条 | 配额剩余 {}", len(active), await quota_status()["remaining"]
         )
 
 

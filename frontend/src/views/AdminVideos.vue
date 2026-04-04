@@ -1,301 +1,171 @@
 <template>
-  <div class="container mx-auto px-4 py-8">
-    <div class="mb-6 flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold mb-2">视频管理</h1>
-        <p class="text-gray-400">按时长筛选，并可批量修改视频类别</p>
+  <AdminCrudTable
+    title="视频管理"
+    description="按时长筛选，并可批量修改视频类别"
+    :columns="columns"
+    :data="videos"
+    :loading="loading"
+    :row-key="(row: Video) => row.id"
+    :pagination="pagination"
+    v-model:checked-row-keys="selectedIds"
+  >
+    <!-- 所有的筛选和批量操作都放在 filters 插槽 -->
+    <template #filters>
+      <div class="flex flex-col gap-6 mb-6">
+        <!-- 过滤器行 -->
+        <div class="flex flex-wrap gap-4 items-end bg-gray-800/30 p-4 rounded-lg">
+          <div class="flex flex-col gap-2">
+            <span class="text-xs text-gray-500">频道</span>
+            <n-select v-model:value="filterChannelId" :options="channelOptions" style="width: 200px" clearable />
+          </div>
+          <div class="flex flex-col gap-2">
+            <span class="text-xs text-gray-500">状态</span>
+            <n-select v-model:value="filterStatus" :options="statusOptions" style="width: 150px" clearable />
+          </div>
+          <div class="flex flex-col gap-2">
+            <span class="text-xs text-gray-500">时长(分)</span>
+            <div class="flex items-center gap-2">
+              <n-input-number v-model:value="durationMinMinutes" placeholder="Min" style="width: 100px" />
+              <span class="text-gray-600">-</span>
+              <n-input-number v-model:value="durationMaxMinutes" placeholder="Max" style="width: 100px" />
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <n-button type="primary" @click="fetchVideos" :disabled="!filterChannelId">查询</n-button>
+            <n-button @click="resetFilters">重制</n-button>
+          </div>
+        </div>
+
+        <!-- 批量操作行 -->
+        <div class="flex items-center justify-between bg-blue-500/5 border border-blue-500/20 p-4 rounded-lg">
+          <div class="flex items-center gap-4">
+            <span class="text-sm font-medium">批量操作 (已选 {{ selectedIds.length }} 条):</span>
+            <n-select v-model:value="batchNewStatus" :options="batchStatusOptions" style="width: 180px" />
+            <n-button type="primary" secondary :disabled="selectedIds.length === 0" @click="applyBatchUpdate">
+              确认修改
+            </n-button>
+          </div>
+          <n-button size="small" quaternary :disabled="selectedIds.length === 0" @click="selectedIds = []">
+            取消全选
+          </n-button>
+        </div>
       </div>
-    </div>
-
-    <!-- Filters -->
-    <div class="mb-4 flex flex-wrap gap-4 items-end">
-      <div class="flex flex-col gap-2">
-        <span class="text-xs text-gray-500">频道</span>
-        <n-select
-          v-model:value="filterChannelId"
-          :options="channelOptions"
-          placeholder="选择频道"
-          style="width: 220px"
-          clearable
-        />
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <span class="text-xs text-gray-500">状态</span>
-        <n-select
-          v-model:value="filterStatus"
-          :options="statusOptions"
-          placeholder="全部"
-          style="width: 200px"
-          clearable
-        />
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <span class="text-xs text-gray-500">最短时长（分钟）</span>
-        <n-input-number
-          v-model:value="durationMinMinutes"
-          :min="0"
-          :step="1"
-          placeholder="例如 10"
-          style="width: 140px"
-        />
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <span class="text-xs text-gray-500">最长时长（分钟）</span>
-        <n-input-number
-          v-model:value="durationMaxMinutes"
-          :min="0"
-          :step="1"
-          placeholder="例如 60"
-          style="width: 140px"
-        />
-      </div>
-
-      <div class="flex gap-2">
-        <n-button type="primary" @click="fetchVideos" :disabled="!filterChannelId">
-          查询
-        </n-button>
-        <n-button @click="resetFilters">
-          重置
-        </n-button>
-      </div>
-    </div>
-
-    <!-- Batch Update -->
-    <div class="mb-4 flex flex-wrap gap-4 items-center">
-      <div class="flex flex-col gap-2">
-        <span class="text-xs text-gray-500">批量修改为</span>
-        <n-select
-          v-model:value="batchNewStatus"
-          :options="batchStatusOptions"
-          placeholder="选择新类别"
-          style="width: 220px"
-        />
-      </div>
-
-      <div class="flex gap-2">
-        <n-button
-          type="primary"
-          :disabled="selectedIds.length === 0"
-          @click="applyBatchUpdate"
-        >
-          批量修改
-        </n-button>
-        <n-button
-          :disabled="selectedIds.length === 0"
-          @click="selectedIds = []"
-        >
-          清空选择
-        </n-button>
-      </div>
-
-      <div class="text-sm text-gray-500">
-        已选 {{ selectedIds.length }} 条
-      </div>
-    </div>
-
-    <!-- Table -->
-    <n-data-table
-      :columns="columns"
-      :data="videos"
-      :loading="loading"
-      :bordered="false"
-      :row-key="(row: any) => row.id"
-      :pagination="false"
-      v-model:checkedRowKeys="selectedIds"
-    />
-
-    <div v-if="total > 0" class="flex justify-center mt-4">
-      <n-pagination
-        v-model:page="currentPage"
-        :page-count="Math.ceil(total / pageSize)"
-        :page-sizes="[24, 48, 96]"
-        @update:page="fetchVideos"
-        @update:page-size="(ps: number) => { pageSize = ps; currentPage = 1; fetchVideos() }"
-      />
-    </div>
-  </div>
+    </template>
+  </AdminCrudTable>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, h } from 'vue'
-import { NButton, NSelect, NInputNumber, NDataTable, NTag, NPagination } from 'naive-ui'
+import { ref, computed, onMounted, h } from 'vue'
+import { NTag, NButton, DataTableColumns } from 'naive-ui'
+import AdminCrudTable from '../components/AdminCrudTable.vue'
 import { channelApi, adminVideosApi, type Video, type Channel } from '../api'
-
-type VideoStatus = 'live' | 'upcoming' | 'archive' | 'upload' | 'short'
 
 const loading = ref(false)
 const videos = ref<Video[]>([])
-const currentPage = ref(1)
+const channels = ref<Channel[]>([])
+const selectedIds = ref<string[]>([])
+
+const filterChannelId = ref<number | null>(null)
+const filterStatus = ref<string | null>(null)
+const durationMinMinutes = ref<number | undefined>(undefined)
+const durationMaxMinutes = ref<number | undefined>(undefined)
+const batchNewStatus = ref('archive')
+
+const page = ref(1)
 const pageSize = ref(24)
 const total = ref(0)
 
-const channels = ref<Channel[]>([])
-const filterChannelId = ref<number | null>(null)
-const filterStatus = ref<string | null>(null)
-
-// duration in minutes (UI)
-const durationMinMinutes = ref<number | undefined>(undefined)
-const durationMaxMinutes = ref<number | undefined>(undefined)
-
-const batchNewStatus = ref<VideoStatus>('archive')
-
-const selectedIds = ref<string[]>([])
-
-const channelOptions = computed(() =>
-  channels.value.map(ch => ({
-    label: `${ch.name} (#${ch.id})`,
-    value: ch.id,
-  })),
-)
-
-const statusOptions = [
-  { label: 'live', value: 'live' },
-  { label: 'upcoming', value: 'upcoming' },
-  { label: 'archive', value: 'archive' },
-  { label: 'upload', value: 'upload' },
-  { label: 'short', value: 'short' },
-]
-
-const batchStatusOptions = statusOptions
-
-const columns: any = [
-  {
-    type: 'selection',
+const pagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: total.value,
+  showSizePicker: true,
+  pageSizes: [24, 48, 96],
+  onChange: (p: number) => {
+    page.value = p
+    fetchVideos()
   },
+  onUpdatePageSize: (ps: number) => {
+    pageSize.value = ps
+    page.value = 1
+    fetchVideos()
+  }
+}))
+
+
+const columns: DataTableColumns<Video> = [
+  { type: 'selection' },
   {
     title: '封面',
     key: 'thumbnail_url',
     width: 90,
-    render: (row: Video) =>
-      row.thumbnail_url
-        ? h('img', {
-            src: row.thumbnail_url,
-            class: 'w-16 h-10 object-cover rounded',
-            referrerpolicy: 'no-referrer',
-          })
-        : null,
+    render: (row: Video) => row.thumbnail_url ? h('img', { src: row.thumbnail_url, class: 'w-16 h-10 object-cover rounded' }) : null
   },
-  {
-    title: 'video_id',
-    key: 'id',
-    width: 180,
-    render: (row: Video) =>
-      h('code', { style: 'font-size: 12px; color: #888;' }, row.id),
-  },
-  {
-    title: '标题',
-    key: 'title',
-    minWidth: 220,
-    render: (row: Video) => row.title || '-',
-  },
+  { title: '标题', key: 'title', minWidth: 200 },
   {
     title: '类别',
     key: 'status',
-    width: 120,
-    render: (row: Video) =>
-      h(
-        NTag,
-        {
-          type:
-            row.status === 'live'
-              ? 'error'
-              : row.status === 'archive'
-                ? 'default'
-                : 'info',
-          size: 'small',
-        },
-        { default: () => row.status },
-      ),
-  },
-  {
-    title: '时长',
-    key: 'duration',
     width: 100,
-    render: (row: Video) => row.duration || '-',
+    render: (row: Video) => h(NTag, { type: row.status === 'live' ? 'error' : 'info', size: 'small' }, { default: () => row.status })
   },
-  {
-    title: '发布时间',
-    key: 'published_at',
-    minWidth: 180,
-    render: (row: Video) => row.published_at || '-',
-  },
-  {
-    title: '观看',
-    key: 'view_count',
-    width: 100,
-    render: (row: Video) => row.view_count ?? 0,
-  },
+  { title: '时长', key: 'duration', width: 100 },
+  { title: '发布时间', key: 'published_at', width: 180 },
 ]
 
-function resetFilters() {
-  filterStatus.value = null
-  durationMinMinutes.value = undefined
-  durationMaxMinutes.value = undefined
-  currentPage.value = 1
-  selectedIds.value = []
-}
+const channelOptions = computed(() => channels.value.map(ch => ({ label: ch.name, value: ch.id })))
+const statusOptions = ['live', 'upcoming', 'archive', 'upload', 'short'].map(s => ({ label: s, value: s }))
+const batchStatusOptions = statusOptions
 
 async function fetchVideos() {
   if (!filterChannelId.value) return
   loading.value = true
   try {
-    const min = durationMinMinutes.value === undefined ? null : Math.max(0, Math.floor(durationMinMinutes.value)) * 60
-    const max = durationMaxMinutes.value === undefined ? null : Math.max(0, Math.floor(durationMaxMinutes.value)) * 60
-
     const { data } = await adminVideosApi.getVideos({
       channel_id: filterChannelId.value,
       status: filterStatus.value,
-      duration_min: min,
-      duration_max: max,
-      page: currentPage.value,
-      page_size: pageSize.value,
+      duration_min: durationMinMinutes.value ? durationMinMinutes.value * 60 : null,
+      duration_max: durationMaxMinutes.value ? durationMaxMinutes.value * 60 : null,
+      page: page.value,
+      page_size: pageSize.value
     })
     videos.value = data.videos
     total.value = data.total
     selectedIds.value = []
-  } catch (err) {
-    console.error('Failed to fetch videos:', err)
   } finally {
     loading.value = false
   }
 }
 
 async function applyBatchUpdate() {
-  if (!filterChannelId.value) return
   if (selectedIds.value.length === 0) return
-
-  const ok = confirm(`确定要将 ${selectedIds.value.length} 条视频类别批量修改为：${batchNewStatus.value} 吗？`)
-  if (!ok) return
-
+  if (!confirm(`确定修改 ${selectedIds.value.length} 个视频为 ${batchNewStatus.value}？`)) return
+  
   loading.value = true
   try {
     await adminVideosApi.batchUpdateStatus({
       video_ids: selectedIds.value,
-      new_status: batchNewStatus.value,
+      new_status: batchNewStatus.value
     })
-    selectedIds.value = []
     await fetchVideos()
-  } catch (err) {
-    console.error('Failed to batch update:', err)
   } finally {
     loading.value = false
   }
 }
 
+function resetFilters() {
+  filterStatus.value = null
+  durationMinMinutes.value = undefined
+  durationMaxMinutes.value = undefined
+  page.value = 1
+  fetchVideos()
+}
+
 onMounted(async () => {
-  try {
-    const { data } = await channelApi.getAll()
-    channels.value = data
-    if (channels.value.length > 0) {
-      filterChannelId.value = channels.value[0].id
-    }
-    await fetchVideos()
-  } catch (err) {
-    console.error('Failed to init channels:', err)
+  const { data } = await channelApi.getAll()
+  channels.value = data
+  if (data.length > 0) {
+    filterChannelId.value = data[0].id
+    fetchVideos()
   }
 })
 </script>
-

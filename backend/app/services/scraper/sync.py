@@ -1,4 +1,3 @@
-import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,11 +6,10 @@ from app.models.models import Channel, Organization, Platform
 from app.services.youtube_channel import get_youtube_channel_info
 from app.services.youtube_sync import sync_channel_videos
 from app.database_async import AsyncSessionFactory
+from app.loguru_config import logger
 from .base import VtuberChannel
 from .vspo_wiki import VSPO_ORG_NAME
 from .nijisanji_wiki import NIJISANJI_ORG_NAME
-
-logger = logging.getLogger(__name__)
 
 
 async def sync_wiki_channels(

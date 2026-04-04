@@ -1,14 +1,10 @@
 import re
 import html
-import logging
 import httpx
 from typing import Optional
-
+from app.loguru_config import logger
 from app.config import settings
 from app.services.url_validator import build_safe_youtube_url, validate_youtube_url
-
-# 配置日志（如果在 FastAPI 中，可以直接使用 app 的 logger）
-logger = logging.getLogger(__name__)
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 DEFAULT_USER_AGENT = (

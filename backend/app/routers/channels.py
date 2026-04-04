@@ -6,6 +6,7 @@ from typing import List, Optional
 from app.deps import get_async_db
 from app.deps.guards import AdminUser, BilibiliAccess, require_permission
 from app.database_async import AsyncSessionFactory
+from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.schemas.schemas import (
     ChannelCreate,
     ChannelResponse,
@@ -55,15 +56,15 @@ async def get_channels(
     is_active: Optional[bool] = None,
     org_id: Optional[int] = None,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
+    ctx: PlatformContext = PlatformGuardDep,
 ):
-
     query = select(Channel)
-    if not can_bilibili:
-        query = query.where(Channel.platform == "youtube")
+    query = ctx.apply_platform_filter(query, Channel.platform)
+    
     if platform:
+        ctx.assert_platform_access(platform)
         query = query.where(Channel.platform == platform)
+
     if is_active is not None:
         query = query.where(Channel.is_active == is_active)
     if org_id is not None:
@@ -72,11 +73,11 @@ async def get_channels(
     result = await db.execute(query)
     channels = result.scalars().all()
 
-    if not current_user:
+    if not ctx.user_id:
         return channels
 
     result = await db.execute(
-        select(UserChannel).where(UserChannel.user_id == current_user.id)
+        select(UserChannel).where(UserChannel.user_id == ctx.user_id)
     )
     user_channels = result.scalars().all()
     status_map = {uc.channel_id: uc.status for uc in user_channels}
@@ -95,23 +96,21 @@ async def get_channels(
 async def get_channel_by_id(
     channel_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
+    ctx: PlatformContext = PlatformGuardDep
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    if channel.platform == Platform.BILIBILI and not can_bilibili:
-        raise HTTPException(status_code=403, detail="需要B站访问权限")
+    ctx.assert_platform_access(channel.platform)
 
     resp = ChannelResponse.model_validate(channel)
 
-    if current_user:
+    if ctx.user_id:
         result = await db.execute(
             select(UserChannel).where(
-                UserChannel.user_id == current_user.id,
+                UserChannel.user_id == ctx.user_id,
                 UserChannel.channel_id == channel_id,
             )
         )
@@ -376,8 +375,7 @@ async def scrape_all_channels(db: AsyncSession = Depends(get_async_db)):
 async def get_channel_bilibili_info(
     channel_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
+    ctx: PlatformContext = PlatformGuardDep,
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
@@ -387,8 +385,7 @@ async def get_channel_bilibili_info(
     if channel.platform != Platform.BILIBILI:
         raise HTTPException(status_code=400, detail="Channel is not a Bilibili channel")
 
-    if not can_bilibili:
-        raise HTTPException(status_code=403, detail="需要B站访问权限")
+    ctx.assert_bilibili_access()
 
     info = {
         "mid": channel.channel_id,

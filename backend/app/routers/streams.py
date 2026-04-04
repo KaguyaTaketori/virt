@@ -2,9 +2,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from app.deps import get_async_db
 from app.deps.guards import BilibiliAccess
+from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, Stream, StreamStatus, User
 from app.schemas.schemas import StreamResponse
 from app.auth import get_current_user_optional
@@ -16,17 +18,16 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 @router.get("/live", response_model=list[StreamResponse])
 async def get_live_streams(
     db: AsyncSession = Depends(get_async_db),
-    _: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
+    ctx: PlatformContext = PlatformGuardDep,
 ):
     query = (
         select(Stream)
+        .options(joinedload(Stream.channel))
         .join(Channel, Stream.channel_id == Channel.id)
         .where(Stream.status == StreamStatus.LIVE)
     )
 
-    if not can_bilibili:
-        query = query.where(Channel.platform == Platform.YOUTUBE)
+    query = ctx.apply_platform_filter(query, Channel.platform)
 
     result = await db.execute(query)
     streams = result.scalars().all()
@@ -38,16 +39,20 @@ async def get_all_streams(
     platform: Optional[Platform] = None,
     status: Optional[StreamStatus] = None,
     db: AsyncSession = Depends(get_async_db),
-    _: Optional[User] = Depends(get_current_user_optional),
-    can_bilibili: bool = BilibiliAccess,
+    ctx: PlatformContext = PlatformGuardDep,
 ):
-    query = select(Stream).join(Channel, Stream.channel_id == Channel.id)
+    query = (
+        select(Stream)
+        .options(joinedload(Stream.channel)) 
+        .join(Channel, Stream.channel_id == Channel.id)
+    )
 
-    if not can_bilibili:
-        query = query.where(Channel.platform == Platform.YOUTUBE)
+    query = ctx.apply_platform_filter(query, Channel.platform)
 
     if platform is not None:
+        ctx.assert_platform_access(platform)
         query = query.where(Stream.platform == platform)
+
     if status is not None:
         query = query.where(Stream.status == status)
 
