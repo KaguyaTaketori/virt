@@ -1,3 +1,3 @@
-from app.deps.base import get_db, verify_admin_key
- 
-__all__ = ["get_db", "verify_admin_key"]
+from app.deps.base import get_async_db
+
+__all__ = ["get_async_db"]

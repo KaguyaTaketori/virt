@@ -72,6 +72,8 @@ async def get_user_videos(
 async def sync_bilibili_channel_videos(db, channel_id: int, channel_id_str: str) -> int:
     """同步bilibili频道视频到数据库"""
     import asyncio
+    from sqlalchemy import select
+    from app.models.models import Video, Platform
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         total_synced = 0
@@ -92,14 +94,14 @@ async def sync_bilibili_channel_videos(db, channel_id: int, channel_id_str: str)
                 if not bvid:
                     continue
 
-                from app.models.models import Video, Platform
                 from datetime import datetime
 
-                existing = (
-                    db.query(Video)
-                    .filter(Video.channel_id == channel_id, Video.video_id == bvid)
-                    .first()
+                result = await db.execute(
+                    select(Video).where(
+                        Video.channel_id == channel_id, Video.video_id == bvid
+                    )
                 )
+                existing = result.scalar_one_or_none()
 
                 published = None
                 if v.get("created"):
@@ -129,7 +131,7 @@ async def sync_bilibili_channel_videos(db, channel_id: int, channel_id_str: str)
                     db.add(video)
                 total_synced += 1
 
-            db.commit()
+            await db.commit()
 
             page_info = data.get("page", {})
             count = page_info.get("count", 0)

@@ -5,10 +5,11 @@ import hashlib
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-from app.deps import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.deps import get_async_db
 from app.config import settings
-from app.database import SessionLocal
 from app.models.models import User
 from app.schemas.schemas import TokenData
 
@@ -48,7 +49,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_async_db)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -66,7 +67,8 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.username == token_data.username).first()
+    result = await db.execute(select(User).where(User.username == token_data.username))
+    user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
     return user
@@ -76,7 +78,7 @@ async def get_current_user_optional(
     token: str = Depends(
         OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> Optional[User]:
     if not token:
         return None
@@ -87,7 +89,8 @@ async def get_current_user_optional(
         username: str = payload.get("sub")
         if username is None:
             return None
-        user = db.query(User).filter(User.username == username).first()
+        result = await db.execute(select(User).where(User.username == username))
+        user = result.scalar_one_or_none()
         return user
     except JWTError:
         return None

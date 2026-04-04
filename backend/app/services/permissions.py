@@ -4,9 +4,10 @@ from typing import Callable, Optional
 from functools import wraps
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.deps import get_db
+from app.deps import get_async_db
 from app.models.models import (
     User,
     Role,
@@ -18,71 +19,71 @@ from app.models.models import (
 from app.auth import get_current_user_optional
 
 
-# ── 基础查询工具 ──────────────────────────────────────────────────────────────
-
-
-def get_user_roles(user_id: int, db: Session) -> list[str]:
+async def get_user_roles(user_id: int, db: AsyncSession) -> list[str]:
     """返回用户所有角色名称列表。"""
-    role_ids = [
-        ur.role_id
-        for ur in db.query(UserRole).filter(UserRole.user_id == user_id).all()
-    ]
+    result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
+    role_ids = [ur.role_id for ur in result.scalars().all()]
     if not role_ids:
         return []
-    return [r.name for r in db.query(Role).filter(Role.id.in_(role_ids)).all()]
+    result = await db.execute(select(Role).where(Role.id.in_(role_ids)))
+    roles = result.scalars().all()
+    return [r.name for r in roles]
 
 
-def has_role(user_id: int, role_name: str, db: Session) -> bool:
-    role_ids = [
-        ur.role_id
-        for ur in db.query(UserRole).filter(UserRole.user_id == user_id).all()
-    ]
-    return bool(
-        role_ids
-        and db.query(Role).filter(Role.id.in_(role_ids), Role.name == role_name).first()
-    )
-
-
-def has_permission(user_id: int, resource: str, action: str, db: Session) -> bool:
-    if has_role(user_id, "superadmin", db):
-        return True
-    role_ids = [
-        ur.role_id
-        for ur in db.query(UserRole).filter(UserRole.user_id == user_id).all()
-    ]
+async def has_role(user_id: int, role_name: str, db: AsyncSession) -> bool:
+    result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
+    role_ids = [ur.role_id for ur in result.scalars().all()]
     if not role_ids:
         return False
-    return bool(
-        db.query(RolePermission)
+    result = await db.execute(
+        select(Role).where(Role.id.in_(role_ids), Role.name == role_name)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def has_permission(
+    user_id: int, resource: str, action: str, db: AsyncSession
+) -> bool:
+    if await has_role(user_id, "superadmin", db):
+        return True
+    result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
+    role_ids = [ur.role_id for ur in result.scalars().all()]
+    if not role_ids:
+        return False
+    result = await db.execute(
+        select(RolePermission)
         .join(Permission)
-        .filter(
+        .where(
             RolePermission.role_id.in_(role_ids),
             Permission.resource == resource,
             Permission.action == action,
         )
-        .first()
     )
+    return result.scalar_one_or_none() is not None
 
 
-def assign_role(user_id: int, role_id: int, db: Session) -> None:
-    exists = (
-        db.query(UserRole)
-        .filter(UserRole.user_id == user_id, UserRole.role_id == role_id)
-        .first()
+async def assign_role(user_id: int, role_id: int, db: AsyncSession) -> None:
+    result = await db.execute(
+        select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)
     )
+    exists = result.scalar_one_or_none()
     if not exists:
         db.add(UserRole(user_id=user_id, role_id=role_id))
-        db.commit()
+        await db.commit()
 
 
-def remove_role(user_id: int, role_id: int, db: Session) -> None:
-    db.query(UserRole).filter(
-        UserRole.user_id == user_id, UserRole.role_id == role_id
-    ).delete()
-    db.commit()
+async def remove_role(user_id: int, role_id: int, db: AsyncSession) -> None:
+    await db.execute(
+        select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)
+    )
+    await db.execute(
+        (await db.connection()).exec_driver_sql(
+            f"DELETE FROM user_roles WHERE user_id = {user_id} AND role_id = {role_id}"
+        )
+    )
+    await db.commit()
 
 
-# ── FastAPI Depends 风格的权限校验 ────────────────────────────────────────────
 class PermissionChecker:
     """用法：Depends(PermissionChecker('channel', 'manage'))"""
 
@@ -91,83 +92,80 @@ class PermissionChecker:
         self.action = action
         self.resource_id = resource_id
 
-    def __call__(
+    async def __call__(
         self,
         current_user: Optional[User] = Depends(get_current_user_optional),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
     ) -> User:
         if not current_user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required",
             )
-        if not self._check(db, current_user.id):
+        if not await self._check(db, current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied: {self.resource}.{self.action}",
             )
         return current_user
 
-    def _check(self, db: Session, user_id: int) -> bool:
-        if has_role(user_id, "superadmin", db):
+    async def _check(self, db: AsyncSession, user_id: int) -> bool:
+        if await has_role(user_id, "superadmin", db):
             return True
-        role_ids = [
-            ur.role_id
-            for ur in db.query(UserRole).filter(UserRole.user_id == user_id).all()
-        ]
+        result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
+        role_ids = [ur.role_id for ur in result.scalars().all()]
         if not role_ids:
             return False
-        has_perm = (
-            db.query(RolePermission)
+        result = await db.execute(
+            select(RolePermission)
             .join(Permission)
-            .filter(
+            .where(
                 RolePermission.role_id.in_(role_ids),
                 Permission.resource == self.resource,
                 Permission.action == self.action,
             )
-            .first()
         )
+        has_perm = result.scalar_one_or_none()
         if has_perm:
             return True
         if self.resource_id:
-            acl = (
-                db.query(ResourceACL)
-                .filter(
+            result = await db.execute(
+                select(ResourceACL).where(
                     ResourceACL.user_id == user_id,
                     ResourceACL.resource == self.resource,
                     ResourceACL.resource_id == self.resource_id,
                     ResourceACL.access.in_(["owner", "editor"]),
                 )
-                .first()
             )
+            acl = result.scalar_one_or_none()
             if acl:
                 return True
         return False
 
 
-# ── 所有权校验（防水平越权） ───────────────────────────────────────────────────
-
-
 class OwnershipVerifier:
     @staticmethod
-    def verify(user_id: int, resource: str, resource_id: int, db: Session) -> bool:
-        acl = (
-            db.query(ResourceACL)
-            .filter(
+    async def verify(
+        user_id: int, resource: str, resource_id: int, db: AsyncSession
+    ) -> bool:
+        result = await db.execute(
+            select(ResourceACL).where(
                 ResourceACL.user_id == user_id,
                 ResourceACL.resource == resource,
                 ResourceACL.resource_id == resource_id,
             )
-            .first()
         )
+        acl = result.scalar_one_or_none()
         if acl:
             return True
-        roles = get_user_roles(user_id, db)
+        roles = await get_user_roles(user_id, db)
         return any(r in roles for r in ("superadmin", "admin"))
 
     @staticmethod
-    def require(user_id: int, resource: str, resource_id: int, db: Session) -> None:
-        if not OwnershipVerifier.verify(user_id, resource, resource_id, db):
+    async def require(
+        user_id: int, resource: str, resource_id: int, db: AsyncSession
+    ) -> None:
+        if not await OwnershipVerifier.verify(user_id, resource, resource_id, db):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied to {resource}:{resource_id}",
@@ -180,7 +178,7 @@ def require_permission(resource: str, action: str):
     def decorator(func: Callable):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            db: Session = kwargs.get("db")
+            db: AsyncSession = kwargs.get("db")
             current_user: Optional[User] = kwargs.get("current_user")
             if not current_user:
                 raise HTTPException(
@@ -188,7 +186,7 @@ def require_permission(resource: str, action: str):
                     detail="Authentication required",
                 )
             checker = PermissionChecker(resource, action)
-            if not checker._check(db, current_user.id):
+            if not await checker._check(db, current_user.id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Permission denied: {resource}.{action}",

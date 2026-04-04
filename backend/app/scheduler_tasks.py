@@ -3,9 +3,10 @@ from apscheduler.schedulers.base import STATE_STOPPED
 import httpx
 from app.loguru_config import logger
 from datetime import datetime, timezone
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.database import SessionLocal
+from app.database_async import AsyncSessionFactory
 from app.models.models import Channel, Stream, StreamStatus, Platform
 from app.services.youtube_fetcher import (
     get_videos_details,
@@ -22,12 +23,10 @@ from app.services.youtube_channel import get_channel_details
 from app.config import settings
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.youtube_sync import sync_channel_videos
-from app.database_async import AsyncSessionFactory
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-# ── YouTube ───────────────────────────────────────────────────────────────────
 async def _daily_backfill_sync():
     """
     每日兜底对账：用 PlaylistItems(UUxxx) 增量同步每个频道的最新50条。
@@ -39,9 +38,6 @@ async def _daily_backfill_sync():
         return
 
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import select
-        from app.models.models import Channel, Platform
-
         result = await session.execute(
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
@@ -69,7 +65,7 @@ async def discover_youtube_streams():
 
     现在的策略：
     - 更新已知活跃流：用 videos.list（update_youtube_streams）
-    - 查询“正在直播”：在 API 层按需用 youtube_sync 增量拉取
+    - 查询"正在直播"：在 API 层按需用 youtube_sync 增量拉取
     """
     return
 
@@ -82,22 +78,19 @@ async def update_youtube_streams():
     if not settings.youtube_api_key:
         return
 
-    # update 是高优先级，只要还有配额就执行（不设 discover_reserve 限制）
     if not await can_spend("videos.list", 1):
         logger.info("配额耗尽，跳过")
         return
 
-    db = SessionLocal()
-    try:
-        active = (
-            db.query(Stream)
-            .filter(
+    async with AsyncSessionFactory() as db:
+        result = await db.execute(
+            select(Stream).where(
                 Stream.platform == Platform.YOUTUBE,
                 Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
                 Stream.video_id.isnot(None),
             )
-            .all()
         )
+        active = result.scalars().all()
 
         if not active:
             return
@@ -106,7 +99,6 @@ async def update_youtube_streams():
         video_ids = list(vid_to_ch_id.keys())
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # 50 个一批，每批消耗 1 配额
             for i in range(0, len(video_ids), 50):
                 chunk = video_ids[i : i + 50]
                 if not await can_spend("videos.list", 1):
@@ -117,32 +109,50 @@ async def update_youtube_streams():
                 for item in items:
                     parsed = parse_youtube_stream(item)
                     if parsed and parsed["video_id"] in vid_to_ch_id:
-                        _upsert_stream(
+                        await _async_upsert_stream(
                             db,
                             vid_to_ch_id[parsed["video_id"]],
                             parsed,
                             Platform.YOUTUBE,
                         )
 
-        db.commit()
+        await db.commit()
         logger.info(
             "刷新 {} 条 | 配额剩余 {}", len(active), quota_status()["remaining"]
         )
-    except Exception as e:
-        logger.error("Error: {}", e)
-        db.rollback()
-    finally:
-        db.close()
 
 
-# ── Bilibili ──────────────────────────────────────────────────────────────────
+async def _async_upsert_stream(
+    db: AsyncSession, channel_id: int, parsed: dict, platform
+):
+    """异步版本的 upsert，供调度器使用。"""
+    from app.models.models import Stream
+
+    result = await db.execute(
+        select(Stream).where(
+            Stream.channel_id == channel_id,
+            Stream.video_id == parsed["video_id"],
+        )
+    )
+    stream = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+
+    if not stream:
+        stream = Stream(channel_id=channel_id, platform=platform)
+        db.add(stream)
+
+    for field, value in parsed.items():
+        if getattr(stream, field, None) != value:
+            setattr(stream, field, value)
+
+    stream.updated_at = now
+    if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
+        stream.peak_viewers = parsed["viewer_count"]
 
 
 async def update_bilibili_streams():
     """使用 AsyncSession，与 YouTube 任务保持一致。"""
     async with AsyncSessionFactory() as db:
-        from sqlalchemy import select
-
         result = await db.execute(
             select(Channel).where(
                 Channel.platform == Platform.BILIBILI,
@@ -170,41 +180,15 @@ async def update_bilibili_streams():
         logger.info("更新 {} 个房间", len(rooms_data))
 
 
-async def _async_upsert_stream(db, channel_id: int, parsed: dict, platform):
-    """异步版本的 upsert，供调度器使用。"""
-    from sqlalchemy import select, update
-    from app.models.models import Stream
-
-    result = await db.execute(
-        select(Stream).where(
-            Stream.channel_id == channel_id,
-            Stream.video_id == parsed["video_id"],
-        )
-    )
-    stream = result.scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-
-    if not stream:
-        stream = Stream(channel_id=channel_id, platform=platform)
-        db.add(stream)
-
-    for field, value in parsed.items():
-        if getattr(stream, field, None) != value:
-            setattr(stream, field, value)
-
-    stream.updated_at = now
-    if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
-        stream.peak_viewers = parsed["viewer_count"]
-
-
 async def sync_bilibili_channels():
-    db = SessionLocal()
-    try:
-        channels = (
-            db.query(Channel)
-            .filter(Channel.platform == Platform.BILIBILI, Channel.is_active == True)
-            .all()
+    async with AsyncSessionFactory() as db:
+        result = await db.execute(
+            select(Channel).where(
+                Channel.platform == Platform.BILIBILI,
+                Channel.is_active == True,
+            )
         )
+        channels = result.scalars().all()
         if not channels:
             return
 
@@ -229,42 +213,8 @@ async def sync_bilibili_channels():
                 if total_synced > 0:
                     logger.info("{}: 同步了 {} 个视频", ch.name, total_synced)
 
-        db.commit()
+        await db.commit()
         logger.info("同步 {} 个频道信息", len(channels))
-    except Exception as e:
-        logger.error("sync_bilibili_channels error: {}", e)
-        db.rollback()
-    finally:
-        db.close()
-
-
-# ── 共用 upsert ───────────────────────────────────────────────────────────────
-
-
-def _upsert_stream(db: Session, channel_id: int, parsed: dict, platform: Platform):
-    stream = (
-        db.query(Stream)
-        .filter(Stream.channel_id == channel_id, Stream.video_id == parsed["video_id"])
-        .first()
-    )
-
-    if not stream:
-        stream = Stream(channel_id=channel_id, platform=platform)
-        db.add(stream)
-
-    changed = False
-    for field, value in parsed.items():
-        if getattr(stream, field, None) != value:
-            setattr(stream, field, value)
-            changed = True
-
-    if changed:
-        stream.updated_at = datetime.now(timezone.utc)
-        if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
-            stream.peak_viewers = parsed["viewer_count"]
-
-
-# ── 频道详情刷新 ─────────────────────────────────────────────────────────────
 
 
 async def refresh_channel_details():
@@ -272,16 +222,14 @@ async def refresh_channel_details():
     if not settings.youtube_api_key:
         return
 
-    db = SessionLocal()
-    try:
-        channels = (
-            db.query(Channel)
-            .filter(
+    async with AsyncSessionFactory() as db:
+        result = await db.execute(
+            select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active == True,
             )
-            .all()
         )
+        channels = result.scalars().all()
 
         if not channels:
             return
@@ -323,16 +271,116 @@ async def refresh_channel_details():
                 except Exception as e:
                     logger.warning("{}: {}", ch.name, e)
 
-        db.commit()
+        await db.commit()
         logger.info("完成")
-    except Exception as e:
-        logger.error("Error: {}", e)
-        db.rollback()
-    finally:
-        db.close()
 
 
-# ── 调度器启动 ────────────────────────────────────────────────────────────────
+async def sync_youtube_videos_bulk(limit: int = 50):
+    """批量同步历史视频 - 每次处理limit个频道，轮流处理所有频道"""
+    if not settings.youtube_api_key:
+        return
+
+    from app.services.youtube_sync import sync_channel_videos
+
+    # 获取当前是第几轮（基于时间）
+    import time
+
+    round_num = int(time.time()) // 3600 % 10  # 每小时换一轮，最多记住10小时
+
+    async with AsyncSessionFactory() as db:
+        # 获取频道总数
+        result = await db.execute(
+            select(Channel).where(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active == True,
+            )
+        )
+        all_channels = result.scalars().all()
+        total_channels = len(all_channels)
+
+        if total_channels == 0:
+            return
+
+        # 计算偏移量，实现轮流处理
+        offset = (round_num * limit) % total_channels
+        channels = all_channels[offset : offset + limit]
+        if len(channels) < limit:
+            channels.extend(all_channels[: limit - len(channels)])
+
+        if not channels:
+            return
+
+        logger.info(
+            "开始批量同步 {} 个频道的视频 (round={}, offset={})",
+            len(channels),
+            round_num,
+            offset,
+        )
+
+        for ch in channels:
+            try:
+                await sync_channel_videos(
+                    db, ch, settings.youtube_api_key, full_refresh=False
+                )
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"{ch.name}: {e}")
+
+        logger.info("批量同步完成")
+
+
+async def discover_yive_streams_from_videos():
+    """从频道视频列表发现 live/upcoming  streams（无搜索API时的备选方案）"""
+    if not settings.youtube_api_key:
+        return
+
+    from app.services.youtube_utils import determine_video_status
+
+    async with AsyncSessionFactory() as db:
+        # 获取最近7天有视频的频道
+        result = await db.execute(
+            select(Channel).where(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active == True,
+            )
+        )
+        channels = result.scalars().all()
+
+        if not channels:
+            return
+
+        logger.info("从 {} 个频道发现 live streams", len(channels))
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for ch in channels:
+                # 获取该频道最近上传的视频（可能包含 live）
+                result = await db.execute(
+                    select(Video).where(
+                        Video.channel_id == ch.id,
+                        Video.status.in_(["live", "upcoming"]),
+                    )
+                )
+                live_videos = result.scalars().all()
+
+                for video in live_videos:
+                    await _async_upsert_stream(
+                        db,
+                        ch.id,
+                        {
+                            "video_id": video.video_id,
+                            "title": video.title,
+                            "thumbnail_url": video.thumbnail_url,
+                            "platform": "YOUTUBE",
+                            "status": video.status.upper() if video.status else "LIVE",
+                            "scheduled_at": video.scheduled_at,
+                            "live_started_at": video.live_started_at,
+                            "viewer_count": 0,
+                        },
+                        Platform.YOUTUBE,
+                    )
+
+        await db.commit()
+        logger.info("Live streams 发现完成")
 
 
 def start_scheduler():
@@ -371,13 +419,32 @@ def start_scheduler():
         next_run_time=now,
         replace_existing=True,
     )
-    logger.info("yt_discover=已禁用 | yt_update=5min | bili_update=2min")
+    # 每小时批量同步50个频道的视频（快速增量）
+    scheduler.add_job(
+        sync_youtube_videos_bulk,
+        "interval",
+        minutes=60,
+        id="yt_bulk_sync",
+        next_run_time=now,
+        replace_existing=True,
+    )
+    # 每5分钟从视频列表发现 live streams
+    scheduler.add_job(
+        discover_yive_streams_from_videos,
+        "interval",
+        minutes=5,
+        id="yt_live_discover",
+        replace_existing=True,
+    )
+    logger.info(
+        "yt_discover=已禁用 | yt_update=5min | bili_update=2min | yt_bulk_sync=60min | yt_live_discover=5min"
+    )
 
     scheduler.add_job(
         _daily_backfill_sync,
         "cron",
         hour=4,
-        minute=0,  # UTC 04:00
+        minute=0,
         id="daily_backfill",
         replace_existing=True,
     )
@@ -389,7 +456,6 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Wiki Scraper - 每周日凌晨2点(UTC)执行
     from app.services.scraper import sync as scraper_sync
 
     scheduler.add_job(
@@ -397,7 +463,7 @@ def start_scheduler():
         "cron",
         hour=2,
         minute=0,
-        day_of_week=6,  # 0=monday, 6=sunday
+        day_of_week=6,
         id="wiki_scrape_weekly",
         replace_existing=True,
     )

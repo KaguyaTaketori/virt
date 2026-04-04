@@ -24,7 +24,7 @@ class VSPOWikiScraper(BaseWikiScraper):
         soup = BeautifulSoup(html, "html.parser")
         channels = []
 
-        target_groups = {"JP", "EN"}
+        target_groups = {"公式", "JP", "EN"}
 
         for h2 in soup.find_all("h2"):
             group = h2.get_text(strip=True)
@@ -49,30 +49,18 @@ class VSPOWikiScraper(BaseWikiScraper):
 
     def _find_next_table_by_section(self, heading) -> Optional[Tag]:
         """在h2标题所在的section中查找后续的table"""
-        parent = heading.parent
-        if not parent:
-            return None
-
-        heading_idx = None
-        for i, child in enumerate(parent.children):
-            if (
-                hasattr(child, "name")
-                and child.name in ["h2", "h3"]
-                and child == heading
-            ):
-                heading_idx = i
+        for sibling in heading.next_siblings:
+            if not hasattr(sibling, "name") or sibling.name is None:
+                continue
+            if sibling.name == "table":
+                return sibling
+            # 检查 div 内的 table
+            if sibling.name == "div":
+                table = sibling.find("table")
+                if table:
+                    return table
+            if sibling.name in ["h2", "h3"]:
                 break
-
-        if heading_idx is None:
-            return None
-
-        for i in range(heading_idx + 1, len(list(parent.children))):
-            child = list(parent.children)[i]
-            if hasattr(child, "name"):
-                if child.name == "table":
-                    return child
-                elif child.name in ["h2", "h3"]:
-                    break
 
         return None
 

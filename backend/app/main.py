@@ -34,18 +34,21 @@ def _assert_production_secrets() -> None:
 
     errors = []
 
-    if settings.jwt_secret_key == "your-secret-key-change-in-production":
+    if not settings.jwt_secret_key or len(settings.jwt_secret_key) < 32:
         errors.append(
-            "JWT_SECRET_KEY 使用了默认值，生产环境必须设置强随机密钥（建议 32+ 字节）"
+            "JWT_SECRET_KEY 未设置或长度不足，生产环境必须配置一个至少 32 字符的密钥"
         )
 
     if not settings.websub_secret:
-        errors.append(
-            "WEBSUB_SECRET 未设置，生产环境必须配置以防止伪造推送"
-        )
+        errors.append("WEBSUB_SECRET 未设置，生产环境必须配置以防止伪造推送")
 
     if not settings.youtube_api_key:
         logger.warning("YOUTUBE_API_KEY 未设置，YouTube 相关功能将不可用")
+
+    if not settings.cors_origins:
+        logger.warning(
+            "CORS_ORIGINS 未设置，默认允许 http://localhost:5173 和 http://localhost:3000 访问"
+        )
 
     if errors:
         for e in errors:
@@ -62,11 +65,12 @@ async def lifespan(app: FastAPI):
     _assert_production_secrets()
 
     from app.services.youtube_websub import subscribe_all_active_channels
-    from app.database_async import AsyncSessionFactory
+    from app.database_async import AsyncSessionFactory, create_all_tables
     from sqlalchemy import select, func
     from app.models.models import WebSubSubscription
 
     Base.metadata.create_all(bind=engine)
+    await create_all_tables()
 
     callback_url = settings.websub_callback_url
     if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
@@ -102,12 +106,16 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 _cors_origins_raw = settings.cors_origins
-_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()] if _cors_origins_raw else ["http://localhost:5173", "http://localhost:3000"]
+_cors_origins = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else ["http://localhost:5173", "http://localhost:3000"]
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

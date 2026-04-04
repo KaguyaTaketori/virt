@@ -5,6 +5,7 @@ __pycache__/
 .env
 .DS_Store
 *.log
+frontend/dist/
 
 # Local-only: Bilibili API notes / keys (do not commit)
 **/bilibili-api.txt

@@ -3,6 +3,19 @@ import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
 export default defineConfig({
+  build: {
+    outDir: 'dist',
+    sourcemap: false, 
+    minify: 'esbuild',
+    rollupOptions: {
+      input: path.resolve(__dirname, 'index.html'),
+      output: {
+        chunkFileNames: 'assets/js/[hash].js',
+        entryFileNames: 'assets/js/[hash].js',
+        assetFileNames: 'assets/[ext]/[hash].[ext]',
+      }
+    }
+  },
   plugins: [vue()],
   resolve: {
     alias: {

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 from typing import List, Optional
 
-from app.deps import get_db
+from app.deps import get_async_db
 from app.deps.permissions import AdminUser, require_permission_dep
 from app.database_async import AsyncSessionFactory
 from app.schemas.schemas import (
@@ -27,88 +28,88 @@ from app.loguru_config import logger
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
-# ── 辅助函数 ──────────────────────────────────────────────────────────────────
-
-def _apply_user_status(
+async def _apply_user_status(
     response: ChannelResponse,
-    db: Session,
+    db: AsyncSession,
     user_id: Optional[int],
 ) -> ChannelResponse:
     if not user_id:
         return response
-    uc = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == user_id,
             UserChannel.channel_id == response.id,
         )
-        .first()
     )
+    uc = result.scalar_one_or_none()
     if uc:
         response.is_liked = uc.status == "liked"
         response.is_blocked = uc.status == "blocked"
     return response
 
 
-# ── 只读路由（无需鉴权）──────────────────────────────────────────────────────
-
 @router.get("", response_model=List[ChannelResponse])
-def get_channels(
+async def get_channels(
     platform: Optional[str] = None,
     is_active: Optional[bool] = None,
     org_id: Optional[int] = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    query = db.query(Channel)
-
     has_bilibili_perm = False
     if current_user:
-        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+        has_bilibili_perm = await has_permission(
+            current_user.id, "bilibili", "access", db
+        )
 
+    query = select(Channel)
     if not has_bilibili_perm:
-        query = query.filter(Channel.platform == "youtube")
-
+        query = query.where(Channel.platform == "youtube")
     if platform:
-        query = query.filter(Channel.platform == platform)
+        query = query.where(Channel.platform == platform)
     if is_active is not None:
-        query = query.filter(Channel.is_active == is_active)
+        query = query.where(Channel.is_active == is_active)
     if org_id is not None:
-        query = query.filter(Channel.org_id == org_id)
+        query = query.where(Channel.org_id == org_id)
 
-    channels = query.all()
+    result = await db.execute(query)
+    channels = result.scalars().all()
 
     if not current_user:
         return channels
 
-    user_channels = (
-        db.query(UserChannel).filter(UserChannel.user_id == current_user.id).all()
+    result = await db.execute(
+        select(UserChannel).where(UserChannel.user_id == current_user.id)
     )
+    user_channels = result.scalars().all()
     status_map = {uc.channel_id: uc.status for uc in user_channels}
 
-    result = []
+    result_list = []
     for ch in channels:
         resp = ChannelResponse.model_validate(ch)
         st = status_map.get(ch.id)
         resp.is_liked = st == "liked"
         resp.is_blocked = st == "blocked"
-        result.append(resp)
-    return result
+        result_list.append(resp)
+    return result_list
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
-def get_channel_by_id(
+async def get_channel_by_id(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
     has_bilibili_perm = False
     if current_user:
-        has_bilibili_perm = has_permission(current_user.id, "bilibili", "access", db)
+        has_bilibili_perm = await has_permission(
+            current_user.id, "bilibili", "access", db
+        )
 
     if channel.platform == Platform.BILIBILI and not has_bilibili_perm:
         raise HTTPException(status_code=403, detail="需要B站访问权限")
@@ -116,14 +117,13 @@ def get_channel_by_id(
     resp = ChannelResponse.model_validate(channel)
 
     if current_user:
-        uc = (
-            db.query(UserChannel)
-            .filter(
+        result = await db.execute(
+            select(UserChannel).where(
                 UserChannel.user_id == current_user.id,
                 UserChannel.channel_id == channel_id,
             )
-            .first()
         )
+        uc = result.scalar_one_or_none()
         if uc:
             resp.is_liked = uc.status == "liked"
             resp.is_blocked = uc.status == "blocked"
@@ -137,9 +137,10 @@ async def get_channel_videos(
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     status: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
@@ -147,21 +148,25 @@ async def get_channel_videos(
         return await fetch_channel_videos(channel.id, page, page_size, status)
 
     if channel.platform == Platform.BILIBILI:
-        if not db.query(Video).filter(Video.channel_id == channel_id).count():
+        result = await db.execute(select(Video).where(Video.channel_id == channel_id))
+        videos_count = len(result.scalars().all())
+        if not videos_count:
             await sync_bilibili_channel_videos(db, channel_id, channel.channel_id)
 
-        query = db.query(Video).filter(Video.channel_id == channel_id)
+        query = select(Video).where(Video.channel_id == channel_id)
         if status:
-            query = query.filter(Video.status == status)
+            query = query.where(Video.status == status)
 
-        total = query.count()
+        result = await db.execute(query)
+        total = len(result.scalars().all())
         total_pages = (total + page_size - 1) // page_size if total else 0
-        videos_db = (
+        query = (
             query.order_by(Video.published_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
-            .all()
         )
+        result = await db.execute(query)
+        videos_db = result.scalars().all()
 
         return PaginatedVideosResponse(
             videos=[
@@ -171,7 +176,9 @@ async def get_channel_videos(
                     thumbnail_url=v.thumbnail_url or "",
                     duration=v.duration or "",
                     view_count=v.view_count or 0,
-                    published_at=v.published_at.strftime("%Y-%m-%d") if v.published_at else None,
+                    published_at=v.published_at.strftime("%Y-%m-%d")
+                    if v.published_at
+                    else None,
                     status=v.status or "archive",
                 )
                 for v in videos_db
@@ -187,14 +194,12 @@ async def get_channel_videos(
     )
 
 
-# ── 写操作路由（要求 admin 及以上）───────────────────────────────────────────
-
 @router.post("", response_model=ChannelResponse)
 async def create_channel(
     channel: ChannelCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    _current_user: User = AdminUser,          
+    db: AsyncSession = Depends(get_async_db),
+    _: User = AdminUser,
 ):
     resolved_channel_id = channel.channel_id
     channel_details: Optional[dict] = None
@@ -210,7 +215,10 @@ async def create_channel(
 
         channel_details = await get_channel_details(resolved_channel_id)
 
-    if db.query(Channel).filter(Channel.channel_id == resolved_channel_id).first():
+    result = await db.execute(
+        select(Channel).where(Channel.channel_id == resolved_channel_id)
+    )
+    if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Channel already exists")
 
     channel.channel_id = resolved_channel_id
@@ -223,8 +231,8 @@ async def create_channel(
 
     db_channel = Channel(**channel_data)
     db.add(db_channel)
-    db.commit()
-    db.refresh(db_channel)
+    await db.commit()
+    await db.refresh(db_channel)
 
     if db_channel.platform == Platform.YOUTUBE:
         channel_id = db_channel.id
@@ -254,56 +262,65 @@ async def create_channel(
 
 
 @router.put("/{channel_id}", response_model=ChannelResponse)
-def update_channel(
+async def update_channel(
     channel_id: int,
     channel_update: ChannelUpdate,
-    db: Session = Depends(get_db),
-    _current_user: User = AdminUser,          
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: User = AdminUser,
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
     for key, value in channel_update.model_dump(exclude_unset=True).items():
         setattr(channel, key, value)
 
-    db.commit()
-    db.refresh(channel)
+    await db.commit()
+    await db.refresh(channel)
     return channel
 
 
 @router.delete("/{channel_id}")
-def delete_channel(
+async def delete_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
-    _current_user: User = AdminUser,          
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: User = AdminUser,
 ):
     from app.models.models import Stream, Danmaku
 
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    db.query(Video).filter(Video.channel_id == channel_id).delete(synchronize_session=False)
-    db.query(UserChannel).filter(UserChannel.channel_id == channel_id).delete(synchronize_session=False)
-    db.query(Danmaku).filter(
-        Danmaku.stream_id.in_(
-            db.query(Stream.id).filter(Stream.channel_id == channel_id)
-        )
-    ).delete(synchronize_session=False)
-    db.query(Stream).filter(Stream.channel_id == channel_id).delete(synchronize_session=False)
-    db.delete(channel)
-    db.commit()
+    result = await db.execute(select(Video).where(Video.channel_id == channel_id))
+    for v in result.scalars().all():
+        await db.delete(v)
+    result = await db.execute(
+        select(UserChannel).where(UserChannel.channel_id == channel_id)
+    )
+    for uc in result.scalars().all():
+        await db.delete(uc)
+    result = await db.execute(select(Stream).where(Stream.channel_id == channel_id))
+    for s in result.scalars().all():
+        result_dm = await db.execute(select(Danmaku).where(Danmaku.stream_id == s.id))
+        for dm in result_dm.scalars().all():
+            await db.delete(dm)
+        await db.delete(s)
+    await db.delete(channel)
+    await db.commit()
     return {"message": "Channel deleted successfully"}
 
 
 @router.post("/{channel_id}/refresh", response_model=ChannelResponse)
 async def refresh_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
-    _current_user: User = AdminUser,          
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: User = AdminUser,
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
@@ -313,20 +330,18 @@ async def refresh_channel(
             for field in ("banner_url", "description", "twitter_url", "youtube_url"):
                 if details.get(field):
                     setattr(channel, field, details[field])
-            db.commit()
-            db.refresh(channel)
+            await db.commit()
+            await db.refresh(channel)
 
     return channel
 
 
-# ── Wiki Scraper 路由（要求 channel.manage 权限）──────────────────────────────
-
 @router.post(
     "/scrape/vspo",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],
 )
-async def scrape_vspo_channels(db: Session = Depends(get_db)):
+async def scrape_vspo_channels(db: AsyncSession = Depends(get_async_db)):
     try:
         result = await scraper_sync.scrape_and_sync_vspo(db)
         return {"status": "success", "source": "vspo", **result}
@@ -338,23 +353,25 @@ async def scrape_vspo_channels(db: Session = Depends(get_db)):
 @router.post(
     "/scrape/nijisanji",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],
 )
-async def scrape_nijisanji_channels(db: Session = Depends(get_db)):
+async def scrape_nijisanji_channels(db: AsyncSession = Depends(get_async_db)):
     try:
         result = await scraper_sync.scrape_and_sync_nijisanji(db)
         return {"status": "success", "source": "nijisanji", **result}
     except Exception as e:
         logger.error("scrape_nijisanji error: {}", e)
-        raise HTTPException(status_code=500, detail="爬取 Nijisanji 失败，请查看服务日志")
+        raise HTTPException(
+            status_code=500, detail="爬取 Nijisanji 失败，请查看服务日志"
+        )
 
 
 @router.post(
     "/scrape/all",
     tags=["scraper"],
-    dependencies=[Depends(require_permission_dep("channel", "manage"))],  
+    dependencies=[Depends(require_permission_dep("channel", "manage"))],
 )
-async def scrape_all_channels(db: Session = Depends(get_db)):
+async def scrape_all_channels(db: AsyncSession = Depends(get_async_db)):
     try:
         result = await scraper_sync.scrape_and_sync_all(db)
         return {"status": "success", **result}

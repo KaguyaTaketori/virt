@@ -1,11 +1,12 @@
 import logging
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.models.models import Channel, Organization, Platform
 from app.services.youtube_channel import get_youtube_channel_info
 from app.services.youtube_sync import sync_channel_videos
-from app.database import SessionLocal
+from app.database_async import AsyncSessionFactory
 from .base import VtuberChannel
 from .vspo_wiki import VSPO_ORG_NAME
 from .nijisanji_wiki import NIJISANJI_ORG_NAME
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def sync_wiki_channels(
     vtuber_channels: list[VtuberChannel],
     org_name: str,
-    db: Session,
+    db: AsyncSession,
 ) -> dict:
     """
     将爬取的VTuber频道同步到数据库
@@ -25,12 +26,12 @@ async def sync_wiki_channels(
     """
     stats = {"created": 0, "updated": 0, "skipped": 0}
 
-    # 获取或创建组织
-    org = db.query(Organization).filter(Organization.name == org_name).first()
+    result = await db.execute(select(Organization).where(Organization.name == org_name))
+    org = result.scalar_one_or_none()
     if not org:
         org = Organization(name=org_name)
         db.add(org)
-        db.flush()
+        await db.flush()
         logger.info(f"Created organization: {org_name}")
 
     for vtuber_ch in vtuber_channels:
@@ -52,10 +53,9 @@ async def sync_wiki_channels(
 async def _sync_single_channel(
     vtuber_ch: VtuberChannel,
     org_id: int,
-    db: Session,
+    db: AsyncSession,
 ) -> str:
     """同步单个频道"""
-    # 解析YouTube channel_id
     channel_id = vtuber_ch.youtube_channel_id
     if not channel_id and vtuber_ch.youtube_handle:
         channel_id = await _resolve_handle(vtuber_ch.youtube_handle)
@@ -66,18 +66,15 @@ async def _sync_single_channel(
         logger.debug(f"Cannot resolve channel_id for {vtuber_ch.name}")
         return "skipped"
 
-    # 查询已存在
-    existing = (
-        db.query(Channel)
-        .filter(
+    result = await db.execute(
+        select(Channel).where(
             Channel.channel_id == channel_id,
             Channel.platform == Platform.YOUTUBE,
         )
-        .first()
     )
+    existing = result.scalar_one_or_none()
 
     if existing:
-        # 更新链接字段
         updated = False
         if vtuber_ch.twitter_url and existing.twitter_url != vtuber_ch.twitter_url:
             existing.twitter_url = vtuber_ch.twitter_url
@@ -96,21 +93,21 @@ async def _sync_single_channel(
             updated = True
 
         if updated:
-            db.flush()
+            await db.flush()
             logger.debug(f"Updated channel: {vtuber_ch.name}")
             return "updated"
         return "skipped"
 
-    # 获取YouTube频道详情（头像等）
     yt_info = await _fetch_youtube_info(channel_id)
 
-    # 创建新频道
     new_channel = Channel(
         org_id=org_id,
         platform=Platform.YOUTUBE,
         channel_id=channel_id,
         name=vtuber_ch.name,
         avatar_url=yt_info.get("avatar_url") if yt_info else None,
+        banner_url=yt_info.get("banner_url") if yt_info else None,
+        description=yt_info.get("description") if yt_info else None,
         twitter_url=vtuber_ch.twitter_url,
         youtube_url=f"https://www.youtube.com/channel/{channel_id}",
         twitch_url=vtuber_ch.twitch_url,
@@ -118,12 +115,10 @@ async def _sync_single_channel(
         status=vtuber_ch.status or "active",
     )
     db.add(new_channel)
-    db.flush()
+    await db.flush()
     logger.info(f"Created channel: {vtuber_ch.name} ({channel_id})")
 
-    # 创建后立即同步视频
     try:
-        from app.database_async import AsyncSessionFactory
         from app.config import settings
 
         async with AsyncSessionFactory() as session:
@@ -161,7 +156,7 @@ async def _fetch_youtube_info(channel_id: str) -> Optional[dict]:
         return None
 
 
-async def scrape_and_sync_vspo(db: Session) -> dict:
+async def scrape_and_sync_vspo(db: AsyncSession) -> dict:
     """爬取并同步VSPO!频道"""
     from .vspo_wiki import VSPOWikiScraper
 
@@ -173,7 +168,7 @@ async def scrape_and_sync_vspo(db: Session) -> dict:
         await scraper.close()
 
 
-async def scrape_and_sync_nijisanji(db: Session) -> dict:
+async def scrape_and_sync_nijisanji(db: AsyncSession) -> dict:
     """爬取并同步Nijisanji频道"""
     from .nijisanji_wiki import NijisanjiWikiScraper
 
@@ -185,18 +180,16 @@ async def scrape_and_sync_nijisanji(db: Session) -> dict:
         await scraper.close()
 
 
-async def scrape_and_sync_all(db: Session) -> dict:
+async def scrape_and_sync_all(db: AsyncSession) -> dict:
     """爬取并同步所有支持的VTuber Wiki"""
     all_stats = {"vspo": {}, "nijisanji": {}}
 
-    # VSPO!
     try:
         all_stats["vspo"] = await scrape_and_sync_vspo(db)
     except Exception as e:
         logger.error(f"Failed to scrape VSPO!: {e}")
         all_stats["vspo"] = {"error": str(e)}
 
-    # Nijisanji
     try:
         all_stats["nijisanji"] = await scrape_and_sync_nijisanji(db)
     except Exception as e:
@@ -207,9 +200,6 @@ async def scrape_and_sync_all(db: Session) -> dict:
 
 
 async def scheduled_scrape_all():
-    """定时任务：爬取并同步所有VTuber Wiki（使用SessionLocal）"""
-    db = SessionLocal()
-    try:
+    """定时任务：爬取并同步所有VTuber Wiki"""
+    async with AsyncSessionFactory() as db:
         return await scrape_and_sync_all(db)
-    finally:
-        db.close()

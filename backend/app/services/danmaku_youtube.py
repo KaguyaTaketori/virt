@@ -7,6 +7,8 @@ from yt_chat_downloader import YouTubeChatDownloader
 from app.config import settings
 from app.models.models import Danmaku
 from datetime import datetime, timezone
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 
 def get_danmaku_file_path(video_id: str) -> Path:
@@ -51,9 +53,10 @@ def get_chat_from_file(video_id: str) -> List[dict]:
         return []
 
 
-def get_chat_from_db(db, stream_id: int) -> List[dict]:
+async def get_chat_from_db(db: AsyncSession, stream_id: int) -> List[dict]:
     """从数据库读取弹幕"""
-    danmaku = db.query(Danmaku).filter(Danmaku.stream_id == stream_id).first()
+    result = await db.execute(select(Danmaku).where(Danmaku.stream_id == stream_id))
+    danmaku = result.scalar_one_or_none()
     if not danmaku:
         return []
 
@@ -63,17 +66,20 @@ def get_chat_from_db(db, stream_id: int) -> List[dict]:
         return []
 
 
-def save_to_db(db, stream_id: int, video_id: str, messages: List[dict]) -> Danmaku:
+async def save_to_db(
+    db: AsyncSession, stream_id: int, video_id: str, messages: List[dict]
+) -> Danmaku:
     """保存弹幕到数据库"""
-    existing = db.query(Danmaku).filter(Danmaku.stream_id == stream_id).first()
+    result = await db.execute(select(Danmaku).where(Danmaku.stream_id == stream_id))
+    existing = result.scalar_one_or_none()
 
     json_messages = json.dumps(messages, ensure_ascii=False)
 
     if existing:
         existing.messages = json_messages
         existing.downloaded_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(existing)
+        await db.commit()
+        await db.refresh(existing)
         return existing
     else:
         danmaku = Danmaku(
@@ -83,6 +89,6 @@ def save_to_db(db, stream_id: int, video_id: str, messages: List[dict]) -> Danma
             source="youtube",
         )
         db.add(danmaku)
-        db.commit()
-        db.refresh(danmaku)
+        await db.commit()
+        await db.refresh(danmaku)
         return danmaku

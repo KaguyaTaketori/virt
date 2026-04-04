@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     danmaku_storage_path: str = "./danmaku_data"
     websub_callback_url: str = ""
     websub_secret: str = ""
-    admin_secret_key: str = ""
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24 * 7

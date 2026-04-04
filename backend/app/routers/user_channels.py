@@ -1,10 +1,12 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from app.database import SessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.deps import get_async_db
 from app.models.models import User, Channel, UserChannel
 from app.schemas.schemas import ChannelResponse
-from app.auth import get_current_user, get_db
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/users/channels", tags=["user-channels"])
 
@@ -12,34 +14,33 @@ router = APIRouter(prefix="/api/users/channels", tags=["user-channels"])
 @router.post("/{channel_id}/like", status_code=status.HTTP_201_CREATED)
 async def like_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    existing = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "liked",
         )
-        .first()
     )
+    existing = result.scalar_one_or_none()
     if existing:
         return {"message": "Channel already liked"}
 
-    existing_blocked = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "blocked",
         )
-        .first()
     )
+    existing_blocked = result.scalar_one_or_none()
     if existing_blocked:
         existing_blocked.status = "liked"
     else:
@@ -48,64 +49,62 @@ async def like_channel(
         )
         db.add(user_channel)
 
-    db.commit()
+    await db.commit()
     return {"message": "Channel liked"}
 
 
 @router.delete("/{channel_id}/like")
 async def unlike_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    user_channel = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "liked",
         )
-        .first()
     )
+    user_channel = result.scalar_one_or_none()
     if not user_channel:
         raise HTTPException(status_code=404, detail="Channel not liked")
 
-    db.delete(user_channel)
-    db.commit()
+    await db.delete(user_channel)
+    await db.commit()
     return {"message": "Channel unliked"}
 
 
 @router.post("/{channel_id}/block", status_code=status.HTTP_201_CREATED)
 async def block_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    existing = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "blocked",
         )
-        .first()
     )
+    existing = result.scalar_one_or_none()
     if existing:
         return {"message": "Channel already blocked"}
 
-    existing_liked = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "liked",
         )
-        .first()
     )
+    existing_liked = result.scalar_one_or_none()
     if existing_liked:
         existing_liked.status = "blocked"
     else:
@@ -114,59 +113,58 @@ async def block_channel(
         )
         db.add(user_channel)
 
-    db.commit()
+    await db.commit()
     return {"message": "Channel blocked"}
 
 
 @router.delete("/{channel_id}/block")
 async def unblock_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    user_channel = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
             UserChannel.status == "blocked",
         )
-        .first()
     )
+    user_channel = result.scalar_one_or_none()
     if not user_channel:
         raise HTTPException(status_code=404, detail="Channel not blocked")
 
-    db.delete(user_channel)
-    db.commit()
+    await db.delete(user_channel)
+    await db.commit()
     return {"message": "Channel unblocked"}
 
 
 @router.get("", response_model=list[ChannelResponse])
 async def get_user_channels(
     type: str = Query(..., pattern="^(liked|blocked)$"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    user_channels = (
-        db.query(UserChannel)
-        .filter(
+    result = await db.execute(
+        select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.status == type,
         )
-        .all()
     )
+    user_channels = result.scalars().all()
 
     channel_ids = [uc.channel_id for uc in user_channels]
-    channels = db.query(Channel).filter(Channel.id.in_(channel_ids)).all()
+    result = await db.execute(select(Channel).where(Channel.id.in_(channel_ids)))
+    channels = result.scalars().all()
 
     channel_dict = {ch.id: ch for ch in channels}
-    result = []
+    result_list = []
     for uc in user_channels:
         ch = channel_dict.get(uc.channel_id)
         if ch:
             response = ChannelResponse.model_validate(ch)
             response.is_liked = uc.status == "liked"
             response.is_blocked = uc.status == "blocked"
-            result.append(response)
+            result_list.append(response)
 
-    return result
+    return result_list
