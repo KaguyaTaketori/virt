@@ -29,17 +29,22 @@ async def get_current_user_info(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前登录用户的信息和权限"""
     resp = UserResponse.model_validate(current_user)
     resp.roles = await get_user_roles(current_user.id, db)
-    result = await db.execute(select(Permission))
-    all_perms = result.scalars().all()
-    user_perms = [
-        p.name
-        for p in all_perms
-        if await has_permission(current_user.id, p.resource, p.action, db)
-    ]
-    resp.permissions = user_perms
+ 
+    if "superadmin" in resp.roles:
+        result = await db.execute(select(Permission.name))
+        resp.permissions = list(result.scalars().all())
+        return resp
+    
+    result = await db.execute(
+        select(Permission.name)
+        .join(RolePermission, Permission.id == RolePermission.permission_id)
+        .join(UserRole, RolePermission.role_id == UserRole.role_id)
+        .where(UserRole.user_id == current_user.id)
+        .distinct()
+    )
+    resp.permissions = list(result.scalars().all())
     return resp
 
 
@@ -166,10 +171,21 @@ async def list_users(
 ):
     result = await db.execute(select(User).offset(skip).limit(limit))
     users = result.scalars().all()
+ 
+    user_ids = [u.id for u in users]
+    roles_result = await db.execute(
+        select(UserRole.user_id, Role.name)
+        .join(Role, UserRole.role_id == Role.id)
+        .where(UserRole.user_id.in_(user_ids))
+    )
+    user_roles_map: dict[int, list[str]] = {}
+    for user_id, role_name in roles_result.all():
+        user_roles_map.setdefault(user_id, []).append(role_name)
+ 
     result_list = []
     for user in users:
         resp = UserResponse.model_validate(user)
-        resp.roles = await get_user_roles(user.id, db)
+        resp.roles = user_roles_map.get(user.id, [])
         result_list.append(resp)
     return result_list
 
@@ -201,23 +217,21 @@ async def update_user_roles(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
-    await db.execute(select(UserRole).where(UserRole.user_id == user_id))
-
+ 
     result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
-    existing_roles = result.scalars().all()
-    for er in existing_roles:
+    for er in result.scalars().all():
         await db.delete(er)
-
+ 
     for role_id in role_update.role_ids:
         result = await db.execute(select(Role).where(Role.id == role_id))
         role = result.scalar_one_or_none()
         if role:
             ur = UserRole(user_id=user_id, role_id=role_id)
             db.add(ur)
-
+ 
     await db.commit()
     return {"message": "Roles updated"}
+ 
 
 
 @router.post("/users/{user_id}/resource-acl")

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 from app.models.models import Platform, StreamStatus
@@ -56,11 +56,20 @@ class TokenData(BaseModel):
 
 
 class OrganizationBase(BaseModel):
-    name: str
-    name_en: Optional[str] = None
-    logo_url: Optional[str] = None
-    website: Optional[str] = None
-    logo_shape: Optional[str] = "circle"  # circle or square
+    name: str = Field(..., min_length=1, max_length=100)
+    name_en: Optional[str] = Field(None, max_length=100)
+    logo_url: Optional[str] = Field(None, max_length=500)
+    website: Optional[str] = Field(None, max_length=200)
+    logo_shape: Optional[str] = Field("circle", pattern="^(circle|square)$")
+ 
+    @field_validator("website", mode="before")
+    @classmethod
+    def validate_website(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Website must start with http:// or https://")
+        return v
 
 
 class OrganizationCreate(OrganizationBase):
@@ -68,11 +77,11 @@ class OrganizationCreate(OrganizationBase):
 
 
 class OrganizationUpdate(BaseModel):
-    name: Optional[str] = None
-    name_en: Optional[str] = None
-    logo_url: Optional[str] = None
-    website: Optional[str] = None
-    logo_shape: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    name_en: Optional[str] = Field(None, max_length=100)
+    logo_url: Optional[str] = Field(None, max_length=500)
+    website: Optional[str] = Field(None, max_length=200)
+    logo_shape: Optional[str] = Field(None, pattern="^(circle|square)$")
 
 
 class OrganizationResponse(OrganizationBase):
@@ -84,34 +93,55 @@ class OrganizationResponse(OrganizationBase):
 
 class ChannelBase(BaseModel):
     platform: Platform
-    channel_id: str
-    name: str
-    avatar_url: Optional[str] = None
+    channel_id: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=100)
+    avatar_url: Optional[str] = Field(None, max_length=500)
     is_active: bool = True
     org_id: Optional[int] = None
-    avatar_shape: Optional[str] = "circle"
-    twitter_url: Optional[str] = None
-    youtube_url: Optional[str] = None
-    twitch_url: Optional[str] = None
-    group: Optional[str] = None
-    status: Optional[str] = "active"
+    avatar_shape: Optional[str] = Field("circle", pattern="^(circle|square)$")
+    twitter_url: Optional[str] = Field(None, max_length=200)
+    youtube_url: Optional[str] = Field(None, max_length=200)
+    twitch_url: Optional[str] = Field(None, max_length=200)
+    group: Optional[str] = Field(None, max_length=50)
+    status: Optional[str] = Field("active", max_length=20)
+ 
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def sanitize_channel_id(cls, v: str) -> str:
+        if not v:
+            raise ValueError("channel_id cannot be empty")
+        v = v.strip()
+        if v.startswith("http://") or v.startswith("https://"):
+            return v
+        if any(c in v for c in ("../", "..\\", "\x00", "\n", "\r")):
+            raise ValueError("channel_id contains invalid characters")
+        return v
+ 
+    @field_validator("twitter_url", "youtube_url", "twitch_url", mode="before")
+    @classmethod
+    def validate_social_urls(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
 
 
 class ChannelUpdate(BaseModel):
     platform: Optional[Platform] = None
-    channel_id: Optional[str] = None
-    name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    channel_id: Optional[str] = Field(None, max_length=100)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    avatar_url: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
     org_id: Optional[int] = None
-    avatar_shape: Optional[str] = None
-    banner_url: Optional[str] = None
-    twitter_url: Optional[str] = None
-    youtube_url: Optional[str] = None
-    twitch_url: Optional[str] = None
-    description: Optional[str] = None
-    group: Optional[str] = None
-    status: Optional[str] = None
+    avatar_shape: Optional[str] = Field(None, pattern="^(circle|square)$")
+    banner_url: Optional[str] = Field(None, max_length=500)
+    twitter_url: Optional[str] = Field(None, max_length=200)
+    youtube_url: Optional[str] = Field(None, max_length=200)
+    twitch_url: Optional[str] = Field(None, max_length=200)
+    description: Optional[str] = Field(None, max_length=5000)
+    group: Optional[str] = Field(None, max_length=50)
+    status: Optional[str] = Field(None, max_length=20)
 
 
 class ChannelCreate(ChannelBase):

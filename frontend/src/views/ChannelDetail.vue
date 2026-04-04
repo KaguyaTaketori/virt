@@ -435,7 +435,7 @@ const message = useMessage()
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
 const bilibiliError = ref<string | null>(null)
-const activeTab = ref('home')
+const activeTab = ref('videos')
 
 const videos = ref<Video[]>([])
 const liveVideos = ref<Video[]>([])
@@ -456,9 +456,9 @@ const isBilibili = computed(() => channel.value?.platform === 'bilibili')
 const tabs = computed(() => {
   if (isBilibili.value) {
     return [
-      { value: 'home', label: '主页' },
+      { value: 'videos', label: '投稿' },
       { value: 'dynamics', label: '动态' },
-      { value: 'videos', label: '投稿' }
+      { value: 'home', label: '主页' }
     ]
   }
   return [
@@ -565,10 +565,13 @@ async function fetchChannel(id: number) {
     liveCurrentPage.value = 1
     
     if (isBilibili.value) {
+      activeTab.value = 'videos'
+      await fetchVideos(id)
       await fetchBilibiliData(id)
     } else {
-      await fetchVideos(id)
+      activeTab.value = 'live'
       await fetchLiveVideos(id)
+      await fetchVideos(id)
       await fetchShortsVideos(id)
     }
   } catch (err: any) {

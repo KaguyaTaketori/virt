@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
     create_access_token,
+    get_current_user,
     get_async_db,
     get_password_hash,
     verify_password,
@@ -18,15 +21,17 @@ from app.auth import (
 from app.config import settings
 from app.models.models import User, UserLoginLog
 from app.schemas.schemas import Token, UserCreate, UserResponse
+from app.services.token_blacklist import token_blacklist
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
 
-_PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
 _DUMMY_HASH = get_password_hash("__dummy_password_for_timing__")
 
-# ── IP 工具 ───────────────────────────────────────────────────────────────────
+_PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
 
+
+# ── IP 工具 ───────────────────────────────────────────────────────────────────
 
 def get_client_ip(request: Request) -> str:
     for header in ("CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"):
@@ -41,7 +46,6 @@ def _is_private_ip(ip: str) -> bool:
 
 
 def _fetch_ip_info_sync(ip: str) -> dict:
-    """纯同步函数，由 asyncio.to_thread 在线程池中执行，不阻塞事件循环"""
     empty = {"country": None, "region": None, "city": None, "isp": None}
     try:
         resp = httpx.get(
@@ -63,7 +67,6 @@ def _fetch_ip_info_sync(ip: str) -> dict:
 
 
 async def get_ip_info(ip: str) -> dict:
-    """异步包装：私有 IP 直接返回，公网 IP 卸载到线程池"""
     if _is_private_ip(ip):
         return {"country": None, "region": None, "city": None, "isp": None}
     return await asyncio.to_thread(_fetch_ip_info_sync, ip)
@@ -90,8 +93,7 @@ async def record_login_log(
     await db.commit()
 
 
-# ── 路由 ──────────────────────────────────────────────────────────────────────
-
+# ── 注册 ──────────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=UserResponse, status_code=201)
 @limiter.limit("5/minute")
@@ -100,19 +102,19 @@ async def register(
     user: UserCreate,
     db: AsyncSession = Depends(get_async_db),
 ):
-    existing_user = await db.get(User, user.username)
-    if existing_user:
+    result = await db.execute(select(User).where(User.username == user.username))
+    if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered",
+            detail="Registration failed. Please try a different username or email.",
         )
 
     if user.email:
-        existing_email = await db.execute(select(User).where(User.email == user.email))
-        if existing_email.scalar_one_or_none():
+        result = await db.execute(select(User).where(User.email == user.email))
+        if result.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered",
+                detail="Registration failed. Please try a different username or email.",
             )
 
     hashed_password = get_password_hash(user.password)
@@ -129,7 +131,9 @@ async def register(
     return db_user
 
 
-@router.post("/login")
+# ── 登录 ──────────────────────────────────────────────────────────────────────
+
+@router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
 async def login(
     request: Request,
@@ -141,7 +145,6 @@ async def login(
 
     password_to_check = user.hashed_password if user else _DUMMY_HASH
     password_valid = verify_password(form_data.password, password_to_check)
-    # ─────────────────────────────────────────────────────────────────────────
 
     if not user or not password_valid:
         if user:
@@ -154,14 +157,28 @@ async def login(
 
     await record_login_log(db, user.id, request, True)
 
-    access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+# ── 注销 ──────────────────────────────────────────────────────────────────────
+
+_bearer_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    request: Request,
+    token: str = Depends(_bearer_scheme),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    if token:
+        await token_blacklist.revoke(token, db, current_user.id)
+
     response.delete_cookie("access_token", path="/")
-    return {"message": "logged out"}
+    return {"message": "Logged out successfully. Token has been revoked."}

@@ -128,6 +128,12 @@ class Channel(Base):
     videos = relationship("Video", back_populates="channel")
     user_channels = relationship("UserChannel", back_populates="channel")
 
+    bilibili_fans = Column(Integer, nullable=True)
+    bilibili_sign = Column(Text, nullable=True)
+    bilibili_archive_count = Column(Integer, nullable=True)
+    bilibili_face = Column(String(500), nullable=True)
+    bilibili_following = Column(Integer, nullable=True)
+
     __table_args__ = (Index("ix_channel_platform_active", "platform", "is_active"),)
 
 

@@ -405,16 +405,19 @@ async def get_channel_bilibili_info(
     if not has_bilibili_perm:
         raise HTTPException(status_code=403, detail="需要B站访问权限")
 
-    uid = channel.channel_id
+    info = {
+        "mid": channel.channel_id,
+        "name": channel.name,
+        "face": channel.bilibili_face,
+        "sign": channel.bilibili_sign,
+        "fans": channel.bilibili_fans,
+        "attention": channel.bilibili_following,
+        "archive_count": channel.bilibili_archive_count,
+    }
 
-    info, dynamics, videos = await asyncio.gather(
-        bilibili_channel_service.get_info(uid),
-        bilibili_channel_service.get_dynamics(uid),
-        bilibili_channel_service.get_videos(uid),
-    )
+    dynamics = await bilibili_channel_service.get_dynamics(channel.channel_id)
 
     return {
         "info": info,
         "dynamics": dynamics or [],
-        "videos": videos or [],
     }

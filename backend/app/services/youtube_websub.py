@@ -17,6 +17,7 @@ from app.database_async import get_async_session, AsyncSessionFactory
 from app.models.models import Channel, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 from app.config import settings
+from app.deps.guards import validate_websub_callback
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
@@ -133,19 +134,22 @@ def _verify_hmac_signature(
     body: bytes, signature_header: Optional[str], secret: str
 ) -> bool:
     if not secret:
-        if settings.env.lower() == "prod":
-            return False
+        if not signature_header:
+            import logging
+            logging.getLogger(__name__).warning(
+                "WebSub received push without HMAC signature. "
+                "Set WEBSUB_SECRET in production to enforce signature validation."
+            )
+            return True
         return True
 
     if not signature_header:
-        logger.warning("期望签名但 Header 缺失，拒绝推送")
         return False
-
+ 
     algo, _, sig_hex = signature_header.partition("=")
     if algo != "sha1":
-        logger.warning("不支持的签名算法: {}", algo)
         return False
-
+ 
     expected = hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
     return hmac.compare_digest(expected, sig_hex)
 
@@ -389,16 +393,21 @@ async def manual_subscribe(
     对数据库中指定 Channel（通过主键 ID）发起 WebSub 订阅请求。
     适合在后台管理面板手动触发或通过定时任务批量续订。
     """
+    allowed_callback = settings.websub_callback_url
+    if not allowed_callback or allowed_callback == "https://your-domain.com/api/websub/youtube":
+        raise HTTPException(status_code=500, detail="WebSub callback URL not configured")
+ 
+    validated_callback = validate_websub_callback(callback_url, allowed_callback)
+ 
     async with AsyncSessionFactory() as session:
         channel = await session.get(Channel, channel_db_id)
         if not channel or channel.platform != "youtube":
             raise HTTPException(status_code=404, detail="频道不存在或不是 YouTube 平台")
-
-        ok = await subscribe_channel(channel.channel_id, callback_url)
+ 
+        ok = await subscribe_channel(channel.channel_id, validated_callback)
         if not ok:
             raise HTTPException(status_code=502, detail="Hub 拒绝了订阅请求")
-
-        # 更新订阅记录
+ 
         sub = await session.scalar(
             select(WebSubSubscription).where(
                 WebSubSubscription.channel_id == channel.id
@@ -415,7 +424,7 @@ async def manual_subscribe(
         sub.subscribed_at = datetime.now(timezone.utc)
         sub.expires_at = datetime.now(timezone.utc) + timedelta(days=_LEASE_DAYS)
         await session.commit()
-
+ 
     return {
         "ok": True,
         "channel": channel.name,
@@ -434,7 +443,10 @@ async def bulk_subscribe(
     批量订阅数据库中所有 is_active=True 的 YouTube 频道。
     适合在应用首次部署时或每日续订定时任务中调用。
     """
-    await subscribe_all_active_channels(callback_url)
+    safe_callback = settings.websub_callback_url
+    if not safe_callback or safe_callback == "https://your-domain.com/api/websub/youtube":
+        raise HTTPException(status_code=500, detail="WebSub callback URL not configured")
+    await subscribe_all_active_channels(safe_callback)
     return {"ok": True, "message": "批量订阅任务已触发，请查看日志了解详情"}
 
 
@@ -451,22 +463,19 @@ async def list_subscriptions() -> list[dict]:
             )
         )
         rows = result.all()
-
-    now = datetime.utcnow()
+ 
+    now = datetime.now(datetime.timezone.utc)
     return [
         {
             "channel_id": sub.channel_id,
             "channel_name": ch.name,
             "youtube_id": ch.channel_id,
             "verified": sub.verified,
-            "subscribed_at": sub.subscribed_at.isoformat()
-            if sub.subscribed_at
-            else None,
+            "subscribed_at": sub.subscribed_at.isoformat() if sub.subscribed_at else None,
             "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
             "is_expired": (sub.expires_at < now) if sub.expires_at else True,
             "last_push_at": sub.last_push_at.isoformat() if sub.last_push_at else None,
             "push_count": sub.push_count,
-            "health": _calc_health(sub),
         }
         for sub, ch in rows
     ]

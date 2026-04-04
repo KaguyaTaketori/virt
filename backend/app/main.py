@@ -8,6 +8,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 
 from app.loguru_config import logger
 from app.config import settings
@@ -31,47 +32,64 @@ def _assert_production_secrets() -> None:
     env = settings.env.lower()
     if env != "prod":
         return
-
+ 
     errors = []
-
+ 
     if not settings.jwt_secret_key or len(settings.jwt_secret_key) < 32:
-        errors.append(
-            "JWT_SECRET_KEY 未设置或长度不足，生产环境必须配置一个至少 32 字符的密钥"
-        )
-
+        errors.append("JWT_SECRET_KEY 未设置或长度不足（生产环境必须 ≥32 字符）")
+ 
     if not settings.websub_secret:
-        errors.append("WEBSUB_SECRET 未设置，生产环境必须配置以防止伪造推送")
-
+        errors.append("WEBSUB_SECRET 未设置（生产环境必须配置）")
+ 
     if not settings.youtube_api_key:
-        logger.warning("YOUTUBE_API_KEY 未设置，YouTube 相关功能将不可用")
-
+        logger.warning("YOUTUBE_API_KEY 未设置，YouTube 功能不可用")
+ 
     if not settings.cors_origins:
-        logger.warning(
-            "CORS_ORIGINS 未设置，默认允许 http://localhost:5173 和 http://localhost:3000 访问"
-        )
-
+        errors.append("CORS_ORIGINS 未设置（生产环境必须显式指定允许的前端域名）")
+ 
     if errors:
         for e in errors:
             logger.critical("启动安全检查失败: {}", e)
         raise RuntimeError(
-            "生产环境安全检查未通过，请修复以下问题后重新启动：\n"
-            + "\n".join(f"  - {e}" for e in errors)
+            "生产环境安全检查未通过：\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── 安全检查（必须在任何业务逻辑之前）──────────────────────────────────
     _assert_production_secrets()
-
+ 
     from app.services.youtube_websub import subscribe_all_active_channels
     from app.database_async import AsyncSessionFactory, create_all_tables
+    from app.database import engine, Base
     from sqlalchemy import select, func
     from app.models.models import WebSubSubscription
-
+ 
     Base.metadata.create_all(bind=engine)
     await create_all_tables()
+ 
+    from app.services.token_blacklist import token_blacklist
+    try:
+        async with AsyncSessionFactory() as session:
 
+            await session.execute(text("""
+                CREATE TABLE IF NOT EXISTS blacklisted_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    jti VARCHAR(64) UNIQUE NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    expired_at DATETIME NOT NULL,
+                    revoked_at DATETIME NOT NULL
+                )
+            """))
+            await session.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti ON blacklisted_tokens (jti)"
+            ))
+            await session.commit()
+            # 预热内存缓存
+            await token_blacklist.warm_up(session)
+    except Exception as e:
+        logger.error("Token blacklist warmup failed: {}", e)
+ 
     callback_url = settings.websub_callback_url
     if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
         logger.info("未配置回调 URL，跳过首次订阅")
@@ -79,47 +97,61 @@ async def lifespan(app: FastAPI):
         async with AsyncSessionFactory() as session:
             result = await session.execute(select(func.count(WebSubSubscription.id)))
             has_subscriptions = result.scalar() > 0
-        if has_subscriptions:
-            logger.info("已有订阅记录，跳过首次订阅")
-        else:
-            logger.info("首次启动，开始自动订阅...")
+        if not has_subscriptions:
             try:
                 await subscribe_all_active_channels(callback_url)
             except Exception as e:
                 logger.error("首次订阅失败: {}", e)
-
+ 
+    from app.scheduler_tasks import start_scheduler, scheduler
     start_scheduler()
+ 
+    async def _cleanup_blacklist():
+        try:
+            async with AsyncSessionFactory() as session:
+                count = await token_blacklist.cleanup_expired(session)
+                if count:
+                    logger.info("Cleaned {} expired blacklist entries", count)
+        except Exception as e:
+            logger.error("Blacklist cleanup error: {}", e)
+ 
+    scheduler.add_job(
+        _cleanup_blacklist,
+        "cron",
+        hour=3,
+        minute=30,
+        id="blacklist_cleanup",
+        replace_existing=True,
+    )
+ 
     yield
 
 
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(
-    title="VTuber Live Aggregator API",
-    description="聚合 YouTube 和 Bilibili 直播流的后端 API",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="VTuber Live Aggregator API",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+ 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=settings.cors_allowed_methods_list,
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+        expose_headers=["X-Total-Count"],
+    )
+ 
+    return app
+
+app = create_app()
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
-
-_cors_origins_raw = settings.cors_origins
-_cors_origins = (
-    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
-    if _cors_origins_raw
-    else ["http://localhost:5173", "http://localhost:3000"]
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

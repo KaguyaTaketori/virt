@@ -23,6 +23,7 @@ from app.services.youtube_channel import get_channel_details
 from app.config import settings
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.youtube_sync import sync_channel_videos
+import asyncio
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -204,6 +205,23 @@ async def sync_bilibili_channels():
                 if info.get("avatar_url") and ch.avatar_url != info["avatar_url"]:
                     ch.avatar_url = info["avatar_url"]
                     changed = True
+
+                if info.get("fans") is not None:
+                    ch.bilibili_fans = info["fans"]
+                    changed = True
+                if info.get("sign"):
+                    ch.bilibili_sign = info["sign"]
+                    changed = True
+                if info.get("archive_count") is not None:
+                    ch.bilibili_archive_count = info["archive_count"]
+                    changed = True
+                if info.get("avatar_url"):
+                    ch.bilibili_face = info["avatar_url"]
+                    changed = True
+                if info.get("attention") is not None:
+                    ch.bilibili_following = info["attention"]
+                    changed = True
+
                 if changed:
                     ch.updated_at = datetime.now(timezone.utc)
 

@@ -8,7 +8,7 @@ from app.services.danmaku_bilibili import get_bilibili_danmaku
 from app.config import settings
 from app.models.models import User
 from app.services.permissions import get_user_roles, has_permission
-from app.auth import get_current_user_optional
+from app.auth import get_current_user, get_current_user_optional
 
 try:
     from app.services.danmaku_youtube import (
@@ -66,23 +66,25 @@ async def get_youtube_danmaku_from_db(
 
 @router.post("/youtube/download/{video_id}")
 async def download_youtube_danmaku(
-    video_id: str, stream_id: int = None, db: AsyncSession = Depends(get_async_db)
+    video_id: str,
+    stream_id: int = None,
+    db: AsyncSession = Depends(get_async_db),
+    _: User = Depends(get_current_user),
 ):
-    """下载YouTube弹幕到文件和数据库"""
     if not settings.enable_danmaku:
         return {"success": False, "enabled": False}
-
+ 
     messages = download_chat(video_id)
     if not messages:
         return {"success": False, "error": "Failed to download chat"}
-
+ 
     result = {"success": True, "message_count": len(messages), "source": "file"}
-
+ 
     if stream_id:
         await save_to_db(db, stream_id, video_id, messages)
         result["source"] = "db"
         result["saved_to_db"] = True
-
+ 
     return result
 
 
@@ -113,23 +115,14 @@ async def get_bilibili_danmaku_endpoint(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取B站直播弹幕 - 需要bilibili.access权限"""
-    if current_user:
-        if await has_permission(current_user.id, "bilibili", "access", db):
-            pass
-        else:
-            roles = await get_user_roles(current_user.id, db)
-            if (
-                "operator" not in roles
-                and "admin" not in roles
-                and "superadmin" not in roles
-            ):
-                raise HTTPException(status_code=403, detail="需要B站访问权限")
-    else:
+    if current_user is None:
         raise HTTPException(status_code=401, detail="请先登录")
-
+ 
+    if not await has_permission(current_user.id, "bilibili", "access", db):
+        raise HTTPException(status_code=403, detail="需要 B 站访问权限")
+ 
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
-
+ 
     messages = await get_bilibili_danmaku(room_id)
     return {"messages": messages, "enabled": True}
