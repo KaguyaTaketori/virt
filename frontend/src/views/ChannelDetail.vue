@@ -206,31 +206,39 @@
           <div v-else class="text-center py-12 text-gray-500">暂无动态</div>
         </div>
 
-        <!-- Bilibili 投稿 Tab -->
+        <!-- Bilibili 投稿 Tab (从数据库读取) -->
         <div v-if="activeTab === 'videos' && isBilibili">
-          <div v-if="bilibiliVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div v-if="videos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <div
-              v-for="v in bilibiliVideos"
-              :key="v.bvid"
+              v-for="video in videos"
+              :key="video.id"
               class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer"
+              @click="addToMultiview(video)"
             >
               <div class="aspect-video relative">
                 <img 
-                  :src="v.pic + '@_webp'" 
+                  :src="video.thumbnail_url + '@_webp'" 
                   class="w-full h-full object-cover"
                   referrerpolicy="no-referrer"
                 />
                 <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
-                  {{ formatDuration(v.duration) }}
+                  {{ video.duration }}
                 </span>
               </div>
               <div class="p-3">
-                <h4 class="text-sm text-white line-clamp-2">{{ v.title }}</h4>
-                <p class="text-xs text-gray-500 mt-1">{{ v.play?.toLocaleString() }}播放</p>
+                <h4 class="text-sm text-white line-clamp-2">{{ video.title }}</h4>
+                <p class="text-xs text-gray-500 mt-1">{{ video.view_count.toLocaleString() }}播放 · {{ video.published_at }}</p>
               </div>
             </div>
           </div>
           <div v-else class="text-center py-12 text-gray-500">暂无投稿</div>
+          <div v-if="totalPages > 1" class="flex justify-center mt-6">
+            <n-pagination
+              v-model:page="currentPage"
+              :page-count="totalPages"
+              @update:page="fetchVideos(Number(route.params.id))"
+            />
+          </div>
         </div>
 
         <!-- YouTube 直播 Tab -->
@@ -644,6 +652,9 @@ watch(activeTab, async (tab) => {
   if (isBilibili.value) {
     if (tab === 'home' && !bilibiliInfo.value) {
       await fetchBilibiliData(channelId)
+    } else if (tab === 'videos') {
+      currentPage.value = 1
+      await fetchVideos(channelId)
     }
   } else {
     if (tab === 'videos') {
