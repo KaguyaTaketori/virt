@@ -20,6 +20,7 @@ from app.schemas.schemas import (
 from app.auth import get_current_user
 from app.services.permissions import get_user_roles, has_permission
 from app.deps.guards import AdminUser, SuperAdminUser
+from app.services.permission_cache import permission_cache
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
 
@@ -31,12 +32,12 @@ async def get_current_user_info(
 ):
     resp = UserResponse.model_validate(current_user)
     resp.roles = await get_user_roles(current_user.id, db)
- 
+
     if "superadmin" in resp.roles:
         result = await db.execute(select(Permission.name))
         resp.permissions = list(result.scalars().all())
         return resp
-    
+
     result = await db.execute(
         select(Permission.name)
         .join(RolePermission, Permission.id == RolePermission.permission_id)
@@ -159,6 +160,7 @@ async def assign_permissions_to_role(
             db.add(rp)
 
     await db.commit()
+    await permission_cache.delete_all()
     return {"message": "Permissions assigned"}
 
 
@@ -171,7 +173,7 @@ async def list_users(
 ):
     result = await db.execute(select(User).offset(skip).limit(limit))
     users = result.scalars().all()
- 
+
     user_ids = [u.id for u in users]
     roles_result = await db.execute(
         select(UserRole.user_id, Role.name)
@@ -181,7 +183,7 @@ async def list_users(
     user_roles_map: dict[int, list[str]] = {}
     for user_id, role_name in roles_result.all():
         user_roles_map.setdefault(user_id, []).append(role_name)
- 
+
     result_list = []
     for user in users:
         resp = UserResponse.model_validate(user)
@@ -217,21 +219,21 @@ async def update_user_roles(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
- 
+
     result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
     for er in result.scalars().all():
         await db.delete(er)
- 
+
     for role_id in role_update.role_ids:
         result = await db.execute(select(Role).where(Role.id == role_id))
         role = result.scalar_one_or_none()
         if role:
             ur = UserRole(user_id=user_id, role_id=role_id)
             db.add(ur)
- 
+
     await db.commit()
+    await permission_cache.delete_all_by_user(user_id)
     return {"message": "Roles updated"}
- 
 
 
 @router.post("/users/{user_id}/resource-acl")

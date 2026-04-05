@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from typing import Optional
 from app.config import settings
 from app.services.youtube_utils import parse_yt_datetime
+from app.services.api_key_manager import get_api_key
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
+
 
 async def get_channel_live_video_ids(
     client: httpx.AsyncClient,
@@ -29,6 +31,7 @@ async def get_channel_upcoming_video_ids(
 async def get_videos_details(
     client: httpx.AsyncClient,
     video_ids: list[str],
+    api_key: Optional[str] = None,
 ) -> list[dict]:
     """
     批量拉视频详情，1 配额可查 50 个。
@@ -37,18 +40,36 @@ async def get_videos_details(
     if not video_ids:
         return []
 
+    if api_key is None:
+        api_key = await get_api_key()
+    if not api_key:
+        from app.loguru_config import logger
+
+        logger.warning("No YouTube API key available")
+        return []
+
+    from app.loguru_config import logger
+
     all_items = []
     for i in range(0, len(video_ids), 50):
         chunk = video_ids[i : i + 50]
         resp = await client.get(
             f"{YOUTUBE_API_BASE}/videos",
             params={
-                "key": settings.youtube_api_key,
+                "key": api_key,
                 "id": ",".join(chunk),
                 "part": "snippet,liveStreamingDetails,statistics",
             },
             timeout=15.0,
         )
+        if resp.status_code == 403:
+            from app.services.api_key_manager import mark_key_failed
+
+            await mark_key_failed(api_key)
+            api_key = await get_api_key()
+            if api_key:
+                continue
+            break
         resp.raise_for_status()
         all_items.extend(resp.json().get("items", []))
 

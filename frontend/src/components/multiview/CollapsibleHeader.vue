@@ -1,18 +1,30 @@
-  <script setup lang="ts">
+<script setup lang="ts">
 import { computed } from 'vue'
 import { 
   Menu, Plus, X, ChevronUp, ChevronDown, 
-  Share2, Captions, Settings, LayoutTemplate, Maximize2 
+  Share2, Captions, Settings, LayoutTemplate, Maximize2,
+  RefreshCw, Star, CirclePlus
 } from 'lucide-vue-next'
-import { NPopover } from 'naive-ui'
-import { Channel } from '@/utils/layoutEngine'
+import { NPopover, NTooltip } from 'naive-ui'
+import type { Channel as StreamChannel, Organization } from '@/api'
 import { type PresetId, PRESET_META as GLOBAL_PRESET_META } from '@/utils/presetLayouts'
 
 interface Props {
   isCollapsed: boolean
   channels: Channel[]
   showDanmaku: boolean
+  selectedGroup: string | null
+  organizationName: string | null
+  groupMembers: StreamChannel[]
+  isRefreshing: boolean
 }
+
+interface Channel {
+  platform: string
+  id: string
+}
+
+export type GroupType = 'favorites' | number
 
 const props = defineProps<Props>()
 
@@ -26,6 +38,10 @@ const emit = defineEmits<{
   (e: 'openSettings'): void
   (e: 'share'): void
   (e: 'update:showDanmaku', val: boolean): void
+  (e: 'selectGroup', group: GroupType): void
+  (e: 'clearGroup'): void
+  (e: 'refresh'): void
+  (e: 'addMember', member: StreamChannel): void
 }>()
 
 const LOCAL_ICONS: Record<PresetId, string> = {
@@ -37,7 +53,6 @@ const LOCAL_ICONS: Record<PresetId, string> = {
   '4-grid': '4g',
   '4-1+3': '4-13'
 }
-
 
 const currentRecommendations = computed(() => {
   const count = props.channels.length
@@ -54,6 +69,38 @@ const currentRecommendations = computed(() => {
     icon: LOCAL_ICONS[id] 
   }))
 })
+
+const groupLabel = computed(() => {
+  if (props.selectedGroup === 'favorites') return '收藏夹'
+  if (typeof props.selectedGroup === 'number') return props.organizationName || `机构 ${props.selectedGroup}`
+  return '请选择分组'
+})
+
+function formatLiveDuration(startedAt: string | null): string {
+  if (!startedAt) return ''
+  const start = new Date(startedAt)
+  const now = new Date()
+  const diffMs = now.getTime() - start.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  
+  if (diffMins < 60) {
+    return `${diffMins}m`
+  }
+  const hours = Math.floor(diffMins / 60)
+  return `${hours}h`
+}
+
+function handleSelectGroup(group: GroupType) {
+  emit('selectGroup', group)
+}
+
+function handleRefresh() {
+  emit('refresh')
+}
+
+function handleAddMember(member: StreamChannel) {
+  emit('addMember', member)
+}
 </script>
 
 <template>
@@ -62,23 +109,100 @@ const currentRecommendations = computed(() => {
     <div class="absolute top-0 left-0 right-0 h-3 z-40 cursor-pointer" @click="emit('toggleCollapse')" />
 
     <Transition name="slide-down">
-      <header v-if="!isCollapsed" class="flex items-center gap-2 px-3 h-12 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 z-30">
+      <header v-if="!isCollapsed" class="flex items-center gap-2 px-3 h-14 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 z-30">
         <button @click="emit('toggleDrawer')" class="icon-btn"><Menu class="w-4 h-4" /></button>
         <div class="w-px h-5 bg-zinc-700 mx-1" />
 
-        <button @click="emit('openAddModal')" class="add-btn">
-          <Plus class="w-3.5 h-3.5" /><span>添加</span>
+        <!-- 分组选择 Popover -->
+        <n-popover trigger="click" placement="bottom-start" :show-arrow="false">
+          <template #trigger>
+            <button class="group-select-btn">
+              <span v-if="selectedGroup">{{ groupLabel }}</span>
+              <span v-else>选择分组</span>
+              <span v-if="selectedGroup" class="text-zinc-500">({{ groupMembers.length }})</span>
+            </button>
+          </template>
+          
+          <div class="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
+            <button
+              @click="handleSelectGroup('favorites')"
+              class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors border-b border-zinc-800"
+            >
+              <Star class="w-4 h-4 text-amber-400" />
+              <span>收藏夹</span>
+            </button>
+            <button
+              @click="emit('openGroupSelector')"
+              class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <div class="w-4 h-4 rounded-full border border-zinc-500" />
+              <span>全部</span>
+            </button>
+          </div>
+        </n-popover>
+
+        <!-- 刷新按钮 -->
+        <button
+          @click="emit('refresh')"
+          class="shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+          :class="{ 'animate-spin': isRefreshing }"
+          :disabled="isRefreshing"
+        >
+          <RefreshCw class="w-4 h-4" />
         </button>
 
-        <!-- 正在播放列表 -->
-        <div class="flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-1 mx-1">
-          <TransitionGroup name="pills">
-            <span v-for="ch in channels" :key="ch.id" class="channel-pill" :class="ch.platform === 'youtube' ? 'yt-pill' : 'bili-pill'">
-              <span class="text-[10px] font-bold">{{ ch.platform === 'youtube' ? 'YT' : 'B' }}</span>
-              <span class="max-w-[60px] truncate text-[11px]">{{ ch.id }}</span>
-              <button @click="emit('removeChannelByPlatformId', ch.platform, ch.id)" class="close-pill-btn"><X class="w-2.5 h-2.5" /></button>
-            </span>
-          </TransitionGroup>
+        <!-- 头像栏 -->
+        <div class="flex items-center gap-2 flex-1 mx-2 min-w-0">
+          <!-- 头像滚动区域 -->
+          <div class="avatar-bar flex-1 min-w-0 flex items-center">
+            <div class="avatar-list flex items-center gap-2">
+              <n-tooltip
+                v-for="member in groupMembers.slice(0, 10)"
+                :key="member.id"
+                placement="bottom"
+                :delay="300"
+              >
+                <template #trigger>
+                  <button
+                    @click="handleAddMember(member)"
+                    class="avatar-wrapper relative shrink-0"
+                  >
+                    <img
+                      v-if="member.channel_avatar"
+                      :src="member.channel_avatar"
+                      class="avatar-img"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div v-else class="avatar-placeholder">
+                      {{ member.channel_name?.charAt(0) || '?' }}
+                    </div>
+                    <span v-if="member.started_at" class="avatar-badge">
+                      {{ formatLiveDuration(member.started_at) }}
+                    </span>
+                  </button>
+                </template>
+                <span class="text-xs">{{ member.channel_name }}</span>
+              </n-tooltip>
+
+              <!-- 添加按钮 (在头像旁边) -->
+              <button @click="emit('openAddModal')" class="add-icon-btn shrink-0 ml-1">
+                <CirclePlus class="w-5 h-5" />
+              </button>
+
+              <div
+                v-if="!selectedGroup"
+                class="text-xs text-zinc-600 italic"
+              >
+                从上方选择分组查看直播成员
+              </div>
+              <div
+                v-else-if="groupMembers.length === 0"
+                class="text-xs text-zinc-600 italic"
+              >
+                该分组暂无直播
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="flex items-center gap-0.5 shrink-0">
@@ -171,9 +295,12 @@ const currentRecommendations = computed(() => {
     </Transition>
   </div>
 </template>
+
 <style scoped>
 .icon-btn { @apply p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors; }
 .add-btn { @apply flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-xs transition-colors shrink-0; }
+.group-select-btn { @apply flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors shrink-0; }
+.add-icon-btn { @apply p-1.5 rounded-md text-rose-400 hover:text-rose-300 hover:bg-zinc-800 transition-colors; }
 .channel-pill { @apply inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md border text-xs font-mono shrink-0; }
 .yt-pill { @apply bg-red-500/20 text-red-400 border-red-500/30; }
 .bili-pill { @apply bg-blue-500/20 text-blue-400 border-blue-500/30; }
@@ -184,4 +311,61 @@ const currentRecommendations = computed(() => {
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .slide-down-enter-active, .slide-down-leave-active { transition: all 0.3s ease; }
 .slide-down-enter-from, .slide-down-leave-to { transform: translateY(-100%); opacity: 0; }
+
+.avatar-bar {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.avatar-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.avatar-wrapper {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.avatar-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.avatar-wrapper:hover .avatar-img {
+  border-color: #f43f5e;
+}
+
+.avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #3f3f46;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a1a1aa;
+  font-weight: 600;
+}
+
+.avatar-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #f43f5e;
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.avatar-list {
+  padding: 2px 0;
+}
 </style>

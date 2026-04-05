@@ -7,6 +7,7 @@ from app.services.youtube_channel import get_youtube_channel_info
 from app.services.youtube_sync import sync_channel_videos
 from app.database_async import AsyncSessionFactory
 from app.loguru_config import logger
+from app.services.api_key_manager import get_api_key, is_api_available
 from .base import VtuberChannel
 from .vspo_wiki import VSPO_ORG_NAME
 from .nijisanji_wiki import NIJISANJI_ORG_NAME
@@ -121,13 +122,15 @@ async def _sync_single_channel(
 
         async with AsyncSessionFactory() as session:
             ch_obj = await session.get(Channel, new_channel.id)
-            if ch_obj and settings.youtube_api_key:
+            if ch_obj and await is_api_available():
                 from app.services.youtube_sync import sync_channel_videos
 
-                await sync_channel_videos(
-                    session, ch_obj, settings.youtube_api_key, full_refresh=True
-                )
-                logger.info(f"Synced videos for channel: {vtuber_ch.name}")
+                api_key = await get_api_key()
+                if api_key:
+                    await sync_channel_videos(
+                        session, ch_obj, api_key, full_refresh=True
+                    )
+                    logger.info(f"Synced videos for channel: {vtuber_ch.name}")
     except Exception as e:
         logger.warning(f"Failed to sync videos for {vtuber_ch.name}: {e}")
 

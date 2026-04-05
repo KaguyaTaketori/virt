@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.models import User
 from app.services.permissions import get_user_roles, has_permission
 from app.auth import get_current_user, get_current_user_optional
+from app.services.api_key_manager import is_api_available
 
 try:
     from app.services.danmaku_youtube import (
@@ -53,7 +54,6 @@ async def get_youtube_danmaku_from_file(
         return {"messages": [], "enabled": False}
     messages = get_chat_from_file(video_id) if get_chat_from_file else []
     return {"messages": messages, "enabled": True, "source": "file"}
- 
 
 
 @router.get("/youtube/db/{stream_id}")
@@ -87,12 +87,11 @@ async def download_youtube_danmaku(
     return result
 
 
-
 @router.get("/youtube/{live_chat_id}")
 async def get_youtube_danmaku(live_chat_id: str, page_token: Optional[str] = None):
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return {"messages": [], "error": "YouTube API key not configured"}
     async with httpx.AsyncClient(timeout=30.0) as client:
         result = await get_live_chat_messages(client, live_chat_id, page_token)
@@ -109,9 +108,8 @@ async def get_bilibili_danmaku_endpoint(
     ctx: PlatformContext = PlatformGuardDep,
 ):
     ctx.assert_bilibili_access()
- 
+
     if not settings.enable_danmaku:
         return {"messages": [], "enabled": False}
     messages = await get_bilibili_danmaku(room_id)
     return {"messages": messages, "enabled": True}
- 

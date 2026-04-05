@@ -17,11 +17,13 @@ from app.auth import (
     get_async_db,
     get_password_hash,
     verify_password,
+    get_token_jti_and_exp,
 )
 from app.config import settings
 from app.models.models import User, UserLoginLog
 from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
+from app.services.permission_cache import permission_cache
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
@@ -32,6 +34,7 @@ _PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
 
 
 # ── IP 工具 ───────────────────────────────────────────────────────────────────
+
 
 def get_client_ip(request: Request) -> str:
     for header in ("CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"):
@@ -95,6 +98,7 @@ async def record_login_log(
 
 # ── 注册 ──────────────────────────────────────────────────────────────────────
 
+
 @router.post("/register", response_model=UserResponse, status_code=201)
 @limiter.limit("5/minute")
 async def register(
@@ -133,6 +137,7 @@ async def register(
 
 # ── 登录 ──────────────────────────────────────────────────────────────────────
 
+
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
 async def login(
@@ -157,10 +162,24 @@ async def login(
 
     await record_login_log(db, user.id, request, True)
 
-    access_token = create_access_token(
+    access_token, jti = create_access_token(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
     )
+
+    from jose import jwt as jose_jwt
+
+    payload = jose_jwt.decode(
+        access_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+    )
+    token_exp = payload.get("exp", 0)
+
+    from app.services.permissions import get_user_roles, get_all_permissions_for_user
+
+    roles = await get_user_roles(user.id, db)
+    permissions = await get_all_permissions_for_user(user.id, db)
+    await permission_cache.set_permissions(jti, roles, permissions, token_exp)
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -179,6 +198,12 @@ async def logout(
 ):
     if token:
         await token_blacklist.revoke(token, db, current_user.id)
+        try:
+            jti, _ = get_token_jti_and_exp(token)
+            if jti:
+                await permission_cache.delete_permissions(jti)
+        except Exception:
+            pass
 
     response.delete_cookie("access_token", path="/")
     return {"message": "Logged out successfully. Token has been revoked."}

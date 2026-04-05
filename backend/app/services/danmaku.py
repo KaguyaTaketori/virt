@@ -1,5 +1,6 @@
 import httpx
 from app.config import settings
+from app.services.api_key_manager import get_api_key, is_api_available
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
@@ -10,11 +11,15 @@ async def get_live_chat_messages(
     page_token: str = None,
 ) -> dict:
     """获取YouTube直播聊天消息"""
-    if not settings.youtube_api_key:
+    if not await is_api_available():
+        return {"messages": [], "next_page_token": None}
+
+    api_key = await get_api_key()
+    if not api_key:
         return {"messages": [], "next_page_token": None}
 
     params = {
-        "key": settings.youtube_api_key,
+        "key": api_key,
         "liveChatId": live_chat_id,
         "part": "snippet,authorDetails",
         "maxResults": 50,

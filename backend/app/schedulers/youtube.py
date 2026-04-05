@@ -7,20 +7,22 @@ import httpx
 from sqlalchemy import select
 
 from app.loguru_config import logger
-from app.config import settings
 from app.database_async import AsyncSessionFactory
 from app.models.models import Channel, Platform, Stream, StreamStatus, Video
 from app.services.youtube_fetcher import get_videos_details, parse_youtube_stream
 from app.services.quota_guard import can_spend, spend, status as quota_status
 from app.services.youtube_sync import sync_channel_videos
+from app.services.api_key_manager import get_api_key, is_api_available
 
 
 async def update_youtube_streams() -> None:
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return
     if not await can_spend("videos.list", 1):
         logger.info("配额耗尽，跳过 update_youtube_streams")
         return
+
+    api_key = await get_api_key()
 
     async with AsyncSessionFactory() as db:
         result = await db.execute(
@@ -42,13 +44,16 @@ async def update_youtube_streams() -> None:
                 chunk = video_ids[i : i + 50]
                 if not await can_spend("videos.list", 1):
                     break
-                items = await get_videos_details(client, chunk)
+                items = await get_videos_details(client, chunk, api_key=api_key)
                 await spend("videos.list", 1)
                 for item in items:
                     parsed = parse_youtube_stream(item)
                     if parsed and parsed["video_id"] in vid_to_ch_id:
                         await _upsert_stream(
-                            db, vid_to_ch_id[parsed["video_id"]], parsed, Platform.YOUTUBE
+                            db,
+                            vid_to_ch_id[parsed["video_id"]],
+                            parsed,
+                            Platform.YOUTUBE,
                         )
 
         await db.commit()
@@ -57,7 +62,10 @@ async def update_youtube_streams() -> None:
 
 
 async def sync_youtube_videos_bulk(limit: int = 50) -> None:
-    api_key = settings.youtube_api_key
+    if not await is_api_available():
+        return
+
+    api_key = await get_api_key()
     if not api_key:
         return
 
@@ -81,7 +89,9 @@ async def sync_youtube_videos_bulk(limit: int = 50) -> None:
     if len(batch) < limit:
         batch += all_channels[: limit - len(batch)]
 
-    logger.info("bulk sync: {} channels (round={}, offset={})", len(batch), round_num, offset)
+    logger.info(
+        "bulk sync: {} channels (round={}, offset={})", len(batch), round_num, offset
+    )
 
     async with AsyncSessionFactory() as session:
         for ch in batch:
@@ -100,7 +110,7 @@ async def sync_youtube_videos_bulk(limit: int = 50) -> None:
 
 
 async def discover_live_streams_from_videos() -> None:
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return
 
     async with AsyncSessionFactory() as db:

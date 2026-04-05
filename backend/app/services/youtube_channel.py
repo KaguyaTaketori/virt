@@ -5,18 +5,20 @@ from typing import Optional
 from app.loguru_config import logger
 from app.config import settings
 from app.services.url_validator import build_safe_youtube_url, validate_youtube_url
+from app.services.api_key_manager import get_api_key, is_api_available
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
- 
+
 _HTTP_CLIENT_KWARGS = {
     "timeout": 10.0,
     "follow_redirects": True,
     "max_redirects": 3,
 }
+
 
 def clean_youtube_url(extracted_url: str) -> str:
     if not extracted_url:
@@ -27,17 +29,17 @@ def clean_youtube_url(extracted_url: str) -> str:
 async def resolve_youtube_channel(input_str: str) -> str | None:
     if not input_str:
         return None
- 
+
     input_str = input_str.strip()
- 
+
     if input_str.startswith("UC") and len(input_str) >= 22:
         return input_str
- 
+
     safe_url = build_safe_youtube_url(input_str)
     if not safe_url:
         logger.warning("Blocked potentially unsafe channel input: %r", input_str[:50])
         return None
- 
+
     try:
         channel_id = await resolve_from_page(safe_url)
         return channel_id
@@ -52,26 +54,26 @@ async def resolve_from_page(url: str) -> str | None:
     except ValueError as e:
         logger.warning("resolve_from_page blocked unsafe URL %r: %s", url[:80], e)
         return None
- 
+
     try:
         async with httpx.AsyncClient(**_HTTP_CLIENT_KWARGS) as client:
             resp = await client.get(url, headers={"User-Agent": DEFAULT_USER_AGENT})
             if resp.status_code != 200:
                 return None
- 
+
             final_url = str(resp.url)
             try:
                 validate_youtube_url(final_url)
             except ValueError:
                 logger.warning("Redirect to unsafe URL blocked: %s", final_url[:80])
                 return None
- 
+
             html_content = resp.text
- 
+
     except Exception as e:
         logger.debug("resolve_from_page error for %s: %s", url[:80], e)
         return None
- 
+
     patterns = [
         r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[0-9a-zA-Z_-]{22})"',
         r'<meta property="og:url" content="https://www\.youtube\.com/channel/(UC[0-9a-zA-Z_-]{22})"',
@@ -83,17 +85,17 @@ async def resolve_from_page(url: str) -> str | None:
         match = re.search(pattern, html_content)
         if match:
             return match.group(1)
- 
+
     return None
- 
 
 
 async def get_youtube_channel_info(input_str: str) -> dict | None:
     channel_id = await resolve_youtube_channel(input_str)
     if not channel_id:
         return None
- 
-    if settings.youtube_api_key:
+
+    if await is_api_available():
+        api_key = await get_api_key()
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
@@ -101,7 +103,7 @@ async def get_youtube_channel_info(input_str: str) -> dict | None:
                     params={
                         "part": "snippet,brandingSettings,contentDetails",
                         "id": channel_id,
-                        "key": settings.youtube_api_key,
+                        "key": api_key,
                     },
                 )
                 if resp.status_code == 200:
@@ -133,7 +135,7 @@ async def get_youtube_channel_info(input_str: str) -> dict | None:
                         }
         except Exception as e:
             logger.warning("YouTube API Error for channel info: %s", e)
- 
+
     return await get_channel_info_from_page(input_str, channel_id)
 
 
@@ -143,7 +145,9 @@ async def get_channel_info_from_page(input_str: str, channel_id: str) -> dict | 
         return None
     try:
         async with httpx.AsyncClient(**_HTTP_CLIENT_KWARGS) as client:
-            resp = await client.get(safe_url, headers={"User-Agent": DEFAULT_USER_AGENT})
+            resp = await client.get(
+                safe_url, headers={"User-Agent": DEFAULT_USER_AGENT}
+            )
             html_text = resp.text
             title_match = re.search(r"<title>([^<]+)</title>", html_text)
             title = None
@@ -158,15 +162,20 @@ async def get_channel_info_from_page(input_str: str, channel_id: str) -> dict | 
                 clean_youtube_url(avatar_match.group(1)) if avatar_match else None
             )
             if title or avatar_url:
-                return {"title": title, "avatar_url": avatar_url, "channel_id": channel_id}
+                return {
+                    "title": title,
+                    "avatar_url": avatar_url,
+                    "channel_id": channel_id,
+                }
     except Exception as e:
         logger.debug("Scraping info error: %s", e)
     return None
 
 
 async def get_channel_details(channel_id: str) -> dict | None:
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return await get_channel_details_from_page(channel_id)
+    api_key = await get_api_key()
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
@@ -174,7 +183,7 @@ async def get_channel_details(channel_id: str) -> dict | None:
                 params={
                     "part": "brandingSettings,snippet",
                     "id": channel_id,
-                    "key": settings.youtube_api_key,
+                    "key": api_key,
                 },
             )
             if resp.status_code == 200:
@@ -185,12 +194,18 @@ async def get_channel_details(channel_id: str) -> dict | None:
                     branding = item.get("brandingSettings", {})
                     channel_branding = branding.get("channel", {})
                     image_branding = branding.get("image", {})
-                    banner_url = image_branding.get("bannerExternalUrl") or image_branding.get("bannerImageUrl")
-                    description = item.get("snippet", {}).get("description") or channel_branding.get("description")
+                    banner_url = image_branding.get(
+                        "bannerExternalUrl"
+                    ) or image_branding.get("bannerImageUrl")
+                    description = item.get("snippet", {}).get(
+                        "description"
+                    ) or channel_branding.get("description")
                     external_links = channel_branding.get("externalLinks", {})
                     twitter_url = None
                     for link in external_links.get("links", []):
-                        if link.get("title", "").lower() == "twitter" or "twitter.com" in link.get("url", ""):
+                        if link.get(
+                            "title", ""
+                        ).lower() == "twitter" or "twitter.com" in link.get("url", ""):
                             twitter_url = link.get("url")
                             break
                     return {
@@ -210,8 +225,12 @@ async def get_channel_details_from_page(channel_id: str) -> dict | None:
         async with httpx.AsyncClient(**_HTTP_CLIENT_KWARGS) as client:
             resp = await client.get(url, headers={"User-Agent": DEFAULT_USER_AGENT})
             html_text = resp.text
-            banner_match = re.search(r'"banner":{"thumbnails":\[{"url":"([^"]+)"', html_text)
-            banner_url = clean_youtube_url(banner_match.group(1)) if banner_match else None
+            banner_match = re.search(
+                r'"banner":{"thumbnails":\[{"url":"([^"]+)"', html_text
+            )
+            banner_url = (
+                clean_youtube_url(banner_match.group(1)) if banner_match else None
+            )
             desc_match = re.search(r'"description":"([^"]+)"', html_text)
             description = None
             if desc_match:
@@ -220,7 +239,9 @@ async def get_channel_details_from_page(channel_id: str) -> dict | None:
                 r"https?://(?:www\.)?(?:twitter|x)\.com/([a-zA-Z0-9_]+)", html_text
             )
             twitter_url = (
-                f"https://twitter.com/{twitter_match.group(1)}" if twitter_match else None
+                f"https://twitter.com/{twitter_match.group(1)}"
+                if twitter_match
+                else None
             )
             return {
                 "banner_url": banner_url,

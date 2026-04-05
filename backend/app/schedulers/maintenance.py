@@ -10,11 +10,12 @@ from app.models.models import Channel, Platform
 from app.services.youtube_channel import get_channel_details
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_all_active_channels
+from app.services.api_key_manager import get_api_key, is_api_available
 
 
 async def refresh_channel_details():
     """每天执行，刷新所有频道的 banner/描述/链接"""
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return
 
     async with AsyncSessionFactory() as db:
@@ -69,13 +70,17 @@ async def refresh_channel_details():
         await db.commit()
         logger.info("完成")
 
+
 async def daily_backfill_sync():
     """
     每日兜底对账：用 PlaylistItems(UUxxx) 增量同步每个频道的最新50条。
     配额消耗极低：每频道约 2 配额，100频道 ≈ 200 配额/天。
     补漏 WebSub 可能遗漏的视频。
     """
-    api_key = settings.youtube_api_key
+    if not await is_api_available():
+        return
+
+    api_key = await get_api_key()
     if not api_key:
         return
 
@@ -94,8 +99,8 @@ async def daily_backfill_sync():
             if ch_obj:
                 await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
 
+
 async def renew_websub():
     """每 8 天续订所有频道的 WebSub 订阅，避免 10 天后过期失效。"""
     callback_url = settings.websub_callback_url
     await subscribe_all_active_channels(callback_url)
-

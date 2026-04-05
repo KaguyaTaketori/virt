@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.auth import get_current_user_optional, get_current_user
+from app.config import settings
+from app.auth import get_current_user
 from app.deps.base import get_async_db
 from app.models.models import User
 from app.services.permissions import get_user_roles, has_permission
+from app.services.permission_cache import permission_cache
 
 
 class _PermissionGuard:
@@ -30,10 +34,12 @@ class _PermissionGuard:
 
     async def __call__(
         self,
+        token: str = Depends(
+            OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+        ),
         db: AsyncSession = Depends(get_async_db),
-        current_user: Optional[User] = Depends(get_current_user_optional),
     ) -> bool | User:
-        if current_user is None:
+        if not token:
             if not self.require and self.allow_anonymous:
                 return False
             raise HTTPException(
@@ -42,7 +48,77 @@ class _PermissionGuard:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        try:
+            from jose import jwt as jose_jwt
+
+            payload = jose_jwt.decode(
+                token,
+                settings.jwt_secret_key,
+                algorithms=[settings.jwt_algorithm],
+            )
+            username: str = payload.get("sub")
+            jti: str = payload.get("jti", "")
+            token_exp: int = payload.get("exp", 0)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        from app.services.token_blacklist import token_blacklist
+
+        if jti and token_blacklist.is_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        result = await db.execute(select(User).where(User.username == username))
+        current_user = result.scalar_one_or_none()
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        cached = await permission_cache.get_permissions(jti)
+        if cached is not None:
+            roles = set(cached.get("roles", []))
+            if "superadmin" in roles:
+                return current_user
+
+            perms = cached.get("permissions", [])
+            granted = any(
+                p.get("resource") == self.resource and p.get("action") == self.action
+                for p in perms
+            )
+            if self.require:
+                if not granted:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Permission required: {self.resource}.{self.action}",
+                    )
+                return current_user
+            return granted
+
         granted = await has_permission(current_user.id, self.resource, self.action, db)
+
+        roles = await get_user_roles(current_user.id, db)
+        from app.services.permissions import get_all_permissions_for_user
+
+        perms = await get_all_permissions_for_user(current_user.id, db)
+        if perms:
+            await permission_cache.set_permissions(jti, roles, perms, token_exp)
 
         if self.require:
             if not granted:
@@ -55,7 +131,6 @@ class _PermissionGuard:
         return granted
 
 
-
 def require_permission(resource: str, action: str) -> _PermissionGuard:
     return _PermissionGuard(resource, action, require=True, allow_anonymous=False)
 
@@ -63,17 +138,79 @@ def require_permission(resource: str, action: str) -> _PermissionGuard:
 def soft_permission(resource: str, action: str) -> _PermissionGuard:
     return _PermissionGuard(resource, action, require=False, allow_anonymous=True)
 
+
 def require_roles(*allowed_roles: str) -> Callable:
     async def _dependency(
+        token: str = Depends(
+            OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+        ),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
     ) -> User:
-        user_roles = await get_user_roles(current_user.id, db)
-        
-        if "superadmin" in user_roles:
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        try:
+            from jose import jwt as jose_jwt
+
+            payload = jose_jwt.decode(
+                token,
+                settings.jwt_secret_key,
+                algorithms=[settings.jwt_algorithm],
+            )
+            username: str = payload.get("sub")
+            jti: str = payload.get("jti", "")
+            token_exp: int = payload.get("exp", 0)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        from app.services.token_blacklist import token_blacklist
+
+        if jti and token_blacklist.is_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        result = await db.execute(select(User).where(User.username == username))
+        current_user = result.scalar_one_or_none()
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        cached = await permission_cache.get_permissions(jti)
+        if cached is not None:
+            roles = set(cached.get("roles", []))
+        else:
+            roles = await get_user_roles(current_user.id, db)
+            from app.services.permissions import get_all_permissions_for_user
+
+            perms = await get_all_permissions_for_user(current_user.id, db)
+            if perms:
+                await permission_cache.set_permissions(jti, roles, perms, token_exp)
+
+        if "superadmin" in roles:
             return current_user
-            
-        if not user_roles.intersection(allowed_roles):
+
+        if not roles.intersection(allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Require one of roles: {', '.join(allowed_roles)}",
@@ -81,6 +218,7 @@ def require_roles(*allowed_roles: str) -> Callable:
         return current_user
 
     return _dependency
+
 
 AdminUser = Depends(require_roles("admin", "superadmin"))
 SuperAdminUser = Depends(require_roles("superadmin"))
@@ -91,6 +229,7 @@ BilibiliRequired = Depends(require_permission("bilibili", "access"))
 BilibiliAccess = Depends(soft_permission("bilibili", "access"))
 WebSubManage = Depends(require_permission("websub", "manage"))
 ChannelManage = Depends(require_permission("channel", "manage"))
+
 
 def validate_websub_callback(callback_url: str, allowed_callback_url: str) -> str:
     try:

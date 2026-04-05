@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { X, LayoutGrid } from 'lucide-vue-next'
 
 // 导入 Store
 import { useMultiviewStore } from '@/stores/multiview'
 import { useThemeStore } from '@/stores/theme'
+import { useOrgStore } from '@/stores/org'
+
+// 导入 API
+import { streamApi, channelApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
 
 // 导入常量与类型
 import { type Channel } from '@/utils/layoutEngine'
@@ -17,12 +21,14 @@ import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
 import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
 import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
 import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
+import GroupSelectorModal from '@/components/multiview/GroupSelectorModal.vue'
 import { DEFAULT_DANMAKU_SETTINGS } from '@/types/danmaku'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
 const store = useMultiviewStore()
+const orgStore = useOrgStore()
 
 // === UI 状态管理 ===
 const isLibraryOpen = ref(false)
@@ -32,6 +38,16 @@ const isAddModalOpen = ref(false)
 const showDanmaku = ref(false)
 const showDanmakuSettings = ref(false)
 const replaceTargetNodeId = ref<string | null>(null)
+
+// === 分组选择状态 ===
+const isGroupSelectorOpen = ref(false)
+const selectedGroup = ref<string | null>(null) // 'favorites' | orgId (number)
+const isRefreshing = ref(false)
+
+// === 数据状态 ===
+const allStreams = ref<Stream[]>([])
+const likedChannels = ref<ApiChannel[]>([])
+const likedOrgIds = ref<number[]>([])
 
 // === 弹幕设置逻辑 (UI 局部状态) ===
 const danmakuSettings = reactive({ ...DEFAULT_DANMAKU_SETTINGS })
@@ -45,6 +61,93 @@ function loadDanmakuSettings() {
 
 function saveDanmakuSettings() {
   localStorage.setItem('danmaku_settings', JSON.stringify(danmakuSettings))
+}
+
+// === 数据获取 ===
+async function fetchData() {
+  try {
+    const [streamsRes, likedRes] = await Promise.all([
+      streamApi.getAllStreams(),
+      userChannelApi.getLiked()
+    ])
+    
+    allStreams.value = streamsRes.data.filter(s => s.status === 'live')
+    likedChannels.value = likedRes.data
+    
+    // 获取已收藏频道的 orgId
+    const likedOrgs = new Set<number>()
+    for (const ch of likedRes.data) {
+      if (ch.org_id) likedOrgs.add(ch.org_id)
+    }
+    likedOrgIds.value = Array.from(likedOrgs)
+  } catch (error) {
+    console.error('Failed to fetch data:', error)
+  }
+}
+
+// === 计算当前分组直播成员 ===
+const groupMembers = computed<Stream[]>(() => {
+  if (!selectedGroup.value) return []
+  
+  let filtered: Stream[]
+  
+  if (selectedGroup.value === 'favorites') {
+    // 收藏夹：用户收藏的频道中正在直播的
+    const likedChannelIds = new Set(likedChannels.value.map(ch => ch.id))
+    filtered = allStreams.value.filter(s => likedChannelIds.has(s.channel_id))
+  } else {
+    // 机构分组
+    const orgId = Number(selectedGroup.value)
+    filtered = allStreams.value.filter(s => s.org_id === orgId)
+  }
+  
+  return filtered.sort((a, b) => {
+    if (!a.started_at) return 1
+    if (!b.started_at) return -1
+    return new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+  })
+})
+
+// === 计算当前机构名称 ===
+const organizationName = computed(() => {
+  if (!selectedGroup.value || selectedGroup.value === 'favorites') return null
+  const orgId = Number(selectedGroup.value)
+  const org = orgStore.organizations.find(o => o.id === orgId)
+  return org?.name || null
+})
+
+// === 分组选择处理 ===
+function handleSelectGroup(group: 'favorites' | number) {
+  selectedGroup.value = group
+}
+
+function handleClearGroup() {
+  selectedGroup.value = null
+}
+
+function handleOpenGroupSelector() {
+  isGroupSelectorOpen.value = true
+}
+
+function handleGroupSelected(orgId: number) {
+  selectedGroup.value = orgId
+  isGroupSelectorOpen.value = false
+}
+
+// === 刷新处理 ===
+async function handleRefresh() {
+  isRefreshing.value = true
+  try {
+    await fetchData()
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+// === 添加成员到网格 ===
+function handleAddMember(member: Stream) {
+  if (!member.video_id) return
+  handleAddChannel({ platform: member.platform, id: member.video_id })
 }
 
 // === 业务逻辑转发至 Store ===
@@ -78,8 +181,14 @@ function handleApplyPreset(id: PresetId) {
 }
 
 // === 生命周期 ===
-onMounted(() => {
+onMounted(async () => {
   loadDanmakuSettings()
+  
+  // 加载机构数据
+  await orgStore.fetchOrganizations()
+  
+  // 加载直播数据
+  await fetchData()
   
   // 1. 优先检查分享参数
   const shareCode = route.query.c as string
@@ -114,6 +223,10 @@ onMounted(() => {
       :is-collapsed="isCollapsed"
       :channels="store.activeChannels"
       :show-danmaku="showDanmaku"
+      :selected-group="selectedGroup"
+      :organization-name="organizationName"
+      :group-members="groupMembers"
+      :is-refreshing="isRefreshing"
       @toggle-drawer="isDrawerOpen = !isDrawerOpen"
       @toggle-collapse="isCollapsed = !isCollapsed"
       @open-add-modal="openAddModal"
@@ -123,6 +236,11 @@ onMounted(() => {
       @share="handleShare"
       @update:show-danmaku="showDanmaku = $event"
       @open-settings="showDanmakuSettings = true"
+      @select-group="handleSelectGroup"
+      @clear-group="handleClearGroup"
+      @open-group-selector="handleOpenGroupSelector"
+      @refresh="handleRefresh"
+      @add-member="handleAddMember"
     />
 
 
@@ -140,6 +258,14 @@ onMounted(() => {
 
     <!-- 添加视频模态框 -->
     <AddVideoModal v-model="isAddModalOpen" @add="handleAddChannel" />
+
+    <!-- 分组选择器模态框 -->
+    <GroupSelectorModal
+      v-model="isGroupSelectorOpen"
+      :organizations="orgStore.organizations"
+      :liked-org-ids="likedOrgIds"
+      @select="handleGroupSelected"
+    />
 
     <Teleport to="body">
       <Transition name="fade">

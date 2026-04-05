@@ -16,13 +16,13 @@ from app.models.models import Channel, User, WebSubSubscription
 from app.services.youtube_sync import fetch_and_upsert_single_video
 from app.config import settings
 from app.deps.guards import AdminUser, validate_websub_callback
+from app.services.api_key_manager import get_api_key, is_api_available
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _HUB_URL = "https://pubsubhubbub.appspot.com/"
 _TOPIC_BASE = "https://www.youtube.com/xml/feeds/videos.xml?channel_id="
 _LEASE_DAYS = 9
 
-_YT_API_KEY: str = settings.youtube_api_key
 _WEBSUB_SECRET: str = settings.websub_secret
 
 # Atom Feed 命名空间
@@ -135,19 +135,20 @@ def _verify_hmac_signature(
         if signature_header:
             logger.warning(
                 "收到签名头但 WEBSUB_SECRET 未配置，建议在生产环境设置 secret。"
-                " signature={}", signature_header[:20]
+                " signature={}",
+                signature_header[:20],
             )
         return True
- 
+
     if not signature_header:
         logger.warning("HMAC secret 已配置但请求缺少 X-Hub-Signature 头，拒绝")
         return False
- 
+
     algo, _, sig_hex = signature_header.partition("=")
     if algo != "sha1":
         logger.warning("不支持的签名算法: {}", algo)
         return False
- 
+
     expected = hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
     result = hmac.compare_digest(expected, sig_hex)
     if not result:
@@ -221,8 +222,13 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
       2. 调用 fetch_and_upsert_single_video 拉取详情并入库
       3. 更新 WebSubSubscription 的推送统计
     """
-    if not _YT_API_KEY:
+    if not await is_api_available():
         logger.warning("YOUTUBE_API_KEY 未配置，无法处理 video_id={}", video_id)
+        return
+
+    api_key = await get_api_key()
+    if not api_key:
+        logger.warning("No available API key for video_id={}", video_id)
         return
 
     async with AsyncSessionFactory() as session:
@@ -240,7 +246,7 @@ async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
         # 拉取并 Upsert 视频详情
         try:
             video = await fetch_and_upsert_single_video(
-                session, channel, video_id, _YT_API_KEY
+                session, channel, video_id, api_key
             )
             if video:
                 logger.info(
@@ -291,8 +297,12 @@ async def websub_verify(
         raise HTTPException(status_code=404, detail="不认识的 hub.topic")
 
     yt_channel_id = hub_topic.removeprefix(_TOPIC_BASE)
-    logger.info("验证通过 | mode={} | channel={} | lease={}s",
-                hub_mode, yt_channel_id, hub_lease_seconds)
+    logger.info(
+        "验证通过 | mode={} | channel={} | lease={}s",
+        hub_mode,
+        yt_channel_id,
+        hub_lease_seconds,
+    )
 
     if hub_mode == "subscribe":
         async with AsyncSessionFactory() as session:
@@ -389,27 +399,32 @@ async def manual_subscribe(
         ...,
         description="本服务的公网回调 URL，如 https://example.com/api/websub/youtube",
     ),
-    _: User = AdminUser, 
+    _: User = AdminUser,
 ) -> dict:
     """
     对数据库中指定 Channel（通过主键 ID）发起 WebSub 订阅请求。
     适合在后台管理面板手动触发或通过定时任务批量续订。
     """
     allowed_callback = settings.websub_callback_url
-    if not allowed_callback or allowed_callback == "https://your-domain.com/api/websub/youtube":
-        raise HTTPException(status_code=500, detail="WebSub callback URL not configured")
- 
+    if (
+        not allowed_callback
+        or allowed_callback == "https://your-domain.com/api/websub/youtube"
+    ):
+        raise HTTPException(
+            status_code=500, detail="WebSub callback URL not configured"
+        )
+
     validated_callback = validate_websub_callback(callback_url, allowed_callback)
- 
+
     async with AsyncSessionFactory() as session:
         channel = await session.get(Channel, channel_db_id)
         if not channel or channel.platform != "youtube":
             raise HTTPException(status_code=404, detail="频道不存在或不是 YouTube 平台")
- 
+
         ok = await subscribe_channel(channel.channel_id, validated_callback)
         if not ok:
             raise HTTPException(status_code=502, detail="Hub 拒绝了订阅请求")
- 
+
         sub = await session.scalar(
             select(WebSubSubscription).where(
                 WebSubSubscription.channel_id == channel.id
@@ -426,7 +441,7 @@ async def manual_subscribe(
         sub.subscribed_at = datetime.now(timezone.utc)
         sub.expires_at = datetime.now(timezone.utc) + timedelta(days=_LEASE_DAYS)
         await session.commit()
- 
+
     return {
         "ok": True,
         "channel": channel.name,
@@ -447,8 +462,13 @@ async def bulk_subscribe(
     适合在应用首次部署时或每日续订定时任务中调用。
     """
     safe_callback = settings.websub_callback_url
-    if not safe_callback or safe_callback == "https://your-domain.com/api/websub/youtube":
-        raise HTTPException(status_code=500, detail="WebSub callback URL not configured")
+    if (
+        not safe_callback
+        or safe_callback == "https://your-domain.com/api/websub/youtube"
+    ):
+        raise HTTPException(
+            status_code=500, detail="WebSub callback URL not configured"
+        )
     await subscribe_all_active_channels(safe_callback)
     return {"ok": True, "message": "批量订阅任务已触发，请查看日志了解详情"}
 
@@ -457,7 +477,9 @@ async def bulk_subscribe(
     "/youtube/subscriptions",
     summary="查询所有 WebSub 订阅状态",
 )
-async def list_subscriptions(_: User = AdminUser,) -> list[dict]:
+async def list_subscriptions(
+    _: User = AdminUser,
+) -> list[dict]:
     """列出数据库中记录的全部 WebSub 订阅状态，用于运维监控。"""
     async with AsyncSessionFactory() as session:
         result = await session.execute(
@@ -466,7 +488,7 @@ async def list_subscriptions(_: User = AdminUser,) -> list[dict]:
             )
         )
         rows = result.all()
- 
+
     now = datetime.now(timezone.utc)
     return [
         {
@@ -474,7 +496,9 @@ async def list_subscriptions(_: User = AdminUser,) -> list[dict]:
             "channel_name": ch.name,
             "youtube_id": ch.channel_id,
             "verified": sub.verified,
-            "subscribed_at": sub.subscribed_at.isoformat() if sub.subscribed_at else None,
+            "subscribed_at": sub.subscribed_at.isoformat()
+            if sub.subscribed_at
+            else None,
             "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
             "is_expired": (sub.expires_at < now) if sub.expires_at else True,
             "last_push_at": sub.last_push_at.isoformat() if sub.last_push_at else None,

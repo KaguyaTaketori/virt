@@ -11,11 +11,20 @@ from app.database_async import AsyncSessionFactory
 from app.deps import get_async_db
 from app.deps.guards import AdminUser
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import Channel, Danmaku, Platform, Stream, User, UserChannel, Video
+from app.models.models import (
+    Channel,
+    Danmaku,
+    Platform,
+    Stream,
+    User,
+    UserChannel,
+    Video,
+)
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
 from app.services.youtube_channel import get_channel_details, get_youtube_channel_info
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_channel
+from app.services.api_key_manager import get_api_key, is_api_available
 
 router = APIRouter()
 
@@ -120,18 +129,24 @@ async def create_channel(
 
     if db_channel.platform == Platform.YOUTUBE:
         channel_id = db_channel.id
-        api_key = settings.youtube_api_key
+        api_key = await get_api_key()
         callback_url = settings.websub_callback_url
 
         async def _bg_sync():
             async with AsyncSessionFactory() as session:
                 ch = await session.get(Channel, channel_id)
-                if not ch:
+                if not ch or not api_key:
                     return
                 await sync_channel_videos(session, ch, api_key, full_refresh=True)
-                if callback_url and callback_url != "https://your-domain.com/api/websub/youtube":
-                    await subscribe_channel(ch.channel_id, callback_url,
-                                            secret=settings.websub_secret or None)
+                if (
+                    callback_url
+                    and callback_url != "https://your-domain.com/api/websub/youtube"
+                ):
+                    await subscribe_channel(
+                        ch.channel_id,
+                        callback_url,
+                        secret=settings.websub_secret or None,
+                    )
 
         background_tasks.add_task(_bg_sync)
 
@@ -171,7 +186,9 @@ async def delete_channel(
 
     result = await db.execute(select(Stream).where(Stream.channel_id == channel_id))
     for stream in result.scalars().all():
-        dm_result = await db.execute(select(Danmaku).where(Danmaku.stream_id == stream.id))
+        dm_result = await db.execute(
+            select(Danmaku).where(Danmaku.stream_id == stream.id)
+        )
         for dm in dm_result.scalars().all():
             await db.delete(dm)
         await db.delete(stream)

@@ -5,13 +5,11 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings
 
-_DEV_FALLBACK_JWT_SECRET = (
-    "dev-only-secret-do-not-use-in-production-vtuber-live-2024"
-)
+_DEV_FALLBACK_JWT_SECRET = "dev-only-secret-do-not-use-in-production-vtuber-live-2024"
 
 
 class Settings(BaseSettings):
-    youtube_api_key: str = ""
+    youtube_api_keys: str = ""
     bilibili_sessdata: str = ""
     db_url: str = "sqlite:///./streams.db"
     enable_danmaku: bool = False
@@ -35,6 +33,8 @@ class Settings(BaseSettings):
     env: str = "DEV"
     base_log_dir: str = "logs"
 
+    redis_url: str = "redis://localhost:6379/0"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     def __init__(self, **data):
         super().__init__(**data)
         self._resolve_jwt_secret()
+
+    @property
+    def youtube_api_key(self) -> str:
+        keys = self.youtube_api_keys_list
+        return keys[0] if keys else ""
+
+    @property
+    def youtube_api_keys_list(self) -> list[str]:
+        if not self.youtube_api_keys:
+            return []
+        return [k.strip() for k in self.youtube_api_keys.split(",") if k.strip()]
 
     def _resolve_jwt_secret(self) -> None:
         if self.jwt_secret_key:
@@ -63,7 +74,9 @@ class Settings(BaseSettings):
 
     @property
     def cors_allowed_methods_list(self) -> list[str]:
-        return [m.strip().upper() for m in self.cors_allowed_methods.split(",") if m.strip()]
+        return [
+            m.strip().upper() for m in self.cors_allowed_methods.split(",") if m.strip()
+        ]
 
 
 settings = Settings()

@@ -8,6 +8,7 @@ from app.database_async import AsyncSessionFactory
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
 from app.models.models import Video, Channel
 from app.services.youtube_sync import sync_channel_videos
+from app.services.api_key_manager import get_api_key, is_api_available
 
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 CACHE_DURATION_MINUTES = 30
@@ -98,15 +99,16 @@ async def _refresh_channel_videos(channel: Channel, full_refresh: bool = False) 
     full_refresh=False → 增量（拉最新 50 条，≈2 配额）
     full_refresh=True  → 全量历史（首次入库时调用）
     """
-    if not settings.youtube_api_key:
+    if not await is_api_available():
         return
+    api_key = await get_api_key()
     async with AsyncSessionFactory() as session:
         ch_obj = await session.get(Channel, channel.id)
         if ch_obj:
             await sync_channel_videos(
                 session,
                 ch_obj,
-                settings.youtube_api_key,
+                api_key,
                 full_refresh=full_refresh,
             )
 
