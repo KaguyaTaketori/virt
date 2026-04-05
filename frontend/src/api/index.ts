@@ -153,7 +153,7 @@ export const streamApi = {
 
 export const channelApi = {
   getAll:    (params?: Record<string, unknown>) =>
-    api.get<Channel[]>('/api/channels', { params }),
+    api.get<Channel[]>('/api/channels/', { params }),
 
   get:       (id: number) =>
     api.get<Channel>(`/api/channels/${id}`),
@@ -168,7 +168,7 @@ export const channelApi = {
     }),
 
   create:    (data: Partial<Channel>) =>
-    api.post<Channel>('/api/channels', data),
+    api.post<Channel>('/api/channels/', data),
 
   update:    (id: number, data: Partial<Channel>) =>
     api.put<Channel>(`/api/channels/${id}`, data),
