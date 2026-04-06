@@ -1,9 +1,3 @@
-/**
- * frontend/src/composables/useChannelVideos.ts
- *
- * 问题 11 修复：ChannelDetail.vue 中 fetchVideos / fetchLiveVideos / fetchShortsVideos
- * 三个函数结构完全一致，仅 status 参数和目标 ref 不同，提取为统一 composable。
- */
 import { ref, type Ref } from 'vue'
 import { channelApi } from '@/api'
 
@@ -34,29 +28,7 @@ interface FetchConfig {
   mergeSort?: (a: Video, b: Video) => number
 }
 
-/**
- * 统一的频道视频拉取 composable。
- *
- * 使用示例：
- *
- *   // 普通视频（上传）
- *   const uploadVideos = useChannelVideos({ status: 'upload' })
- *   await uploadVideos.fetch(channelId)
- *
- *   // 直播 + 预约合并，预约优先
- *   const liveVideos = useChannelVideos({
- *     status: ['live', 'upcoming'],
- *     pageSize: 48,
- *     mergeSort: (a, b) => {
- *       if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
- *       if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
- *       return 0
- *     }
- *   })
- *
- *   // Shorts
- *   const shortsVideos = useChannelVideos({ status: 'short', pageSize: 48 })
- */
+
 export function useChannelVideos(config: FetchConfig): VideoFetchState {
   const videos = ref<Video[]>([])
   const page = ref(1)

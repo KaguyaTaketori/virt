@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional, Set
+from collections import deque
+from typing import Dict, List, Optional, Set
 
 from app.loguru_config import logger
 from app.services.connection_manager import manager
@@ -14,6 +15,21 @@ except ImportError:
     YouTubeChatDownloader = None
 
 _MAX_SEEN_IDS = 10_000
+
+seen_ids_queue: deque[str] = deque()
+seen_ids_set: set[str] = set()
+
+def add_seen(mid: str) -> bool:
+    if mid in seen_ids_set:
+        return False
+    
+    seen_ids_set.add(mid)
+    seen_ids_queue.append(mid)
+    
+    if len(seen_ids_queue) > _MAX_SEEN_IDS:
+        oldest = seen_ids_queue.popleft()
+        seen_ids_set.discard(oldest)
+    return True
 
 
 class DanmakuPoller:
@@ -115,7 +131,6 @@ class DanmakuPoller:
         version: str,
         continuation: str,
         is_live: bool,
-        seen_ids: Set[str],
     ) -> Optional[str]:
         try:
             chat_data = await asyncio.to_thread(
@@ -132,18 +147,11 @@ class DanmakuPoller:
             logger.error("fetch error for {}: {}", video_id, e)
             return continuation
 
-        if len(seen_ids) > _MAX_SEEN_IDS:
-            logger.debug(
-                "seen_ids for {} exceeded {}, resetting to prevent memory leak",
-                video_id, _MAX_SEEN_IDS,
-            )
-            seen_ids.clear()
-
-        new_msgs = [
-            m for m in messages
-            if (mid := m.get("message_id", "")) and mid not in seen_ids
-        ]
-        seen_ids.update(m.get("message_id", "") for m in new_msgs)
+        new_msgs: List[dict] = []
+        for m in messages:
+            mid = m.get("message_id", "")
+            if mid and add_seen(mid):
+                new_msgs.append(m)
 
         if len(new_msgs) > 50:
             new_msgs = new_msgs[-50:]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_async_db
@@ -46,22 +46,27 @@ async def _get_bilibili_videos(
     page_size: int,
     status: Optional[str],
 ) -> PaginatedVideosResponse:
-    count_result = await db.execute(
-        select(Video).where(Video.channel_id == channel.id)
-    )
-    if not count_result.scalars().all():
+    exists_query = select(Video.id).where(Video.channel_id == channel.id).limit(1)
+    exists_result = await db.execute(exists_query)
+    
+    if exists_result.first() is None:
         await sync_bilibili_channel_videos(db, channel.id, channel.channel_id)
 
-    query = select(Video).where(Video.channel_id == channel.id)
+    base_query = select(Video).where(Video.channel_id == channel.id)
     if status:
-        query = query.where(Video.status == status)
+        base_query = base_query.where(Video.status == status)
 
-    total_result = await db.execute(query)
-    total = len(total_result.scalars().all())
-    total_pages = (total + page_size - 1) // page_size if total else 0
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+    
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 0
 
-    query = query.order_by(Video.published_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
+    paged_query = (
+        base_query.order_by(Video.published_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(paged_query)
     videos = result.scalars().all()
 
     return PaginatedVideosResponse(

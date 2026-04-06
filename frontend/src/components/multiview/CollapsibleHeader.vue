@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { 
-  Menu, Plus, X, ChevronUp, ChevronDown, 
+  Menu, ChevronUp, ChevronDown, 
   Share2, Captions, Settings, LayoutTemplate, Maximize2,
   RefreshCw, Star, CirclePlus
 } from 'lucide-vue-next'
 import { NPopover, NTooltip } from 'naive-ui'
-import type { Channel as StreamChannel, Organization } from '@/api'
+import type { Channel as StreamChannel } from '@/api'
 import { type PresetId, PRESET_META as GLOBAL_PRESET_META } from '@/utils/presetLayouts'
 
 interface Props {
@@ -168,20 +168,20 @@ function handleAddMember(member: StreamChannel) {
                     class="avatar-wrapper relative shrink-0"
                   >
                     <img
-                      v-if="member.channel_avatar"
-                      :src="member.channel_avatar"
+                      v-if="member.avatar_url"
+                      :src="member.avatar_url"
                       class="avatar-img"
                       referrerpolicy="no-referrer"
                     />
                     <div v-else class="avatar-placeholder">
-                      {{ member.channel_name?.charAt(0) || '?' }}
+                      {{ member.name?.charAt(0) || '?' }}
                     </div>
                     <span v-if="member.started_at" class="avatar-badge">
                       {{ formatLiveDuration(member.started_at) }}
                     </span>
                   </button>
                 </template>
-                <span class="text-xs">{{ member.channel_name }}</span>
+                <span class="text-xs">{{ member.name }}</span>
               </n-tooltip>
 
               <!-- 添加按钮 (在头像旁边) -->

@@ -40,10 +40,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router' 
 import { bilibiliApi, type QrCodeResponse, type QrCodeStatusResponse } from '@/api/bilibili'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 const loading = ref(false)
 const error = ref('')

@@ -254,48 +254,38 @@ async def sync_channel_videos(
 
     total_processed = 0
     page_token: Optional[str] = None
+    
+    playlist_id = _uc_to_uu(channel.channel_id)
 
     async with httpx.AsyncClient() as client:
-        playlist_id = _uc_to_uu(channel.channel_id)
-        is_fallback_needed = False
-
-        if not playlist_id:
-            playlist_id = await _get_real_uploads_playlist_id(
-                client, api_key, channel.channel_id
-            )
-        else:
-            video_ids, next_token, status = await _fetch_playlist_page(
-                client, api_key, playlist_id
-            )
-            if status != 200:
-                logger.warning(
-                    "默认 UU 方案无效 (Status: {})，尝试使用 API 后备方案...", status
-                )
-                is_fallback_needed = True
-            else:
-                pass
-
-        if is_fallback_needed:
-            playlist_id = await _get_real_uploads_playlist_id(
-                client, api_key, channel.channel_id
-            )
-            if not playlist_id:
-                logger.error(
-                    "所有方案均无法获取 channel_id={} 的播放列表，同步取消",
-                    channel.channel_id,
-                )
-                return 0
-            video_ids, next_token, status = await _fetch_playlist_page(
-                client, api_key, playlist_id
-            )
-
         while True:
+            video_ids, next_token, status = await _fetch_playlist_page(
+                client, api_key, playlist_id, page_token
+            )
+
+            if status != 200 and page_token is None:
+                logger.warning(
+                    "播放列表 ID {} 验证失败(status={})，尝试获取真实 uploads ID...", 
+                    playlist_id, status
+                )
+                playlist_id = await _get_real_uploads_playlist_id(
+                    client, api_key, channel.channel_id
+                )
+                
+                if not playlist_id:
+                    logger.error("无法获取频道 {} 的任何有效播放列表，同步终止", channel.channel_id)
+                    break
+                
+                video_ids, next_token, status = await _fetch_playlist_page(
+                    client, api_key, playlist_id, page_token
+                )
+
             if not video_ids:
                 break
 
             for i in range(0, len(video_ids), _BATCH_SIZE):
-                batch = video_ids[i : i + _BATCH_SIZE]
-                items = await _fetch_video_details_batch(client, api_key, batch)
+                batch_ids = video_ids[i : i + _BATCH_SIZE]
+                items = await _fetch_video_details_batch(client, api_key, batch_ids)
 
                 for item in items:
                     video_data = parse_video_item(channel.id, channel.platform, item)
@@ -306,23 +296,23 @@ async def sync_channel_videos(
                         video_data=video_data,
                     )
                     total_processed += 1
+                
                 await session.flush()
 
             if not full_refresh or not next_token:
                 break
-
+            
             page_token = next_token
-            video_ids, next_token, status = await _fetch_playlist_page(
-                client, api_key, playlist_id, page_token
-            )
 
     channel.videos_last_fetched = datetime.now(timezone.utc)
     await session.commit()
 
     logger.info(
-        "Channel {!r} 同步完成 | processed={}",
+        "频道 {!r} 同步任务完成 | 平台: {} | 新增/更新视频数: {} | 模式: {}",
         channel.name,
+        channel.platform,
         total_processed,
+        "全量" if full_refresh else "仅增量(第一页)",
     )
     return total_processed
 

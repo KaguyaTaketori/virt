@@ -3,11 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.permissions import has_permission
+from app.services.bilibili_user import bilibili_user_service
 from app.services.bilibili_auth import bilibili_auth_service
 from app.models.models import User
 from app.auth import get_current_user_optional
 from app.deps.base import get_async_db
-from app.services.permissions import has_permission
+from app.loguru_config import logger
+
 
 router = APIRouter(prefix="/api/bilibili/auth", tags=["bilibili"])
 
@@ -50,8 +53,6 @@ async def check_qrcode_status(
     """
     检查二维码登录状态，登录成功后自动保存凭证到用户账户
     """
-    from app.services.bilibili_user import bilibili_user_service
-
     result = await bilibili_auth_service.check_status(session_id)
 
     if result.get("status") == "confirmed":
@@ -69,4 +70,3 @@ async def check_qrcode_status(
     return result
 
 
-from app.loguru_config import logger

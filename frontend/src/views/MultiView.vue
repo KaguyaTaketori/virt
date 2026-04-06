@@ -3,19 +3,15 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { X, LayoutGrid } from 'lucide-vue-next'
 
-// 导入 Store
 import { useMultiviewStore } from '@/stores/multiview'
 import { useThemeStore } from '@/stores/theme'
 import { useOrgStore } from '@/stores/org'
 
-// 导入 API
-import { streamApi, channelApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
+import { streamApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
 
-// 导入常量与类型
 import { type Channel } from '@/utils/layoutEngine'
 import { PRESET_GROUPS, PRESET_META, type PresetId } from '@/utils/presetLayouts'
 
-// 导入组件
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
 import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
 import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
@@ -92,11 +88,9 @@ const groupMembers = computed<Stream[]>(() => {
   let filtered: Stream[]
   
   if (selectedGroup.value === 'favorites') {
-    // 收藏夹：用户收藏的频道中正在直播的
     const likedChannelIds = new Set(likedChannels.value.map(ch => ch.id))
     filtered = allStreams.value.filter(s => likedChannelIds.has(s.channel_id))
   } else {
-    // 机构分组
     const orgId = Number(selectedGroup.value)
     filtered = allStreams.value.filter(s => s.org_id === orgId)
   }
@@ -108,7 +102,6 @@ const groupMembers = computed<Stream[]>(() => {
   })
 })
 
-// === 计算当前机构名称 ===
 const organizationName = computed(() => {
   if (!selectedGroup.value || selectedGroup.value === 'favorites') return null
   const orgId = Number(selectedGroup.value)
@@ -116,7 +109,6 @@ const organizationName = computed(() => {
   return org?.name || null
 })
 
-// === 分组选择处理 ===
 function handleSelectGroup(group: 'favorites' | number) {
   selectedGroup.value = group
 }
