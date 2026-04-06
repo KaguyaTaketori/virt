@@ -25,6 +25,11 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    bilibili_sessdata = Column(String(500), nullable=True)
+    bilibili_bili_jct = Column(String(100), nullable=True)
+    bilibili_buvid3 = Column(String(100), nullable=True)
+    bilibili_dedeuserid = Column(String(100), nullable=True)
+
     channels = relationship("UserChannel", back_populates="user")
     user_roles = relationship("UserRole", back_populates="user")
     login_logs = relationship("UserLoginLog", back_populates="user")

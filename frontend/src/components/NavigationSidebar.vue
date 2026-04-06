@@ -13,6 +13,7 @@ import {
   SlidersHorizontal, ChevronDown, ChevronUp,
 } from 'lucide-vue-next'
 import AdminSubMenu from '@/components/AdminSubMenu.vue'
+import { useAuthStore } from '@/stores/auth'
 
 interface Props {
   isCollapsed: boolean
@@ -22,6 +23,7 @@ const props = defineProps<Props>()
 const route = useRoute()
 const router = useRouter()
 const showAdminMenu = ref(false)
+const authStore = useAuthStore()
 
 const navItems = [
   { label: '主页',     icon: Home,      to: '/' },
@@ -31,7 +33,6 @@ const navItems = [
   { label: '多窗播放', icon: LayoutGrid, to: '/multiview' },
   { label: 'Musicdex', icon: Music,      to: '/musicdex' },
   { label: '帮助',     icon: HelpCircle, to: '/help' },
-  { label: '设置',     icon: Settings,   to: '/settings' },
 ]
 
 function isActive(to: string) {
@@ -103,8 +104,17 @@ const labelClass = computed(() =>
 
     </div>
 
-    <!-- 底部偏好设置按钮 -->
-    <div class="shrink-0 border-t border-zinc-800 py-3 px-2">
+    <!-- 底部设置按钮 -->
+    <div class="shrink-0 border-t border-zinc-800 py-3 px-2 space-y-0.5">
+      <button
+        v-if="authStore.canAccessBilibili"
+        @click="router.push('/settings')"
+        class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
+               text-zinc-500 hover:text-white hover:bg-zinc-800/60 transition-colors text-sm group relative"
+      >
+        <Settings style="width:1.125rem;height:1.125rem" class="shrink-0" />
+        <span class="font-medium leading-none transition-all duration-300" :class="labelClass">设置</span>
+      </button>
       <button
         class="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5
                text-zinc-500 hover:text-white hover:bg-zinc-800/60 transition-colors text-sm group relative"

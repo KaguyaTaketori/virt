@@ -20,7 +20,7 @@ from app.auth import (
     get_token_jti_and_exp,
 )
 from app.config import settings
-from app.models.models import User, UserLoginLog
+from app.models.models import User, UserLoginLog, UserRole, Role
 from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
 from app.services.permission_cache import permission_cache
@@ -130,6 +130,12 @@ async def register(
     db.add(db_user)
     await db.commit()
     await db.refresh(db_user)
+
+    result = await db.execute(select(Role).where(Role.name == "user"))
+    user_role = result.scalar_one_or_none()
+    if user_role:
+        db.add(UserRole(user_id=db_user.id, role_id=user_role.id))
+        await db.commit()
 
     await record_login_log(db, db_user.id, request, True)
     return db_user

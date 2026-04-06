@@ -82,6 +82,19 @@
             <span>{{ channel.is_blocked ? '已屏蔽' : '屏蔽' }}</span>
           </n-button>
 
+          <n-button
+            v-if="channel.platform === 'bilibili'"
+            tag="a"
+            :href="'https://space.bilibili.com/' + channel.channel_id"
+            target="_blank"
+            class="flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            <span>B站</span>
+          </n-button>
+
           <a
             v-if="channel.youtube_url"
             :href="channel.youtube_url"
@@ -158,7 +171,7 @@
               >
                 <div class="aspect-video relative">
                   <img 
-                    :src="v.pic + '@_webp'" 
+                    :src="v.pic + '@.webp'" 
                     class="w-full h-full object-cover"
                     referrerpolicy="no-referrer"
                   />
@@ -193,7 +206,7 @@
                 <img 
                   v-for="(img, idx) in d.images.slice(0, 4)" 
                   :key="idx"
-                  :src="img + '@_webp'" 
+                  :src="img + '@.webp'" 
                   class="w-20 h-20 object-cover rounded"
                   referrerpolicy="no-referrer"
                 />
@@ -217,7 +230,7 @@
             >
               <div class="aspect-video relative">
                 <img 
-                  :src="video.thumbnail_url + '@_webp'" 
+                  :src="video.thumbnail_url + '@.webp'" 
                   class="w-full h-full object-cover"
                   referrerpolicy="no-referrer"
                 />

@@ -14,7 +14,7 @@ from app.services.api_key_manager import get_api_key, is_api_available
 
 
 async def refresh_channel_details():
-    """每天执行，刷新所有频道的 banner/描述/链接"""
+    """每天执行，刷新所有活跃（未毕业）频道的 banner/描述/链接"""
     if not await is_api_available():
         return
 
@@ -23,6 +23,7 @@ async def refresh_channel_details():
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active == True,
+                Channel.status != "graduated",
             )
         )
         channels = result.scalars().all()
@@ -73,7 +74,7 @@ async def refresh_channel_details():
 
 async def daily_backfill_sync():
     """
-    每日兜底对账：用 PlaylistItems(UUxxx) 增量同步每个频道的最新50条。
+    每日兜底对账：用 PlaylistItems(UUxxx) 增量同步每个活跃（未毕业）频道的最新50条。
     配额消耗极低：每频道约 2 配额，100频道 ≈ 200 配额/天。
     补漏 WebSub 可能遗漏的视频。
     """
@@ -89,6 +90,7 @@ async def daily_backfill_sync():
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active == True,
+                Channel.status != "graduated",
             )
         )
         channels = result.scalars().all()

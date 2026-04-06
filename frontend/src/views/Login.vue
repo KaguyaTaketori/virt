@@ -10,15 +10,15 @@
       </div>
 
       <n-card>
-        <n-form ref="formRef" :model="form" :rules="rules">
+        <n-form ref="formRef" :model="form" :rules="rules" @submit.prevent="isRegister ? handleRegister() : handleLogin()">
           <n-form-item path="username" label="用户名">
-            <n-input v-model:value="form.username" placeholder="用户名" />
+            <n-input v-model:value="form.username" placeholder="用户名" @keydown.enter="handleLogin" />
           </n-form-item>
           <n-form-item path="password" label="密码">
-            <n-input v-model:value="form.password" type="password" placeholder="密码" show-password-on="click" />
+            <n-input v-model:value="form.password" type="password" placeholder="密码" show-password-on="click" @keydown.enter="handleLogin" />
           </n-form-item>
           <n-form-item v-if="isRegister" path="email" label="邮箱">
-            <n-input v-model:value="form.email" placeholder="邮箱（可选）" />
+            <n-input v-model:value="form.email" placeholder="邮箱（可选）" @keydown.enter="handleRegister" />
           </n-form-item>
         </n-form>
 

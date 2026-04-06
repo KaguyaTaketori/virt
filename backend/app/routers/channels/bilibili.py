@@ -2,16 +2,20 @@
 backend/app/routers/channels/bilibili.py
 B 站频道详情接口（修复问题 7：补齐视频列表返回）。
 """
+
 from __future__ import annotations
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_async_db
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import Channel, Platform
+from app.models.models import Channel, Platform, User
+from app.auth import get_current_user_optional
 from app.services.bilibili_channel import bilibili_channel_service
+from app.services.bilibili_user import bilibili_user_service
 
 router = APIRouter()
 
@@ -21,6 +25,7 @@ async def get_channel_bilibili_info(
     channel_id: int,
     db: AsyncSession = Depends(get_async_db),
     ctx: PlatformContext = PlatformGuardDep,
+    current_user: User = Depends(get_current_user_optional),
 ):
     """
     返回 B 站频道信息、动态列表、视频列表。
@@ -33,13 +38,21 @@ async def get_channel_bilibili_info(
     if channel.platform != Platform.BILIBILI:
         raise HTTPException(status_code=400, detail="Channel is not a Bilibili channel")
 
-    # 权限检查：未登录或无 bilibili.access 权限时 403
     ctx.assert_bilibili_access()
+
+    # 尝试使用用户凭证
+    if current_user:
+        user_cred = await bilibili_user_service.get_credential(current_user.id, db)
+        if user_cred:
+            bilibili_channel_service.set_user_credential(
+                sessdata=user_cred["sessdata"],
+                bili_jct=user_cred["bili_jct"],
+                buvid3=user_cred["buvid3"],
+                dedeuserid=user_cred.get("dedeuserid"),
+            )
 
     uid = channel.channel_id
 
-    # 并发拉取动态与视频，减少等待时间
-    import asyncio
     dynamics_task = asyncio.create_task(bilibili_channel_service.get_dynamics(uid))
     videos_task = asyncio.create_task(bilibili_channel_service.get_videos(uid))
     dynamics, videos = await asyncio.gather(dynamics_task, videos_task)
@@ -57,5 +70,5 @@ async def get_channel_bilibili_info(
     return {
         "info": info,
         "dynamics": dynamics or [],
-        "videos": videos or [],  # ← 修复：原来此处硬编码返回 []
+        "videos": videos or [],
     }

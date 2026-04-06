@@ -11,10 +11,34 @@ from app.loguru_config import logger
 class BilibiliChannelService:
     def __init__(self, credential: Optional[Credential] = None):
         self._credential = credential
+        self._user_credential: Optional[Credential] = None
+
+    def set_user_credential(
+        self,
+        sessdata: str,
+        bili_jct: str,
+        buvid3: str,
+        dedeuserid: Optional[str] = None,
+    ) -> None:
+        try:
+            self._user_credential = Credential(
+                sessdata=sessdata,
+                bili_jct=bili_jct,
+                buvid3=buvid3,
+                dedeuserid=dedeuserid,
+            )
+            logger.info("User credential set successfully")
+        except Exception as e:
+            logger.warning("Failed to create user credential: {}", e)
+            self._user_credential = None
 
     @property
     def credential(self) -> Optional[Credential]:
-        if not self._credential and settings.bilibili_sessdata:
+        if self._user_credential:
+            return self._user_credential
+        if self._credential:
+            return self._credential
+        if settings.bilibili_sessdata:
             try:
                 self._credential = Credential(sessdata=settings.bilibili_sessdata)
             except Exception as e:
@@ -57,13 +81,13 @@ class BilibiliChannelService:
 
         try:
             u = user.User(uid=int(uid), credential=self.credential)
-            dynamics = await u.get_dynamics(offset=0, size=limit)
+            dynamics = await u.get_dynamics(offset=0)
             result = []
-            for d in dynamics:
+            for d in dynamics.get("cards", []):
                 item = self._parse_dynamic(d)
                 if item:
                     result.append(item)
-            return result
+            return result[:limit]
         except Exception as e:
             logger.error("Failed to get dynamics, uid={}: {}", uid, e)
             return []
@@ -76,8 +100,8 @@ class BilibiliChannelService:
 
             card = json.loads(card_str) if isinstance(card_str, str) else card_str
 
-            dtype = d.get("type", 0)
             desc = d.get("desc", {})
+            dtype = desc.get("type", 0)
 
             item = {
                 "id": desc.get("uid"),
@@ -90,22 +114,26 @@ class BilibiliChannelService:
             }
 
             if dtype == 2:
-                item["content"] = card.get("item", {}).get("content", "")
-                images = card.get("item", {}).get("pictures", [])
-                item["images"] = [img.get("img_src", "") for img in images]
+                item["content"] = (card.get("item") or {}).get("content", "")
+                pictures = (card.get("item") or {}).get("pictures", [])
+                item["images"] = (
+                    [img.get("img_src", "") for img in pictures] if pictures else []
+                )
             elif dtype == 4:
-                item["content"] = card.get("item", {}).get("content", "")
+                item["content"] = (card.get("item") or {}).get("content", "")
             elif dtype == 8:
                 item["content"] = card.get("title", "")
-                item["images"] = [card.get("pic", "")]
+                item["images"] = [card.get("pic", "")] if card.get("pic") else []
             elif dtype == 64:
                 item["content"] = card.get("title", "")
-                item["images"] = [card.get("pic", "")]
+                item["images"] = [card.get("pic", "")] if card.get("pic") else []
             elif dtype == 1:
-                item["content"] = card.get("item", {}).get("content", "")
+                item["content"] = (card.get("item") or {}).get("content", "")
                 if card.get("origin"):
                     origin = json.loads(card["origin"])
-                    item["repost_content"] = origin.get("item", {}).get("content", "")
+                    item["repost_content"] = (origin.get("item") or {}).get(
+                        "content", ""
+                    )
 
             return item
         except Exception as e:
@@ -120,7 +148,12 @@ class BilibiliChannelService:
 
         try:
             u = user.User(uid=int(uid), credential=self.credential)
-            videos = await u.get_videos(pn=page, ps=page_size)
+            videos_data = await u.get_videos(pn=page, ps=page_size)
+            videos = (
+                videos_data.get("list", {}).get("videos", [])
+                if isinstance(videos_data, dict)
+                else []
+            )
             result = []
             for v in videos:
                 result.append(

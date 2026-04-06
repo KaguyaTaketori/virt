@@ -12,11 +12,12 @@ from app.models.models import Channel, Video
 from app.services.youtube_utils import parse_video_item
 
 _YT_API_BASE = "https://www.googleapis.com/youtube/v3"
-_BATCH_SIZE  = 50
+_BATCH_SIZE = 50
 _HTTP_TIMEOUT = 20.0
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _uc_to_uu(channel_id: str) -> Optional[str]:
     if channel_id and channel_id.startswith("UC"):
@@ -52,14 +53,70 @@ async def _get_real_uploads_playlist_id(
             )
             if playlist_id:
                 logger.info(
-                    "通过 API 成功获取真实 uploads playlist: {} (channel: {})", 
-                    playlist_id, channel_id
+                    "通过 API 成功获取真实 uploads playlist: {} (channel: {})",
+                    playlist_id,
+                    channel_id,
                 )
                 return playlist_id
     except Exception as e:
-        logger.error("API 获取频道 uploads playlist 失败 channel_id={}: {}", channel_id, e)
-    
+        logger.error(
+            "API 获取频道 uploads playlist 失败 channel_id={}: {}", channel_id, e
+        )
+
     return None
+
+
+async def get_playlist_total_videos(
+    client: httpx.AsyncClient,
+    api_key: str,
+    playlist_id: str,
+) -> Optional[int]:
+    params = {
+        "key": api_key,
+        "part": "contentDetails",
+        "id": playlist_id,
+    }
+    try:
+        resp = await client.get(
+            f"{_YT_API_BASE}/playlists",
+            params=params,
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("items", [])
+        if items:
+            return items[0].get("contentDetails", {}).get("itemCount", 0)
+    except Exception as e:
+        logger.error("API 获取播放列表视频数失败 playlist_id={}: {}", playlist_id, e)
+    return None
+
+
+async def is_channel_full_sync_completed(
+    session: AsyncSession,
+    channel: Channel,
+    api_key: str,
+) -> bool:
+    async with httpx.AsyncClient() as client:
+        playlist_id = _uc_to_uu(channel.channel_id)
+        if not playlist_id:
+            playlist_id = await _get_real_uploads_playlist_id(
+                client, api_key, channel.channel_id
+            )
+
+        if not playlist_id:
+            return False
+
+        total_videos = await get_playlist_total_videos(client, api_key, playlist_id)
+        if total_videos is None:
+            return False
+
+        result = await session.execute(
+            select(Video).where(Video.channel_id == channel.id)
+        )
+        db_count = len(result.scalars().all())
+
+        return db_count >= total_videos
 
 
 async def _get_table_columns(session: AsyncSession, table_name: str) -> set[str]:
@@ -78,6 +135,7 @@ async def _load_existing_video_id_set(
 
 
 # ── Upsert ────────────────────────────────────────────────────────────────────
+
 
 async def _upsert_video(
     session: AsyncSession,
@@ -114,6 +172,7 @@ async def _upsert_video(
 
 # ── YouTube API 调用 ──────────────────────────────────────────────────────────
 
+
 async def _fetch_playlist_page(
     client: httpx.AsyncClient,
     api_key: str,
@@ -124,8 +183,8 @@ async def _fetch_playlist_page(
     返回: (video_ids, next_page_token, status_code)
     """
     params: dict = {
-        "key":        api_key,
-        "part":       "snippet",
+        "key": api_key,
+        "part": "snippet",
         "playlistId": playlist_id,
         "maxResults": _BATCH_SIZE,
     }
@@ -140,12 +199,13 @@ async def _fetch_playlist_page(
         )
         if resp.status_code != 200:
             return [], None, resp.status_code
-            
+
         data = resp.json()
         video_ids = [
             item["snippet"]["resourceId"]["videoId"]
             for item in data.get("items", [])
-            if item.get("snippet", {}).get("resourceId", {}).get("kind") == "youtube#video"
+            if item.get("snippet", {}).get("resourceId", {}).get("kind")
+            == "youtube#video"
         ]
         return video_ids, data.get("nextPageToken"), 200
     except Exception as e:
@@ -162,9 +222,9 @@ async def _fetch_video_details_batch(
         return []
 
     params = {
-        "key":  api_key,
+        "key": api_key,
         "part": "snippet,contentDetails,statistics,liveStreamingDetails",
-        "id":   ",".join(video_ids),
+        "id": ",".join(video_ids),
     }
     try:
         resp = await client.get(
@@ -181,6 +241,7 @@ async def _fetch_video_details_batch(
 
 # ── 公开核心函数 ───────────────────────────────────────────────────────────────
 
+
 async def sync_channel_videos(
     session: AsyncSession,
     channel: Channel,
@@ -188,7 +249,7 @@ async def sync_channel_videos(
     *,
     full_refresh: bool = False,
 ) -> int:
-    db_video_columns   = await _get_table_columns(session, "videos")
+    db_video_columns = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
 
     total_processed = 0
@@ -199,21 +260,34 @@ async def sync_channel_videos(
         is_fallback_needed = False
 
         if not playlist_id:
-            playlist_id = await _get_real_uploads_playlist_id(client, api_key, channel.channel_id)
+            playlist_id = await _get_real_uploads_playlist_id(
+                client, api_key, channel.channel_id
+            )
         else:
-            video_ids, next_token, status = await _fetch_playlist_page(client, api_key, playlist_id)
+            video_ids, next_token, status = await _fetch_playlist_page(
+                client, api_key, playlist_id
+            )
             if status != 200:
-                logger.warning("默认 UU 方案无效 (Status: {})，尝试使用 API 后备方案...", status)
+                logger.warning(
+                    "默认 UU 方案无效 (Status: {})，尝试使用 API 后备方案...", status
+                )
                 is_fallback_needed = True
             else:
                 pass
 
         if is_fallback_needed:
-            playlist_id = await _get_real_uploads_playlist_id(client, api_key, channel.channel_id)
+            playlist_id = await _get_real_uploads_playlist_id(
+                client, api_key, channel.channel_id
+            )
             if not playlist_id:
-                logger.error("所有方案均无法获取 channel_id={} 的播放列表，同步取消", channel.channel_id)
+                logger.error(
+                    "所有方案均无法获取 channel_id={} 的播放列表，同步取消",
+                    channel.channel_id,
+                )
                 return 0
-            video_ids, next_token, status = await _fetch_playlist_page(client, api_key, playlist_id)
+            video_ids, next_token, status = await _fetch_playlist_page(
+                client, api_key, playlist_id
+            )
 
         while True:
             if not video_ids:
@@ -236,7 +310,7 @@ async def sync_channel_videos(
 
             if not full_refresh or not next_token:
                 break
-            
+
             page_token = next_token
             video_ids, next_token, status = await _fetch_playlist_page(
                 client, api_key, playlist_id, page_token
@@ -247,7 +321,8 @@ async def sync_channel_videos(
 
     logger.info(
         "Channel {!r} 同步完成 | processed={}",
-        channel.name, total_processed,
+        channel.name,
+        total_processed,
     )
     return total_processed
 
@@ -264,7 +339,7 @@ async def fetch_and_upsert_single_video(
     if not items:
         return None
 
-    db_video_columns   = await _get_table_columns(session, "videos")
+    db_video_columns = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
     video_data = parse_video_item(channel.id, channel.platform, items[0])
 

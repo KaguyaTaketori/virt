@@ -86,8 +86,15 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await authApi.getUserInfo()
       user.value = res.data
-    } catch (e) {
-      console.error('Failed to fetch user info:', e)
+    } catch (e: any) {
+      if (e.response?.status === 401) {
+        token.value = null
+        user.value = null
+        localStorage.removeItem('token')
+        router.push('/')
+      } else {
+        console.error('Failed to fetch user info:', e)
+      }
     }
   }
 

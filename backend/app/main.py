@@ -21,6 +21,7 @@ from app.routers import (
     auth,
     user_channels,
     permissions,
+    bilibili_auth,
 )
 from app.services.token_blacklist import token_blacklist
 from app.services.youtube_websub import (
@@ -221,6 +222,7 @@ app.include_router(auth.router)
 app.include_router(user_channels.router)
 app.include_router(permissions.router)
 app.include_router(youtube_websub_router)
+app.include_router(bilibili_auth.router)
 
 
 @app.get("/")

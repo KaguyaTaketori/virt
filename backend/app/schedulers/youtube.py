@@ -1,5 +1,5 @@
-import time
 import asyncio
+import time
 from datetime import datetime, timezone
 from typing import List
 
@@ -61,52 +61,98 @@ async def update_youtube_streams() -> None:
         logger.info("刷新 {} 条 | 配额剩余 {}", len(active), remaining)
 
 
-async def sync_youtube_videos_bulk(limit: int = 50) -> None:
+async def sync_youtube_videos_full() -> None:
+    from app.config import settings
+    from app.services.youtube_sync import (
+        sync_channel_videos,
+        is_channel_full_sync_completed,
+    )
+
     if not await is_api_available():
+        logger.info("API 不可用，跳过全量同步")
+        return
+
+    if settings.youtube_full_sync_completed:
+        logger.info("全量同步已完成，跳过")
         return
 
     api_key = await get_api_key()
     if not api_key:
         return
 
-    round_num = int(time.time()) // 3600 % 10
+    BATCH_SIZE = 50
 
     async with AsyncSessionFactory() as session:
         result = await session.execute(
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active.is_(True),
+                Channel.status != "graduated",
             )
         )
-        all_channels: List[Channel] = result.scalars().all()
+        channels: List[Channel] = result.scalars().all()
 
-    if not all_channels:
+    if not channels:
         return
 
-    total = len(all_channels)
-    offset = (round_num * limit) % total
-    batch = all_channels[offset : offset + limit]
-    if len(batch) < limit:
-        batch += all_channels[: limit - len(batch)]
+    total_channels = len(channels)
+    total_batches = (total_channels + BATCH_SIZE - 1) // BATCH_SIZE
+    current_batch = int(time.time()) // 3600 % total_batches
+
+    start_idx = current_batch * BATCH_SIZE
+    end_idx = min(start_idx + BATCH_SIZE, total_channels)
+    batch_channels = channels[start_idx:end_idx]
 
     logger.info(
-        "bulk sync: {} channels (round={}, offset={})", len(batch), round_num, offset
+        "全量同步批次 {}/{}，频道 {}-{}，共 {} 个",
+        current_batch + 1,
+        total_batches,
+        start_idx + 1,
+        end_idx,
+        len(batch_channels),
     )
 
-    async with AsyncSessionFactory() as session:
-        for ch in batch:
-            try:
+    completed_count = 0
+
+    for ch in batch_channels:
+        try:
+            async with AsyncSessionFactory() as session:
                 ch_obj = await session.get(Channel, ch.id)
                 if not ch_obj:
                     continue
-                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
-                await session.commit()
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                await session.rollback()
-                logger.warning("bulk sync error for channel_id={}: {}", ch.id, e)
 
-    logger.info("bulk sync done: {} channels processed", len(batch))
+                is_completed = await is_channel_full_sync_completed(
+                    session, ch_obj, api_key
+                )
+                if is_completed:
+                    completed_count += 1
+                    logger.info(
+                        "频道已全量同步: {} ({}/{})",
+                        ch_obj.name,
+                        completed_count,
+                        len(batch_channels),
+                    )
+                    continue
+
+                await sync_channel_videos(session, ch_obj, api_key, full_refresh=True)
+                await session.commit()
+                completed_count += 1
+                logger.info(
+                    "全量同步频道: {} ({}/{})",
+                    ch_obj.name,
+                    completed_count,
+                    len(batch_channels),
+                )
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.warning("全量同步错误 channel_id={}: {}", ch.id, e)
+
+    logger.info(
+        "批次同步完成! 批次 {}/{}，已处理 {} 个频道",
+        current_batch + 1,
+        total_batches,
+        completed_count,
+    )
 
 
 async def discover_live_streams_from_videos() -> None:

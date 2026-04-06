@@ -66,6 +66,18 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/AdminRoles.vue'),
     meta: { title: '角色与权限', requiresSuperadmin: true },
   },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('../views/Settings.vue'),
+    meta: { title: '设置' },
+  },
+  {
+    path: '/settings/bilibili',
+    name: 'BilibiliLogin',
+    component: () => import('../views/BilibiliLogin.vue'),
+    meta: { title: 'B站登录' },
+  },
 ]
 
 const router = createRouter({

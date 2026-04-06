@@ -89,6 +89,8 @@ async def _sync_single_channel(
             updated = True
         if vtuber_ch.status and existing.status != vtuber_ch.status:
             existing.status = vtuber_ch.status
+            if vtuber_ch.status == "graduated":
+                existing.is_active = False
             updated = True
 
         if updated:
