@@ -1,16 +1,5 @@
-import { ref, watch, onMounted, onUnmounted, type Ref } from 'vue'
-
-export interface DanmakuMessage {
-  messageId?: string
-  message_id?: string
-  userId?: string
-  user_id?: string
-  user_display_name?: string
-  comment: string
-  message?: string
-  message_type?: string
-  sticker_url?: string
-}
+import { watch, onMounted, onUnmounted, type Ref } from 'vue'
+import { DanmakuMessage } from '@/types/danmaku'
 
 const WS_BASE =
   (import.meta.env.VITE_WS_BASE as string | undefined) ||
@@ -80,12 +69,17 @@ export function useDanmakuWS(
   }
 
   function drainQueue(): DanmakuMessage[] {
+    if (queue.length === 0) return []
     return queue.splice(0, queue.length)
   }
 
-  watch(enabled, (val) => {
-    if (val && platform.value === 'youtube') connect()
-    else disconnect()
+ watch(enabled, (val) => {
+    if (val && platform.value === 'youtube') {
+      connect()
+    } else {
+      disconnect()
+      queue.length = 0
+    }
   })
 
   watch(videoId, () => {
@@ -118,6 +112,8 @@ export function useDanmakuHitLayer(
     y: number,
     textWidth: number,
     fontSize: number,
+    userId?: string,
+    displayName?: string 
   ) {
     if (!hitLayerRef.value || !messageId) return
 
@@ -125,12 +121,15 @@ export function useDanmakuHitLayer(
     div.className = 'danmaku-ghost absolute cursor-pointer whitespace-nowrap'
     div.textContent = text
     div.dataset.messageId = messageId
+    if (userId) div.dataset.userId = userId
+    if (displayName) div.dataset.displayName = displayName
 
     Object.assign(div.style, {
       top: '0px',
       left: '0px',
       width: `${textWidth}px`,
       height: `${fontSize}px`,
+      lineHeight: `${fontSize}px`,
       fontSize: `${fontSize}px`,
       color: 'transparent',
       userSelect: 'none',

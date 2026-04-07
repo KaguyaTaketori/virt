@@ -36,7 +36,14 @@ from app.services.redis_client import RedisClient
 from app.services.permission_cache import init_permission_cache
 from app.services.room_counter import init_room_counter
 from app.services.danmaku_queue import init_danmaku_queue
-
+from app.startup import (
+    check_production_secrets,
+    init_databases,
+    init_redis,
+    init_token_blacklist,
+    init_websub,
+    register_scheduled_jobs,
+)
 
 def _assert_production_secrets() -> None:
     env = settings.env.lower()
@@ -66,91 +73,26 @@ def _assert_production_secrets() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
+    """
+    应用生命周期编排器。
+    职责：按顺序调用各初始化模块，处理整体启动失败。
+    """
     try:
-        _assert_production_secrets()
-
-        Base.metadata.create_all(bind=engine)
-        await create_all_tables()
-
-        try:
-            redis = await RedisClient.get_client()
-            await redis.ping()
-            await init_permission_cache(redis)
-            await init_room_counter(redis)
-            await init_danmaku_queue(redis)
-            logger.info("Redis connected successfully")
-        except Exception as e:
-            logger.warning("Redis connection failed, permission cache disabled: {}", e)
-
-        try:
-            async with AsyncSessionFactory() as session:
-                await session.execute(
-                    text("""
-                    CREATE TABLE IF NOT EXISTS blacklisted_tokens (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        jti VARCHAR(64) UNIQUE NOT NULL,
-                        user_id INTEGER NOT NULL,
-                        expired_at DATETIME NOT NULL,
-                        revoked_at DATETIME NOT NULL
-                    )
-                """)
-                )
-                await session.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti ON blacklisted_tokens (jti)"
-                    )
-                )
-                await session.commit()
-                await token_blacklist.warm_up(session)
-        except Exception as e:
-            logger.error("Token blacklist warmup failed: {}", e)
-
-        callback_url = settings.websub_callback_url
-        if (
-            not callback_url
-            or callback_url == "https://your-domain.com/api/websub/youtube"
-        ):
-            logger.info("未配置回调 URL，跳过首次订阅")
-        else:
-            async with AsyncSessionFactory() as session:
-                result = await session.execute(
-                    select(func.count(WebSubSubscription.id))
-                )
-                has_subscriptions = result.scalar() > 0
-            if not has_subscriptions:
-                try:
-                    await subscribe_all_active_channels(callback_url)
-                except Exception as e:
-                    logger.error("首次订阅失败: {}", e)
-
-        start_scheduler()
-
-        async def _cleanup_blacklist():
-            try:
-                async with AsyncSessionFactory() as session:
-                    count = await token_blacklist.cleanup_expired(session)
-                    if count:
-                        logger.info("Cleaned {} expired blacklist entries", count)
-            except Exception as e:
-                logger.error("Blacklist cleanup error: {}", e)
-
-        scheduler.add_job(
-            _cleanup_blacklist,
-            "cron",
-            hour=3,
-            minute=30,
-            id="blacklist_cleanup",
-            replace_existing=True,
-        )
-
-        yield
-        logger.info("Application shutting down...")
+        await check_production_secrets()   # 1. 安全断言
+        await init_databases()             # 2. 建表
+        await init_redis()                 # 3. Redis（失败可降级）
+        await init_token_blacklist()       # 4. 黑名单预热
+        await init_websub()               # 5. WebSub 订阅
+        await register_scheduled_jobs()   # 6. 定时任务
+        logger.info("Application startup complete")
     except Exception as e:
         logger.critical("Application startup failed: {}", e)
-        logger.exception(e)
-        raise e
+        raise
 
+    yield
+
+    logger.info("Application shutting down...")
 
 limiter = Limiter(key_func=get_remote_address)
 

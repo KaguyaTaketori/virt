@@ -24,6 +24,7 @@ from app.models.models import User, UserLoginLog, UserRole, Role
 from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
 from app.services.permission_cache import permission_cache
+from app.services.permissions import get_all_permissions_for_user, get_user_roles
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
@@ -168,25 +169,18 @@ async def login(
 
     await record_login_log(db, user.id, request, True)
 
-    access_token, jti = create_access_token(
+    result = create_access_token(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
     )
-
-    from jose import jwt as jose_jwt
-
-    payload = jose_jwt.decode(
-        access_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
-    )
-    token_exp = payload.get("exp", 0)
-
-    from app.services.permissions import get_user_roles, get_all_permissions_for_user
+    # ✅ 直接使用，无需二次解码
+    token_exp = result.expires_at
 
     roles = await get_user_roles(user.id, db)
     permissions = await get_all_permissions_for_user(user.id, db)
-    await permission_cache.set_permissions(jti, roles, permissions, token_exp)
+    await permission_cache.set_permissions(result.jti, roles, permissions, token_exp, user.id)
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": result.token, "token_type": "bearer"}
 
 
 # ── 注销 ──────────────────────────────────────────────────────────────────────
@@ -207,7 +201,7 @@ async def logout(
         try:
             jti, _ = get_token_jti_and_exp(token)
             if jti:
-                await permission_cache.delete_permissions(jti)
+                await permission_cache.delete_permissions(jti, current_user.id)
         except Exception:
             pass
 

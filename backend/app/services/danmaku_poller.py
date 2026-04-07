@@ -75,7 +75,6 @@ class DanmakuPoller:
         api_key: Optional[str] = None
         version: Optional[str] = None
         is_live = False
-        seen_ids: Set[str] = set()
 
         try:
             info = await asyncio.to_thread(downloader.get_video_info, video_id)
@@ -100,7 +99,7 @@ class DanmakuPoller:
 
         if not is_live:
             await self._fetch_and_send(downloader, video_id, api_key, version,
-                                       continuation, is_live, seen_ids)
+                                       continuation, is_live)
             return
 
         while True:
@@ -111,7 +110,7 @@ class DanmakuPoller:
             try:
                 continuation = await self._fetch_and_send(
                     downloader, video_id, api_key, version,
-                    continuation, is_live, seen_ids
+                    continuation, is_live
                 )
                 if not continuation:
                     logger.info("no more continuation for {}", video_id)

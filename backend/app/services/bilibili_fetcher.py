@@ -1,12 +1,15 @@
 # backend/app/services/bilibili_fetcher.py
 from __future__ import annotations
 
-import asyncio
-from app.loguru_config import logger
+import httpx
 import random
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
-import httpx
+from sqlalchemy import select
+
+from app.models.models import Video, Platform
+from app.loguru_config import logger
 
 BILIBILI_LIVE_API = "https://api.live.bilibili.com"
 BILIBILI_API = "https://api.bilibili.com"
@@ -71,9 +74,7 @@ async def get_user_videos(
 
 async def sync_bilibili_channel_videos(db, channel_id: int, channel_id_str: str) -> int:
     """同步bilibili频道视频到数据库"""
-    import asyncio
-    from sqlalchemy import select
-    from app.models.models import Video, Platform
+    
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         total_synced = 0

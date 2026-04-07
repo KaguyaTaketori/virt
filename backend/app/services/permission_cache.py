@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import time
-from typing import Any, Optional
+from time import time
+from typing import Any
 
 from app.loguru_config import logger
 
@@ -13,7 +13,7 @@ class PermissionCache:
     def __init__(self, redis_client: Any):
         self.redis = redis_client
 
-    async def _get_ttl_seconds(self, token_exp: int) -> int:
+    def _calc_ttl(self, token_exp: int) -> int:
         now = int(time())
         ttl = token_exp - now
         return max(ttl, 60)
@@ -22,16 +22,20 @@ class PermissionCache:
         return f"{self.PREFIX}{user_id}:{jti}"
 
     async def set_permissions(self, jti: str, roles, permissions, token_exp, user_id: int):
-        ttl = await self._get_ttl_seconds(token_exp)
+        ttl = self._calc_ttl(token_exp)
         data = {"roles": list(roles), "permissions": permissions}
         await self.redis.setex(self._key(jti, user_id), ttl, json.dumps(data))
 
     async def get_permissions(self, jti: str, user_id: int):
-        data = await self.redis.get(self._key(jti, user_id))
-        return json.loads(data) if data else None
+        try:
+            data = await self.redis.get(self._key(jti, user_id))
+            return json.loads(data) if data else None
+        except Exception as e:
+            logger.warning("Permission cache get failed for jti={}: {}", jti, e)
+            return None
 
-    async def delete_permissions(self, jti: str) -> None:
-        await self.redis.delete(f"{self.PREFIX}{jti}")
+    async def delete_permissions(self, jti: str, user_id: int) -> None:
+        await self.redis.delete(self._key(jti, user_id))
 
     async def delete_all_by_user(self, user_id: int) -> None:
         pattern = f"{self.PREFIX}{user_id}:*"

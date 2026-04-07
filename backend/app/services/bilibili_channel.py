@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 import re
 import html
 import json
@@ -9,6 +10,120 @@ from bilibili_api import user, Credential
 from app.config import settings
 from app.loguru_config import logger
 
+
+# ── 内容节点构建工具 ──────────────────────────────────────────────────────────
+def build_content_nodes(raw_text: str, emoji_map: dict[str, str]) -> list[dict]:
+    """将含表情符号的原始文本转换为节点列表。"""
+    if not raw_text:
+        return []
+    nodes = []
+    for part in re.split(r'(\[.*?\])', raw_text):
+        if not part:
+            continue
+        if part in emoji_map:
+            nodes.append({"type": "emoji", "text": part, "url": emoji_map[part]})
+        else:
+            nodes.append({"type": "text", "text": part})
+    return nodes
+
+
+def extract_emoji_map(display: dict) -> dict[str, str]:
+    """从 display 字段提取表情包映射。"""
+    emoji_details = (display.get("emoji_info") or {}).get("emoji_details") or []
+    return {
+        em["emoji_name"]: em["url"]
+        for em in emoji_details
+        if em.get("emoji_name") and em.get("url")
+    }
+
+
+class DynamicParser(ABC):
+    """每种动态类型对应一个解析器，SRP 原则。"""
+
+    @abstractmethod
+    def parse(self, card: dict, card_item: dict, emoji_map: dict) -> dict:
+        """返回包含 content_nodes, images, repost_content 的字典。"""
+
+class TextDynamicParser(DynamicParser):
+    """dtype=4: 纯文字动态"""
+    def parse(self, card, card_item, emoji_map):
+        return {
+            "content_nodes": build_content_nodes(
+                card_item.get("content", ""), emoji_map
+            ),
+            "images": [],
+            "repost_content": None,
+        }
+    
+class ImageDynamicParser(DynamicParser):
+    """dtype=2: 图文动态"""
+    def parse(self, card, card_item, emoji_map):
+        pics = card_item.get("pictures") or []
+        return {
+            "content_nodes": build_content_nodes(
+                card_item.get("description", ""), emoji_map
+            ),
+            "images": [
+                p["img_src"] for p in pics
+                if isinstance(p, dict) and p.get("img_src")
+            ],
+            "repost_content": None,
+        }
+    
+class VideoDynamicParser(DynamicParser):
+    """dtype=8: 视频投稿"""
+    def parse(self, card, card_item, emoji_map):
+        text = f"{card.get('title', '')}\n{card.get('desc', '')}".strip()
+        return {
+            "content_nodes": build_content_nodes(text, emoji_map),
+            "images": [],
+            "repost_content": None,
+        }
+
+class RepostDynamicParser(DynamicParser):
+    """dtype=1: 转发动态"""
+    def parse(self, card, card_item, emoji_map):
+        origin_str = card.get("origin")
+        repost_content = None
+        if origin_str:
+            try:
+                origin_card = (
+                    json.loads(origin_str)
+                    if isinstance(origin_str, str) else origin_str
+                )
+                o_item = origin_card.get("item", {})
+                repost_content = (
+                    o_item.get("description")
+                    or o_item.get("content")
+                    or "[转发内容解析失败]"
+                )
+            except (json.JSONDecodeError, AttributeError):
+                repost_content = "[转发内容解析失败]"
+
+        return {
+            "content_nodes": build_content_nodes(
+                card_item.get("content", ""), emoji_map
+            ),
+            "images": [],
+            "repost_content": repost_content,
+        }
+
+class FallbackDynamicParser(DynamicParser):
+    """未知 dtype 的兜底解析器"""
+    def parse(self, card, card_item, emoji_map):
+        return {"content_nodes": [], "images": [], "repost_content": None}
+    
+_PARSER_REGISTRY: dict[int, DynamicParser] = {
+    1: RepostDynamicParser(),
+    2: ImageDynamicParser(),
+    4: TextDynamicParser(),
+    8: VideoDynamicParser(),
+}
+_FALLBACK_PARSER = FallbackDynamicParser()
+
+
+def get_parser(dtype: int) -> DynamicParser:
+    return _PARSER_REGISTRY.get(dtype, _FALLBACK_PARSER)
 
 class BilibiliChannelService:
     def __init__(self, credential: Optional[Credential] = None):
@@ -100,79 +215,31 @@ class BilibiliChannelService:
         try:
             desc = d.get("desc", {})
             display = d.get("display", {})
-            card_data = d.get("card", {})
-
-            if isinstance(card_data, str):
-                card = json.loads(card_data)
-            else:
-                card = card_data
-
+            card_raw = d.get("card", {})
+            card = json.loads(card_raw) if isinstance(card_raw, str) else card_raw
+            card_item = card.get("item") or {}
             dtype = desc.get("type", 0)
-            
-            item = {
+
+            emoji_map = extract_emoji_map(display)
+            parser = get_parser(dtype)
+            parsed_content = parser.parse(card, card_item, emoji_map)
+
+            return {
                 "dynamic_id": desc.get("dynamic_id_str") or str(desc.get("dynamic_id", "")),
                 "uid": desc.get("uid"),
                 "uname": desc.get("user_profile", {}).get("info", {}).get("uname", ""),
                 "type": dtype,
                 "timestamp": desc.get("timestamp"),
-                "content_nodes": [],
-                "images": [],
-                "repost_content": None,
+                **parsed_content,  # content_nodes, images, repost_content
             }
-
-            emoji_details = (display.get("emoji_info") or {}).get("emoji_details") or []
-            emoji_map = {}
-            for em in emoji_details:
-                name = em.get("emoji_name")
-                url = em.get("url")
-                if name and url:
-                    emoji_map[name] = url
-
-            raw_text = ""
-            card_item = card.get("item") or {}
-            if dtype == 2: raw_text = card_item.get("description") or ""
-            elif dtype == 4: raw_text = card_item.get("content") or ""
-            elif dtype == 8: raw_text = f"{card.get('title', '')}\n{card.get('desc', '')}"
-            elif dtype == 1: raw_text = card_item.get("content") or ""
-
-            if raw_text:
-                pattern = r'(\[.*?\])'
-                parts = re.split(pattern, raw_text)
-                nodes = []
-                for part in parts:
-                    if not part:
-                        continue
-                    if part in emoji_map:
-                        nodes.append({
-                            "type": "emoji",
-                            "text": part,
-                            "url": emoji_map[part]
-                        })
-                    else:
-                        nodes.append({
-                            "type": "text",
-                            "text": part
-                        })
-                item["content_nodes"] = nodes
-            if dtype == 2:
-                pics = card_item.get("pictures") or []
-                item["images"] = [p.get("img_src") for p in pics if isinstance(p, dict) and p.get("img_src")]
-                
-            elif dtype == 1:
-                origin_str = card.get("origin")
-                if origin_str:
-                    try:
-                        origin_card = json.loads(origin_str) if isinstance(origin_str, str) else origin_str
-                        o_item = origin_card.get("item", {})
-                        item["repost_content"] = o_item.get("description") or o_item.get("content") or ""
-                    except Exception:
-                        item["repost_content"] = "[转发内容解析失败]"
-
-            return item
         except Exception as e:
-            logger.error("解析动态项失败: {}, 动态ID: {}", e, desc.get("dynamic_id"))
+            logger.warning(
+                "解析动态项失败: {} | dynamic_id={}",
+                e,
+                d.get("desc", {}).get("dynamic_id", "unknown")
+            )
             return None
-
+        
     async def get_videos(self, uid: str, page: int = 1, page_size: int = 30) -> list:
         """获取用户投稿视频列表"""
         if not self.credential:

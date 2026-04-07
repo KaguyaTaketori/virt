@@ -118,7 +118,9 @@ async def danmaku_websocket(websocket: WebSocket, video_id: str) -> None:
       {"type": "ping"}                        → 服务端回 pong
       {"type": "time", "currentTime": 12.5}  → 服务端推送对应时间弹幕
     """
-    await manager.connect(video_id, websocket)
+    accepted = await manager.connect(video_id, websocket)
+    if not accepted:
+        return
     poller.start_polling(video_id)
 
     last_sent: set = set()

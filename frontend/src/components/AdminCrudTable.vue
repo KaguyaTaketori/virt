@@ -80,5 +80,12 @@ defineEmits<{
 const showAddModal = ref(false)
 const showEditModal = ref(false)
 
-defineExpose({ showAddModal, showEditModal })
+defineExpose({
+  openAdd: () => { showAddModal.value = true },
+  openEdit: () => { showEditModal.value = true },
+  closeAll: () => {
+    showAddModal.value = false
+    showEditModal.value = false
+  },
+})
 </script>

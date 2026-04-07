@@ -121,7 +121,7 @@ function openRoleModal(user: UserWithRoles) {
   selectedRoleIds.value = roles.value
     .filter(r => user.roles.includes(r.name))
     .map(r => r.id)
-  tableRef.value.showEditModal = true
+  tableRef.value.openEdit()
 }
 
 async function saveRoles() {
@@ -131,7 +131,7 @@ async function saveRoles() {
     await adminPermissionsApi.updateUserRoles(selectedUser.value.id, selectedRoleIds.value)
     message.success('角色分配成功')
     
-    tableRef.value.showEditModal = false
+    tableRef.value.closeAll()
     
     await fetchUsers()
     

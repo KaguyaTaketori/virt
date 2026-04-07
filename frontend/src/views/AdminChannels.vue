@@ -194,13 +194,13 @@ function resetForm() {
 
 function openAddModal() {
   resetForm()
-  tableRef.value.showAddModal = true
+  tableRef.value.openAdd()  
 }
 
 function openEditModal(channel: Channel) {
   editingId.value = channel.id
   formData.value = { ...channel } as any
-  tableRef.value.showEditModal = true
+  tableRef.value.openEdit()
 }
 
 async function handleDelete(id: number) {
@@ -220,8 +220,7 @@ async function handleConfirm(mode: 'add' | 'edit') {
     } else {
       await channelApi.create(formData.value)
     }
-    tableRef.value.showAddModal = false
-    tableRef.value.showEditModal = false
+    tableRef.value.closeAll()
     fetchChannels()
   } catch (err) {
     handleError(err, '保存失败')

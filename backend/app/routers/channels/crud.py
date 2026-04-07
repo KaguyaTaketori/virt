@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.loguru_config import logger
 from app.database_async import AsyncSessionFactory
 from app.deps import get_db_session
 from app.deps.guards import AdminUser
@@ -27,6 +28,32 @@ from app.services.youtube_websub import subscribe_channel
 from app.services.api_key_manager import get_api_key, is_api_available
 
 router = APIRouter()
+
+async def _bg_sync_channel(channel_id: int, callback_url: str) -> None:
+    if not await is_api_available():
+        logger.warning("No YouTube API available, skipping sync for channel_id={}", channel_id)
+        return
+
+    api_key = await get_api_key()
+    if not api_key:
+        return
+
+    async with AsyncSessionFactory() as session:
+        ch = await session.get(Channel, channel_id)
+        if not ch:
+            logger.warning("Channel {} not found during bg sync", channel_id)
+            return
+        await sync_channel_videos(session, ch, api_key, full_refresh=True)
+
+    _safe_callback = settings.websub_callback_url
+    if callback_url and callback_url != "https://your-domain.com/api/websub/youtube":
+        async with AsyncSessionFactory() as session:
+            ch = await session.get(Channel, channel_id)
+            if ch:
+                await subscribe_channel(
+                    ch.channel_id, callback_url,
+                    secret=settings.websub_secret or None,
+                )
 
 
 @router.get("/", response_model=List[ChannelResponse])
@@ -128,27 +155,11 @@ async def create_channel(
     await db.refresh(db_channel)
 
     if db_channel.platform == Platform.YOUTUBE:
-        channel_id = db_channel.id
-        api_key = await get_api_key()
-        callback_url = settings.websub_callback_url
-
-        async def _bg_sync():
-            async with AsyncSessionFactory() as session:
-                ch = await session.get(Channel, channel_id)
-                if not ch or not api_key:
-                    return
-                await sync_channel_videos(session, ch, api_key, full_refresh=True)
-                if (
-                    callback_url
-                    and callback_url != "https://your-domain.com/api/websub/youtube"
-                ):
-                    await subscribe_channel(
-                        ch.channel_id,
-                        callback_url,
-                        secret=settings.websub_secret or None,
-                    )
-
-        background_tasks.add_task(_bg_sync)
+        background_tasks.add_task(
+            _bg_sync_channel,
+            db_channel.id,
+            settings.websub_callback_url,
+        )
 
     return db_channel
 

@@ -37,6 +37,25 @@ class Settings(BaseSettings):
 
     youtube_full_sync_completed: bool = False
 
+    max_ws_connections_per_video: int = 1000
+    max_ws_connections_total: int = 10000
+
+    @property
+    def db_dialect(self) -> str:
+        """从 db_url 推断数据库类型，整个应用共用同一判断逻辑。"""
+        url = self.db_url.lower()
+        if "postgresql" in url or "postgres" in url:
+            return "postgresql"
+        return "sqlite"  # 默认
+
+    @property
+    def is_sqlite(self) -> bool:
+        return self.db_dialect == "sqlite"
+
+    @property
+    def is_postgresql(self) -> bool:
+        return self.db_dialect == "postgresql"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

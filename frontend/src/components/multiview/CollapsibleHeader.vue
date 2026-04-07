@@ -42,6 +42,7 @@ const emit = defineEmits<{
   (e: 'clearGroup'): void
   (e: 'refresh'): void
   (e: 'addMember', member: StreamChannel): void
+  (e: 'openGroupSelector'): void
 }>()
 
 const LOCAL_ICONS: Record<PresetId, string> = {

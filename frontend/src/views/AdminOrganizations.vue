@@ -120,13 +120,13 @@ function resetForm() {
 
 function openAddModal() {
   resetForm()
-  tableRef.value.showAddModal = true
+  tableRef.value.openAdd()
 }
 
 function openEditModal(org: Organization) {
   editingId.value = org.id
   formData.value = { ...org }
-  tableRef.value.showEditModal = true
+  tableRef.value.openEdit()
 }
 
 async function handleDelete(id: number) {
@@ -148,8 +148,7 @@ async function handleConfirm(mode: 'add' | 'edit') {
     }
     
     await orgStore.invalidate()
-    tableRef.value.showAddModal = false
-    tableRef.value.showEditModal = false
+    tableRef.value.closeAll()
     fetchOrganizations()
   } catch (err) {
     handleError(err, '保存失败')

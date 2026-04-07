@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
+from app.db_utils import upsert
 from app.models.models import Channel, Video
 from app.services.youtube_utils import parse_video_item
 
@@ -136,10 +137,6 @@ async def _load_existing_video_id_set(
 
 # ── Upsert ────────────────────────────────────────────────────────────────────
 
-
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
 async def _upsert_video(
     session: AsyncSession,
     *,
@@ -147,31 +144,22 @@ async def _upsert_video(
     db_video_columns: set[str],
     video_data: dict,
 ) -> None:
-    vid_id: str = video_data["video_id"]
-    now = datetime.now(timezone.utc)
-
     safe_data = {k: v for k, v in video_data.items() if k in db_video_columns}
-    if "fetched_at" in db_video_columns:
-        safe_data["fetched_at"] = now
+    safe_data["fetched_at"] = datetime.now(timezone.utc)
 
-    dialect_name = session.bind.dialect.name
-    insert_fn = pg_insert if dialect_name == "postgresql" else sqlite_insert
-
-    stmt = insert_fn(Video).values(**safe_data)
-    
     update_cols = {
-        k: v for k, v in safe_data.items() 
+        k: v for k, v in safe_data.items()
         if k not in ["id", "channel_id", "video_id", "platform"]
     }
 
-    upsert_stmt = stmt.on_conflict_do_update(
+    await upsert(
+        session,
+        Video,
+        values=safe_data,
         index_elements=["channel_id", "video_id"],
-        set_=update_cols
+        update_cols=update_cols,
     )
-
-    await session.execute(upsert_stmt)
-    
-    existing_video_ids.add(vid_id)
+    existing_video_ids.add(video_data["video_id"])
 
 
 # ── YouTube API 调用 ──────────────────────────────────────────────────────────
