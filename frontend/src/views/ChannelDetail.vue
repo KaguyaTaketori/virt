@@ -91,8 +91,8 @@
       <div class="py-6">
         <!-- 投稿/普通视频 (B站 & YouTube) -->
         <div v-if="activeTab === 'videos'">
-          <div v-if="uploadState.videos.value.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            <div v-for="video in uploadState.videos.value" :key="video.id" class="video-card bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video)">
+          <div v-if="displayVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div v-for="video in displayVideos" :key="video.id" class="video-card bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video)">
               <div class="aspect-video relative">
                 <img :src="video.thumbnail_url + (isBilibili ? '@.webp' : '')" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
                 <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">{{ video.duration }}</span>
@@ -155,19 +155,68 @@
         <!-- Bilibili 动态 Tab -->
         <div v-if="activeTab === 'dynamics' && isBilibili">
           <div v-if="bilibiliDynamics.length > 0" class="space-y-4">
-            <div v-for="d in bilibiliDynamics" :key="d.dynamic_id" class="bg-zinc-900 rounded-lg p-4">
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-xs px-2 py-0.5 bg-pink-600 text-white rounded">{{ getDynamicTypeLabel(d.type) }}</span>
-                <span class="text-xs text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
+            <div v-for="d in bilibiliDynamics" :key="d.dynamic_id" class="bg-zinc-900 rounded-lg p-5 shadow-sm">
+              
+              <!-- 1. 动态头部：类型标签与时间 -->
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] px-1.5 py-0.5 bg-pink-600/20 text-pink-500 border border-pink-500/30 rounded">
+                    {{ getDynamicTypeLabel(d.type) }}
+                  </span>
+                  <span class="text-xs text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
+                </div>
+                <!-- 更多操作按钮可以在此处添加 -->
               </div>
-              <p class="text-gray-300 text-sm whitespace-pre-wrap">{{ d.content }}</p>
-              <div v-if="d.images?.length > 0" class="flex gap-2 mt-3 flex-wrap">
-                <img v-for="(img, idx) in d.images.slice(0, 4)" :key="idx" :src="img + '@.webp'" class="w-20 h-20 object-cover rounded" referrerpolicy="no-referrer" />
+
+              <!-- 2. 动态正文：节点渲染方案 (核心修改) -->
+              <!-- whitespace-pre-wrap 确保文本中的 \n 正常换行 -->
+              <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
+                <template v-for="(node, idx) in d.content_nodes" :key="idx">
+                  <!-- 文字节点 -->
+                  <span v-if="node.type === 'text'">{{ node.text }}</span>
+                  
+                  <!-- 表情节点 -->
+                  <img 
+                    v-else-if="node.type === 'emoji'" 
+                    :src="node.url" 
+                    :alt="node.text" 
+                    :title="node.text"
+                    class="bili-emoji-img inline-block w-[20px] h-[20px] mx-0.5 vertical-text-bottom"
+                    referrerpolicy="no-referrer"
+                  />
+                </template>
               </div>
-              <p v-if="d.repost_content" class="mt-2 text-gray-500 text-sm border-l-2 border-gray-700 pl-3">{{ d.repost_content }}</p>
+
+              <!-- 3. 转发内容渲染 -->
+              <div v-if="d.repost_content" class="mt-3 p-3 bg-zinc-950/50 rounded border-l-4 border-zinc-700">
+                <p class="text-gray-500 text-xs italic leading-snug">
+                  {{ d.repost_content }}
+                </p>
+              </div>
+
+              <!-- 4. 图片列表渲染 -->
+              <div v-if="d.images?.length > 0" class="mt-4 grid grid-cols-3 gap-2 max-w-2xl">
+                <div 
+                  v-for="(img, idx) in d.images" 
+                  :key="idx" 
+                  class="aspect-square rounded overflow-hidden bg-zinc-800"
+                >
+                  <!-- B站图片强制使用 no-referrer 防止 403 -->
+                  <img 
+                    :src="img + '@200w_200h_1c.webp'" 
+                    class="w-full h-full object-cover hover:scale-110 transition-transform duration-300 cursor-zoom-in" 
+                    referrerpolicy="no-referrer" 
+                    loading="lazy"
+                  />
+                </div>
+              </div>
+
             </div>
           </div>
-          <div v-else class="text-center py-12 text-gray-500">暂无动态</div>
+          <div v-else class="text-center py-20">
+            <div class="text-gray-600 mb-2">暂无动态数据</div>
+            <div class="text-xs text-gray-700">尝试刷新页面或检查登录状态</div>
+          </div>
         </div>
 
         <!-- Bilibili 主页 Tab (Raw Info) -->
@@ -189,10 +238,37 @@
             </div>
             <!-- B站主页展示最新几个视频 -->
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div v-for="v in bilibiliVideos.slice(0, 8)" :key="v.bvid" class="bg-zinc-900 rounded-lg overflow-hidden">
-                <img :src="v.pic + '@.webp'" class="aspect-video object-cover w-full" referrerpolicy="no-referrer" />
-                <div class="p-2 text-xs text-white line-clamp-1">{{ v.title }}</div>
-              </div>
+              <a 
+                v-for="v in bilibiliVideos.slice(0, 8)" 
+                :key="v.bvid" 
+                :href="'https://www.bilibili.com/video/' + v.bvid"
+                target="_blank"
+                class="bg-zinc-900 rounded-lg overflow-hidden group hover:ring-1 hover:ring-pink-500 transition-all"
+              >
+                <!-- 封面图容器 -->
+                <div class="relative aspect-video">
+                  <img 
+                    :src="v.pic + '@320w_200h_1c.webp'" 
+                    class="object-cover w-full h-full" 
+                    referrerpolicy="no-referrer" 
+                  />
+                  <!-- 时长悬浮窗 -->
+                  <span class="absolute bottom-1 right-1 bg-black/60 text-[10px] text-white px-1 rounded">
+                    {{ v.duration }}
+                  </span>
+                </div>
+                
+                <!-- 文字信息 -->
+                <div class="p-2">
+                  <h4 class="text-xs text-white line-clamp-2 mb-1 group-hover:text-pink-400 transition-colors">
+                    {{ v.title }}
+                  </h4>
+                  <div class="flex justify-between items-center text-[10px] text-gray-500">
+                    <span>{{ formatCount(v.play) }}播放</span>
+                    <span>{{ formatPubDate(v.pubdate) }}</span>
+                  </div>
+                </div>
+              </a>
             </div>
           </div>
           <div v-else class="text-center py-12 text-gray-500">加载中...</div>
@@ -223,17 +299,35 @@ import { channelApi, userChannelApi, type Channel as ApiChannel } from '@/api'
 import { useChannelVideos, type Video } from '@/composables/useChannelVideos'
 
 // --- 接口定义 ---
+interface ContentNode {
+  type: 'text' | 'emoji'
+  text: string
+  url?: string  // 表情包特有，文字节点没有此属性
+}
+
 interface Dynamic {
   dynamic_id: string
   type: number
   timestamp: number
-  content: string
+  content: string        // 虽然现在主要用 nodes，但保留这个字段防止报错
+  content_nodes: ContentNode[] // <-- 核心：新增这个字段
   images: string[]
   repost_content: string | null
 }
 
 interface BilibiliVideo {
-  bvid: string; title: string; pic: string; duration: string; play: number
+  aid: number;           // 稿件id
+  bvid: string;          // 视频bvid
+  title: string;         // 标题
+  pic: string;           // 封面图
+  duration: string;      // 时长 (如 "03:56")
+  play: number;          // 播放量
+  pubdate: number;       // 发布时间戳
+  reply: number;         // 评论数
+  like: number;          // 点赞数
+  coin?: number;
+  favorite?: number;
+  share?: number;
 }
 
 // --- 基础状态 ---
@@ -287,6 +381,38 @@ const tabs = computed(() => {
 })
 
 // --- 方法逻辑 ---
+function formatCount(num: number): string {
+  if (num >= 10000) {
+    return (num / 10000).toFixed(1) + '万'
+  }
+  return num.toString()
+}
+
+function formatPubDate(ts: number): string {
+  if (!ts) return ''
+  const date = new Date(ts * 1000)
+  return date.toLocaleDateString('zh-CN')
+}
+
+const displayVideos = computed(() => {
+  // 如果是 B站且有实时抓取的视频，将其转换成通用格式展示
+  if (isBilibili.value && bilibiliVideos.value.length > 0) {
+    return bilibiliVideos.value.map(v => ({
+      id: v.bvid, // 用 bvid 作为 key
+      thumbnail_url: v.pic,
+      title: v.title,
+      duration: v.duration,
+      view_count: v.play,
+      published_at: formatPubDate(v.pubdate),
+      status: 'upload',
+
+      isRaw: true // 标记这是来自 B站接口的原始数据
+    }))
+  }
+  // 否则返回通用的 uploadState 数据
+  return uploadState.videos.value
+})
+
 function getOrgName(orgId: number | null): string {
   if (!orgId) return ''
   return orgStore.organizations.find(o => o.id === orgId)?.name || ''

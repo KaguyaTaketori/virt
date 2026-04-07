@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.models.models import User, Channel, UserChannel
 from app.schemas.schemas import ChannelResponse
 from app.auth import get_current_user
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/users/channels", tags=["user-channels"])
 @router.post("/{channel_id}/like", status_code=status.HTTP_201_CREATED)
 async def like_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
@@ -56,7 +56,7 @@ async def like_channel(
 @router.delete("/{channel_id}/like")
 async def unlike_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
@@ -78,7 +78,7 @@ async def unlike_channel(
 @router.post("/{channel_id}/block", status_code=status.HTTP_201_CREATED)
 async def block_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
@@ -120,7 +120,7 @@ async def block_channel(
 @router.delete("/{channel_id}/block")
 async def unblock_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
@@ -142,7 +142,7 @@ async def unblock_channel(
 @router.get("", response_model=list[ChannelResponse])
 async def get_user_channels(
     type: str = Query(..., pattern="^(liked|blocked)$"),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(

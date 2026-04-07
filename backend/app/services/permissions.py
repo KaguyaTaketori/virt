@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.models.models import (
     User,
     Role,

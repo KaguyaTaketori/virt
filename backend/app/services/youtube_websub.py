@@ -214,14 +214,6 @@ def _parse_atom_feed(xml_body: bytes) -> list[dict]:
 
 
 async def _bg_fetch_video(yt_channel_id: str, video_id: str) -> None:
-    """
-    WebSub 推送触发的后台任务。
-
-    流程：
-      1. 用 yt_channel_id 查找数据库中的 Channel 记录
-      2. 调用 fetch_and_upsert_single_video 拉取详情并入库
-      3. 更新 WebSubSubscription 的推送统计
-    """
     if not await is_api_available():
         logger.warning("YOUTUBE_API_KEY 未配置，无法处理 video_id={}", video_id)
         return

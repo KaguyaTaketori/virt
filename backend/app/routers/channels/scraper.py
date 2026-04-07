@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.guards import require_permission
 from app.loguru_config import logger
 from app.services.scraper import sync as scraper_sync
@@ -15,7 +15,7 @@ router = APIRouter(
 
 
 @router.post("/scrape/vspo")
-async def scrape_vspo(db: AsyncSession = Depends(get_async_db)):
+async def scrape_vspo(db: AsyncSession = Depends(get_db_session)):
     try:
         result = await scraper_sync.scrape_and_sync_vspo(db)
         return {"status": "success", "source": "vspo", **result}
@@ -25,7 +25,7 @@ async def scrape_vspo(db: AsyncSession = Depends(get_async_db)):
 
 
 @router.post("/scrape/nijisanji")
-async def scrape_nijisanji(db: AsyncSession = Depends(get_async_db)):
+async def scrape_nijisanji(db: AsyncSession = Depends(get_db_session)):
     try:
         result = await scraper_sync.scrape_and_sync_nijisanji(db)
         return {"status": "success", "source": "nijisanji", **result}
@@ -35,7 +35,7 @@ async def scrape_nijisanji(db: AsyncSession = Depends(get_async_db)):
 
 
 @router.post("/scrape/all")
-async def scrape_all(db: AsyncSession = Depends(get_async_db)):
+async def scrape_all(db: AsyncSession = Depends(get_db_session)):
     try:
         result = await scraper_sync.scrape_and_sync_all(db)
         return {"status": "success", **result}

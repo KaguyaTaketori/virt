@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.loguru_config import logger
 from app.database_async import AsyncSessionFactory
@@ -10,30 +12,39 @@ from app.models.models import Channel, Platform, Stream
 from app.services.bilibili_fetcher import get_rooms_by_uids, get_user_info, parse_bilibili_room, sync_bilibili_channel_videos
 
 
-async def _async_upsert_stream(
-    db: AsyncSession, channel_id: int, parsed: dict, platform
-):
-    result = await db.execute(
-        select(Stream).where(
-            Stream.channel_id == channel_id,
-            Stream.video_id == parsed["video_id"],
-        )
-    )
-    stream = result.scalar_one_or_none()
+async def _upsert_stream(db: AsyncSession, channel_id: int, parsed: dict, platform) -> None:
     now = datetime.now(timezone.utc)
+    
+    insert_data = {
+        "channel_id": channel_id,
+        "platform": platform,
+        "updated_at": now,
+        **parsed
+    }
 
-    if not stream:
-        stream = Stream(channel_id=channel_id, platform=platform)
-        db.add(stream)
+    dialect_name = db.bind.dialect.name
+    insert_fn = pg_insert if dialect_name == "postgresql" else sqlite_insert
 
-    for field, value in parsed.items():
-        if getattr(stream, field, None) != value:
-            setattr(stream, field, value)
+    stmt = insert_fn(Stream).values(**insert_data)
 
-    stream.updated_at = now
-    if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
-        stream.peak_viewers = parsed["viewer_count"]
+    update_cols = {
+        "title": stmt.excluded.title,
+        "status": stmt.excluded.status,
+        "viewer_count": stmt.excluded.viewer_count,
+        "updated_at": now,
+    }
 
+    update_cols["peak_viewers"] = func.max(
+        Stream.peak_viewers, 
+        stmt.excluded.viewer_count
+    )
+
+    upsert_stmt = stmt.on_conflict_do_update(
+        index_elements=["channel_id", "video_id"], # 确保模型里有这个联合唯一索引
+        set_=update_cols
+    )
+
+    await db.execute(upsert_stmt)
 
 async def update_bilibili_streams():
     """使用 AsyncSession，与 YouTube 任务保持一致。"""
@@ -58,7 +69,7 @@ async def update_bilibili_streams():
         for uid, room_data in rooms_data.items():
             if uid in uid_to_ch_id:
                 parsed = parse_bilibili_room(room_data)
-                await _async_upsert_stream(
+                await _upsert_stream(
                     db, uid_to_ch_id[uid], parsed, Platform.BILIBILI
                 )
         await db.commit()

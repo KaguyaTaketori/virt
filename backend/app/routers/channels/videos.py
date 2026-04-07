@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.models.models import Channel, Platform, Video
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
 from app.services.youtube_videos import get_channel_videos as fetch_yt_videos
@@ -21,7 +21,7 @@ async def get_channel_videos(
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     status: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()

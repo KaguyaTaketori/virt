@@ -23,7 +23,7 @@ from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.deps.base import get_async_db
+from app.deps.base import get_db_session
 from app.config import settings
 from app.models.models import User
 from app.schemas.schemas import TokenData
@@ -125,7 +125,7 @@ def get_token_jti_and_exp(token: str) -> tuple[str, int]:
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ) -> User:
     """
     验证 Token 并返回当前用户。
@@ -170,7 +170,7 @@ async def get_current_user_optional(
     token: str = Depends(
         OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
     ),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ) -> Optional[User]:
     """可选认证：无 Token 时返回 None 而非抛异常。"""
     if not token:

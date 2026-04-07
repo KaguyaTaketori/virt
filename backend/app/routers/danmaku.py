@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path as FPath
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.guards import BilibiliAccess
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.services.danmaku import get_live_chat_messages
@@ -59,7 +59,7 @@ async def get_youtube_danmaku_from_file(
 @router.get("/youtube/db/{stream_id}")
 async def get_youtube_danmaku_from_db(
     stream_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = Depends(get_current_user),
 ):
     if not settings.enable_danmaku:
@@ -72,7 +72,7 @@ async def get_youtube_danmaku_from_db(
 async def download_youtube_danmaku(
     video_id: str,
     stream_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = Depends(get_current_user),
 ):
     if not settings.enable_danmaku or not download_chat:

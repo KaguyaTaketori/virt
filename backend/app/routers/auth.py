@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import (
     create_access_token,
     get_current_user,
-    get_async_db,
+    get_db_session,
     get_password_hash,
     verify_password,
     get_token_jti_and_exp,
@@ -104,7 +104,7 @@ async def record_login_log(
 async def register(
     request: Request,
     user: UserCreate,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ):
     result = await db.execute(select(User).where(User.username == user.username))
     if result.scalar_one_or_none():
@@ -149,7 +149,7 @@ async def register(
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ):
     result = await db.execute(select(User).where(User.username == form_data.username))
     user = result.scalar_one_or_none()
@@ -200,7 +200,7 @@ async def logout(
     request: Request,
     token: str = Depends(_bearer_scheme),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
 ):
     if token:
         await token_blacklist.revoke(token, db, current_user.id)

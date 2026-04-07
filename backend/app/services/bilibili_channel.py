@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-from typing import Optional
-from bilibili_api import user, Credential, video, dynamic
+import re
+import html
+import json
+from typing import Optional, List, Dict
+from bilibili_api import user, Credential
 
 from app.config import settings
 from app.loguru_config import logger
@@ -92,52 +94,83 @@ class BilibiliChannelService:
             logger.error("Failed to get dynamics, uid={}: {}", uid, e)
             return []
 
+
+
     def _parse_dynamic(self, d: dict) -> Optional[dict]:
-        """解析动态项"""
         try:
-            card_str = d.get("card", "{}")
-            import json
-
-            card = json.loads(card_str) if isinstance(card_str, str) else card_str
-
             desc = d.get("desc", {})
-            dtype = desc.get("type", 0)
+            display = d.get("display", {})
+            card_data = d.get("card", {})
 
+            if isinstance(card_data, str):
+                card = json.loads(card_data)
+            else:
+                card = card_data
+
+            dtype = desc.get("type", 0)
+            
             item = {
-                "id": desc.get("uid"),
-                "dynamic_id": desc.get("dynamic_id"),
+                "dynamic_id": desc.get("dynamic_id_str") or str(desc.get("dynamic_id", "")),
+                "uid": desc.get("uid"),
+                "uname": desc.get("user_profile", {}).get("info", {}).get("uname", ""),
                 "type": dtype,
                 "timestamp": desc.get("timestamp"),
-                "content": "",
+                "content_nodes": [],
                 "images": [],
                 "repost_content": None,
             }
 
+            emoji_details = (display.get("emoji_info") or {}).get("emoji_details") or []
+            emoji_map = {}
+            for em in emoji_details:
+                name = em.get("emoji_name")
+                url = em.get("url")
+                if name and url:
+                    emoji_map[name] = url
+
+            raw_text = ""
+            card_item = card.get("item") or {}
+            if dtype == 2: raw_text = card_item.get("description") or ""
+            elif dtype == 4: raw_text = card_item.get("content") or ""
+            elif dtype == 8: raw_text = f"{card.get('title', '')}\n{card.get('desc', '')}"
+            elif dtype == 1: raw_text = card_item.get("content") or ""
+
+            if raw_text:
+                pattern = r'(\[.*?\])'
+                parts = re.split(pattern, raw_text)
+                nodes = []
+                for part in parts:
+                    if not part:
+                        continue
+                    if part in emoji_map:
+                        nodes.append({
+                            "type": "emoji",
+                            "text": part,
+                            "url": emoji_map[part]
+                        })
+                    else:
+                        nodes.append({
+                            "type": "text",
+                            "text": part
+                        })
+                item["content_nodes"] = nodes
             if dtype == 2:
-                item["content"] = (card.get("item") or {}).get("content", "")
-                pictures = (card.get("item") or {}).get("pictures", [])
-                item["images"] = (
-                    [img.get("img_src", "") for img in pictures] if pictures else []
-                )
-            elif dtype == 4:
-                item["content"] = (card.get("item") or {}).get("content", "")
-            elif dtype == 8:
-                item["content"] = card.get("title", "")
-                item["images"] = [card.get("pic", "")] if card.get("pic") else []
-            elif dtype == 64:
-                item["content"] = card.get("title", "")
-                item["images"] = [card.get("pic", "")] if card.get("pic") else []
+                pics = card_item.get("pictures") or []
+                item["images"] = [p.get("img_src") for p in pics if isinstance(p, dict) and p.get("img_src")]
+                
             elif dtype == 1:
-                item["content"] = (card.get("item") or {}).get("content", "")
-                if card.get("origin"):
-                    origin = json.loads(card["origin"])
-                    item["repost_content"] = (origin.get("item") or {}).get(
-                        "content", ""
-                    )
+                origin_str = card.get("origin")
+                if origin_str:
+                    try:
+                        origin_card = json.loads(origin_str) if isinstance(origin_str, str) else origin_str
+                        o_item = origin_card.get("item", {})
+                        item["repost_content"] = o_item.get("description") or o_item.get("content") or ""
+                    except Exception:
+                        item["repost_content"] = "[转发内容解析失败]"
 
             return item
         except Exception as e:
-            logger.warning("Failed to parse dynamic: {}", e)
+            logger.error("解析动态项失败: {}, 动态ID: {}", e, desc.get("dynamic_id"))
             return None
 
     async def get_videos(self, uid: str, page: int = 1, page_size: int = 30) -> list:
@@ -149,29 +182,22 @@ class BilibiliChannelService:
         try:
             u = user.User(uid=int(uid), credential=self.credential)
             videos_data = await u.get_videos(pn=page, ps=page_size)
-            videos = (
-                videos_data.get("list", {}).get("videos", [])
-                if isinstance(videos_data, dict)
-                else []
-            )
+
+            vlist = (videos_data.get("list") or {}).get("vlist") or []
+            
             result = []
-            for v in videos:
-                result.append(
-                    {
-                        "bvid": v.get("bvid"),
-                        "title": v.get("title"),
-                        "pic": v.get("pic"),
-                        "aid": v.get("aid"),
-                        "duration": v.get("duration"),
-                        "pubdate": v.get("pubdate"),
-                        "play": v.get("play"),
-                        "like": v.get("like"),
-                        "coin": v.get("coin"),
-                        "favorite": v.get("favorite"),
-                        "share": v.get("share"),
-                        "reply": v.get("reply"),
-                    }
-                )
+            for v in vlist:
+                result.append({
+                    "bvid": v.get("bvid"),
+                    "title": v.get("title"),
+                    "pic": v.get("pic"),
+                    "aid": v.get("aid"),
+                    "duration": v.get("length"),
+                    "pubdate": v.get("created"),
+                    "play": v.get("play"),
+                    "like": (v.get("stat") or {}).get("like", 0), 
+                    "reply": v.get("comment", 0),
+                })
             return result
         except Exception as e:
             logger.error("Failed to get videos, uid={}: {}", uid, e)

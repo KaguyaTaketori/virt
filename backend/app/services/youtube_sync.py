@@ -137,6 +137,9 @@ async def _load_existing_video_id_set(
 # ── Upsert ────────────────────────────────────────────────────────────────────
 
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 async def _upsert_video(
     session: AsyncSession,
     *,
@@ -151,22 +154,23 @@ async def _upsert_video(
     if "fetched_at" in db_video_columns:
         safe_data["fetched_at"] = now
 
-    if vid_id in existing_video_ids:
-        safe_data.pop("channel_id", None)
-        safe_data.pop("platform", None)
-        safe_data.pop("video_id", None)
-        if safe_data:
-            await session.execute(
-                update(Video)
-                .where(
-                    Video.channel_id == video_data["channel_id"],
-                    Video.video_id == vid_id,
-                )
-                .values(**safe_data)
-            )
-        return
+    dialect_name = session.bind.dialect.name
+    insert_fn = pg_insert if dialect_name == "postgresql" else sqlite_insert
 
-    await session.execute(insert(Video).values(**safe_data))
+    stmt = insert_fn(Video).values(**safe_data)
+    
+    update_cols = {
+        k: v for k, v in safe_data.items() 
+        if k not in ["id", "channel_id", "video_id", "platform"]
+    }
+
+    upsert_stmt = stmt.on_conflict_do_update(
+        index_elements=["channel_id", "video_id"],
+        set_=update_cols
+    )
+
+    await session.execute(upsert_stmt)
+    
     existing_video_ids.add(vid_id)
 
 

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, User
 from app.auth import get_current_user_optional
@@ -23,7 +23,7 @@ router = APIRouter()
 @router.get("/{channel_id}/bilibili")
 async def get_channel_bilibili_info(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
     current_user: User = Depends(get_current_user_optional),
 ):

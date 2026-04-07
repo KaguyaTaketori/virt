@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Boolean,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -150,7 +151,7 @@ class Stream(Base):
     id = Column(Integer, primary_key=True, index=True)
     channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
     platform = Column(SQLEnum(Platform), nullable=False)
-    video_id = Column(String(100), nullable=True, index=True)
+    video_id = Column(String(100), nullable=False, index=True)
     title = Column(String(500), nullable=True)
     description = Column(Text, nullable=True)
     thumbnail_url = Column(String(500), nullable=True)
@@ -168,6 +169,7 @@ class Stream(Base):
     channel = relationship("Channel", back_populates="streams")
 
     __table_args__ = (
+        UniqueConstraint('channel_id', 'video_id', name='uix_stream_channel_video'),
         Index("ix_stream_status_platform", "status", "platform"),
         Index("ix_stream_channel_status", "channel_id", "status"),
     )
@@ -189,7 +191,7 @@ class Video(Base):
     published_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="archive")
     fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    duration_secs = Column(Integer, nullable=True)  # 秒数，便于 Shorts 判断
+    duration_secs = Column(Integer, nullable=True)
     like_count = Column(BigInteger, nullable=True)
     live_chat_id = Column(String(100), nullable=True)
     scheduled_at = Column(DateTime, nullable=True)

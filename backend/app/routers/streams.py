@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.guards import BilibiliAccess
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, Stream, StreamStatus, User
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 
 @router.get("/live", response_model=list[StreamResponse])
 async def get_live_streams(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
 ):
     query = (
@@ -38,7 +38,7 @@ async def get_live_streams(
 async def get_all_streams(
     platform: Optional[Platform] = None,
     status: Optional[StreamStatus] = None,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
 ):
     query = (

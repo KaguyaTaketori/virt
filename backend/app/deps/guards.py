@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.auth import get_current_user
-from app.deps.base import get_async_db
+from app.deps.base import get_db_session
 from app.models.models import User
 from app.services.permissions import get_user_roles, has_permission
 from app.services.permission_cache import permission_cache
@@ -37,7 +37,7 @@ class _PermissionGuard:
         token: str = Depends(
             OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
         ),
-        db: AsyncSession = Depends(get_async_db),
+        db: AsyncSession = Depends(get_db_session),
     ) -> bool | User:
         if not token:
             if not self.require and self.allow_anonymous:
@@ -144,7 +144,7 @@ def require_roles(*allowed_roles: str) -> Callable:
         token: str = Depends(
             OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
         ),
-        db: AsyncSession = Depends(get_async_db),
+        db: AsyncSession = Depends(get_db_session),
     ) -> User:
         if not token:
             raise HTTPException(

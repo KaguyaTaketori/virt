@@ -103,6 +103,12 @@ export interface PaginatedVideos {
   total_pages: number
 }
 
+export interface ContentNode {
+  type: 'text' | 'emoji'
+  text: string
+  url?: string
+}
+
 export interface BilibiliInfo {
   info: {
     mid: number
@@ -124,6 +130,7 @@ export interface BilibiliInfo {
     type: number
     timestamp: number
     content: string
+    content_nodes: ContentNode[]
     images: string[]
     repost_content: string | null
   }>

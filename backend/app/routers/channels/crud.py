@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database_async import AsyncSessionFactory
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.guards import AdminUser
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import (
@@ -34,7 +34,7 @@ async def get_channels(
     platform: Optional[str] = None,
     is_active: Optional[bool] = None,
     org_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
 ):
     query = select(Channel)
@@ -68,7 +68,7 @@ async def get_channels(
 @router.get("/{channel_id}", response_model=ChannelResponse)
 async def get_channel_by_id(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
 ):
     channel = await _get_or_404(db, channel_id)
@@ -93,7 +93,7 @@ async def get_channel_by_id(
 async def create_channel(
     channel: ChannelCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
     resolved_id = channel.channel_id
@@ -157,7 +157,7 @@ async def create_channel(
 async def update_channel(
     channel_id: int,
     channel_update: ChannelUpdate,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
     channel = await _get_or_404(db, channel_id)
@@ -171,7 +171,7 @@ async def update_channel(
 @router.delete("/{channel_id}")
 async def delete_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
     channel = await _get_or_404(db, channel_id)
@@ -201,7 +201,7 @@ async def delete_channel(
 @router.post("/{channel_id}/refresh", response_model=ChannelResponse)
 async def refresh_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
     channel = await _get_or_404(db, channel_id)

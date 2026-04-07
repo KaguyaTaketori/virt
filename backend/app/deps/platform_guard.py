@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps.base import get_async_db
+from app.deps.base import get_db_session
 from app.models.models import Platform, User
 from app.auth import get_current_user_optional
 from app.services.permissions import has_permission
@@ -77,7 +77,7 @@ class PlatformContext:
 
 
 async def _build_platform_context(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> PlatformContext:
     """构建权限上下文"""

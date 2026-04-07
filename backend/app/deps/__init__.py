@@ -1,3 +1,3 @@
-from app.deps.base import get_async_db
+from app.deps.base import get_db_session
 
-__all__ = ["get_async_db"]
+__all__ = ["get_db_session"]

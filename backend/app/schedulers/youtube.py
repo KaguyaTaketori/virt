@@ -4,14 +4,16 @@ from datetime import datetime, timezone
 from typing import List
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, case
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
 from app.database_async import AsyncSessionFactory
 from app.models.models import Channel, Platform, Stream, StreamStatus, Video
 from app.services.youtube_fetcher import get_videos_details, parse_youtube_stream
 from app.services.quota_guard import can_spend, spend, status as quota_status
-from app.services.youtube_sync import sync_channel_videos
 from app.services.api_key_manager import get_api_key, is_api_available
 
 
@@ -196,24 +198,42 @@ async def discover_live_streams_from_videos() -> None:
         await db.commit()
 
 
-async def _upsert_stream(db, channel_id: int, parsed: dict, platform) -> None:
-    result = await db.execute(
-        select(Stream).where(
-            Stream.channel_id == channel_id,
-            Stream.video_id == parsed["video_id"],
-        )
-    )
-    stream = result.scalar_one_or_none()
+
+
+async def _upsert_stream(db: AsyncSession, channel_id: int, parsed: dict, platform) -> None:
     now = datetime.now(timezone.utc)
+    
+    insert_data = {
+        "channel_id": channel_id,
+        "platform": platform,
+        "video_id": parsed["video_id"],
+        "title": parsed.get("title"),
+        "status": parsed.get("status"),
+        "viewer_count": parsed.get("viewer_count", 0),
+        "updated_at": now,
+        "peak_viewers": parsed.get("viewer_count", 0) 
+    }
 
-    if not stream:
-        stream = Stream(channel_id=channel_id, platform=platform)
-        db.add(stream)
+    dialect_name = db.bind.dialect.name
+    insert_fn = pg_insert if dialect_name == "postgresql" else sqlite_insert
 
-    for field, value in parsed.items():
-        if getattr(stream, field, None) != value:
-            setattr(stream, field, value)
+    stmt = insert_fn(Stream).values(**insert_data)
 
-    stream.updated_at = now
-    if parsed.get("viewer_count", 0) > (stream.peak_viewers or 0):
-        stream.peak_viewers = parsed["viewer_count"]
+    update_cols = {
+        "title": stmt.excluded.title,
+        "status": stmt.excluded.status,
+        "viewer_count": stmt.excluded.viewer_count,
+        "updated_at": now,
+        
+        "peak_viewers": case(
+            (stmt.excluded.viewer_count > Stream.peak_viewers, stmt.excluded.viewer_count),
+            else_=Stream.peak_viewers
+        )
+    }
+
+    upsert_stmt = stmt.on_conflict_do_update(
+        index_elements=["channel_id", "video_id"],
+        set_=update_cols
+    )
+
+    await db.execute(upsert_stmt)

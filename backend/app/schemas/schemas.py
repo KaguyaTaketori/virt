@@ -40,7 +40,7 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     created_at: datetime
-    roles: Optional[list[str]] = []
+    roles: Optional[set[str]] = []
     permissions: Optional[list[str]] = []
 
     class Config:

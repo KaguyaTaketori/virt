@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 
-from app.deps import get_async_db
+from app.deps import get_db_session
 from app.deps.guards import AdminUser
 from app.models.models import Organization, User
 from app.schemas.schemas import (
@@ -16,13 +16,13 @@ router = APIRouter(prefix="/api/organizations", tags=["organizations"])
 
 
 @router.get("", response_model=List[OrganizationResponse])
-async def get_organizations(db: AsyncSession = Depends(get_async_db)):
+async def get_organizations(db: AsyncSession = Depends(get_db_session)):
     result = await db.execute(select(Organization))
     return result.scalars().all()
 
 
 @router.get("/{org_id}", response_model=OrganizationResponse)
-async def get_organization(org_id: int, db: AsyncSession = Depends(get_async_db)):
+async def get_organization(org_id: int, db: AsyncSession = Depends(get_db_session)):
     result = await db.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one_or_none()
     if not org:
@@ -33,7 +33,7 @@ async def get_organization(org_id: int, db: AsyncSession = Depends(get_async_db)
 @router.post("", response_model=OrganizationResponse)
 async def create_organization(
     org: OrganizationCreate,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _current_user: User = AdminUser,
 ):
     result = await db.execute(select(Organization).where(Organization.name == org.name))
@@ -50,7 +50,7 @@ async def create_organization(
 async def update_organization(
     org_id: int,
     org_update: OrganizationUpdate,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
     result = await db.execute(select(Organization).where(Organization.id == org_id))
@@ -69,7 +69,7 @@ async def update_organization(
 @router.delete("/{org_id}")
 async def delete_organization(
     org_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     _current_user: User = AdminUser,
 ):
     result = await db.execute(select(Organization).where(Organization.id == org_id))

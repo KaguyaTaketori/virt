@@ -8,7 +8,7 @@ from app.services.bilibili_user import bilibili_user_service
 from app.services.bilibili_auth import bilibili_auth_service
 from app.models.models import User
 from app.auth import get_current_user_optional
-from app.deps.base import get_async_db
+from app.deps.base import get_db_session
 from app.loguru_config import logger
 
 
@@ -24,7 +24,7 @@ async def get_current_active_user(
 
 
 async def check_bilibili_permission(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_active_user),
 ):
     has_perm = await has_permission(current_user.id, "bilibili", "access", db)
@@ -47,7 +47,7 @@ async def generate_qrcode(
 @router.get("/qrcode/{session_id}")
 async def check_qrcode_status(
     current_user: User = Depends(check_bilibili_permission),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_db_session),
     session_id: str = None,
 ):
     """
