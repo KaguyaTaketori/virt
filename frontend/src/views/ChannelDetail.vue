@@ -165,17 +165,12 @@
                   </span>
                   <span class="text-xs text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
                 </div>
-                <!-- 更多操作按钮可以在此处添加 -->
               </div>
 
-              <!-- 2. 动态正文：节点渲染方案 (核心修改) -->
-              <!-- whitespace-pre-wrap 确保文本中的 \n 正常换行 -->
+              <!-- 2. 动态正文 -->
               <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
                 <template v-for="(node, idx) in d.content_nodes" :key="idx">
-                  <!-- 文字节点 -->
                   <span v-if="node.type === 'text'">{{ node.text }}</span>
-                  
-                  <!-- 表情节点 -->
                   <img 
                     v-else-if="node.type === 'emoji'" 
                     :src="node.url" 
@@ -201,7 +196,6 @@
                   :key="idx" 
                   class="aspect-square rounded overflow-hidden bg-zinc-800"
                 >
-                  <!-- B站图片强制使用 no-referrer 防止 403 -->
                   <img 
                     :src="img + '@200w_200h_1c.webp'" 
                     class="w-full h-full object-cover hover:scale-110 transition-transform duration-300 cursor-zoom-in" 
@@ -212,6 +206,23 @@
               </div>
 
             </div>
+            
+            <!-- 加载更多 -->
+            <div v-if="bilibiliDynamicsHasMore.value" class="text-center py-4">
+              <n-button 
+                :loading="bilibiliDynamicsLoading.value" 
+                @click="loadMoreDynamics"
+                quaternary
+              >
+                加载更多
+              </n-button>
+            </div>
+            <div v-else-if="bilibiliDynamics.length > 0" class="text-center py-4 text-gray-500 text-sm">
+              没有更多了
+            </div>
+          </div>
+          <div v-else-if="bilibiliDynamicsLoading.value" class="text-center py-20">
+            <n-spin size="medium" />
           </div>
           <div v-else class="text-center py-20">
             <div class="text-gray-600 mb-2">暂无动态数据</div>
@@ -288,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, type Ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination, useMessage } from 'naive-ui'
 import { Heart, Ban, Youtube } from 'lucide-vue-next'
@@ -359,8 +370,13 @@ const liveState   = useChannelVideos({
 
 // --- B站专属数据 (不属于通用视频列表) ---
 const bilibiliInfo = ref<any>(null)
-const bilibiliDynamics = ref<Dynamic[]>([])
+const bilibiliAllDynamics = ref<Dynamic[]>([])
 const bilibiliVideos = ref<BilibiliVideo[]>([])
+const bilibiliDynamicsOffset = ref("")
+const bilibiliDynamicsLoading = ref(false)
+const bilibiliDynamicsHasMore = ref(true)
+
+const bilibiliDynamics = computed(() => bilibiliAllDynamics.value)
 
 const isBilibili = computed(() => channel.value?.platform === 'bilibili')
 
@@ -494,22 +510,72 @@ async function fetchChannel(id: number) {
 }
 
 // 抓取 B站 动态和实时主页数据 (非数据库视频)
-async function fetchBilibiliRawData(channelId: number) {
+async function fetchBilibiliRawData(channelId: number, append = false) {
+  if (bilibiliDynamicsLoading.value) return
+  
+  bilibiliDynamicsLoading.value = true
   try {
-    const { data } = await channelApi.getBilibili(channelId)
-    bilibiliInfo.value = data.info
-    bilibiliDynamics.value = data.dynamics
-    bilibiliVideos.value = data.videos
+    if (!append && bilibiliAllDynamics.value.length > 0) {
+      bilibiliDynamicsLoading.value = false
+      return
+    }
+    
+    const offset = append ? bilibiliDynamicsOffset.value : ""
+    const { data } = await channelApi.getBilibili(channelId, offset, 12)
+    
+    if (!append) {
+      bilibiliInfo.value = data.info
+      bilibiliAllDynamics.value = data.dynamics
+      bilibiliVideos.value = data.videos
+      bilibiliDynamicsOffset.value = data.next_offset || ""
+      bilibiliDynamicsHasMore.value = !!data.next_offset
+    } else {
+      bilibiliAllDynamics.value = [...bilibiliAllDynamics.value, ...data.dynamics]
+      bilibiliDynamicsOffset.value = data.next_offset || ""
+      bilibiliDynamicsHasMore.value = !!data.next_offset
+    }
   } catch (err) {
     console.error('Failed to fetch Bilibili raw data:', err)
+  } finally {
+    bilibiliDynamicsLoading.value = false
+  }
+}
+
+function loadMoreDynamics() {
+  if (!bilibiliDynamicsHasMore.value || bilibiliDynamicsLoading.value || !bilibiliDynamicsOffset.value) return
+  fetchBilibiliRawData(channel.value!.id, true)
+}
+
+// 页面滚动到底触发加载
+function onPageScroll() {
+  console.log('[scroll] fired!')
+  
+  if (activeTab.value !== 'dynamics') return
+  
+  const scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0
+  const docHeight = document.documentElement.scrollHeight || document.body.scrollHeight
+  const winHeight = window.innerHeight
+  
+  console.log('[scroll] top:', scrollTop, 'doc:', docHeight, 'win:', winHeight)
+  
+  if (winHeight + scrollTop >= docHeight - 200) {
+    console.log('[scroll] triggering loadMoreDynamics')
+    loadMoreDynamics()
   }
 }
 
 // --- 生命周期与监听 ---
+const mainScrollRef = inject<Ref<HTMLElement | null>>('mainScrollRef')
+
 onMounted(async () => {
+  console.log('[onMounted] adding scroll listener')
   await orgStore.invalidate()
   const channelId = Number(route.params.id)
   await fetchChannel(channelId)
+  
+  const scrollEl = mainScrollRef?.value || window
+  scrollEl.addEventListener('scroll', onPageScroll)
+  console.log('[onMounted] scroll listener added on', scrollEl === window ? 'window' : 'main element')
 })
 
 watch(activeTab, async (tab) => {
@@ -525,6 +591,8 @@ watch(activeTab, async (tab) => {
     await shortsState.fetch(channelId)
   } else if (tab === 'home' && !bilibiliInfo.value) {
     await fetchBilibiliRawData(channelId)
+  } else if (tab === 'dynamics' && bilibiliDynamics.value.length === 0) {
+    await fetchBilibiliRawData(channelId)
   }
 })
 
@@ -538,4 +606,9 @@ function getDynamicTypeLabel(type: number): string {
   const map: Record<number, string> = { 1: '转发', 2: '图文', 4: '文字', 8: '视频', 64: '专栏' }
   return map[type] || '动态'
 }
+
+onUnmounted(() => {
+  const scrollEl = mainScrollRef?.value || window
+  scrollEl.removeEventListener('scroll', onPageScroll)
+})
 </script>

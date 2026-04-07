@@ -1,6 +1,7 @@
 // frontend/src/api/index.ts
 import axios from 'axios'
 import type { AxiosInstance, AxiosError } from 'axios'
+import type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, Role, Permission, UserWithRoles } from '@/types'
 
 const api: AxiosInstance = axios.create({
   baseURL: '',
@@ -37,118 +38,7 @@ api.interceptors.response.use(
   }
 )
 
-// ── 类型定义 ──────────────────────────────────────────────────────────────────
-
-export interface Stream {
-  id: number
-  channel_id: number
-  platform: 'youtube' | 'bilibili'
-  video_id: string | null
-  title: string | null
-  thumbnail_url: string | null
-  viewer_count: number
-  status: 'live' | 'upcoming' | 'archive' | 'offline'
-  started_at: string | null
-  scheduled_at: string | null
-  channel_name: string | null
-  channel_avatar: string | null
-  channel_avatar_shape?: 'circle' | 'square'
-  org_id?: number | null
-}
-
-export interface Channel {
-  id: number
-  platform: 'youtube' | 'bilibili' | 'empty'
-  channel_id: string
-  name: string
-  avatar_url: string | null
-  is_active: boolean
-  org_id: number | null
-  avatar_shape: 'circle' | 'square'
-  banner_url: string | null
-  twitter_url: string | null
-  youtube_url: string | null
-  description: string | null
-  is_liked: boolean
-  is_blocked: boolean
-  bilibili_sign: string | null
-  bilibili_fans: number | null
-  bilibili_archive_count: number | null
-}
-
-export interface Organization {
-  id: number
-  name: string
-  name_en: string | null
-  logo_url: string | null
-  website: string | null
-  logo_shape: 'circle' | 'square'
-}
-
-export interface Video {
-  id: string
-  title: string
-  thumbnail_url: string | null
-  duration: string | null
-  view_count: number
-  published_at: string | null
-  status: string
-}
-
-export interface PaginatedVideos {
-  videos: Video[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
-}
-
-export interface ContentNode {
-  type: 'text' | 'emoji'
-  text: string
-  url?: string
-}
-
-export interface BilibiliInfo {
-  info: {
-    mid: number
-    name: string
-    sex: string
-    face: string
-    sign: string
-    level: number
-    fans: number
-    attention: number
-    archive_count: number
-    article_count: number
-    following: number
-    like_num: number
-    official_verify: { type: number; desc: string } | null
-  } | null
-  dynamics: Array<{
-    dynamic_id: string
-    type: number
-    timestamp: number
-    content: string
-    content_nodes: ContentNode[]
-    images: string[]
-    repost_content: string | null
-  }>
-  videos: Array<{
-    bvid: string
-    title: string
-    pic: string
-    aid: number
-    duration: string
-    pubdate: number
-    play: number
-    like: number
-    coin: number
-    favorite: number
-    share: number
-    reply: number
-  }>
-}
+export type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, Role, Permission, UserWithRoles }
 
 // ── API 方法 ──────────────────────────────────────────────────────────────────
 
@@ -165,8 +55,10 @@ export const channelApi = {
   get:       (id: number) =>
     api.get<Channel>(`/api/channels/${id}`),
 
-  getBilibili: (id: number) =>
-    api.get<BilibiliInfo>(`/api/channels/${id}/bilibili`),
+  getBilibili: (id: number, dynamicsOffset?: string, dynamicsLimit?: number) =>
+    api.get<BilibiliInfo>(`/api/channels/${id}/bilibili`, {
+      params: { dynamics_offset: dynamicsOffset, dynamics_limit: dynamicsLimit },
+    }),
 
   // 明确返回 PaginatedVideos，消除隐式 any
   getVideos: (id: number, page?: number, pageSize?: number, status?: string) =>
@@ -253,28 +145,6 @@ export const adminVideosApi = {
 
   batchUpdateStatus: (payload: { video_ids: string[]; new_status: string }) =>
     api.post('/api/admin/videos/batch-update-status', payload),
-}
-
-export interface Role {
-  id: number
-  name: string
-  description: string | null
-}
-
-export interface Permission {
-  id: number
-  name: string
-  description: string | null
-  resource: string
-  action: string
-}
-
-export interface UserWithRoles {
-  id: number
-  username: string
-  email: string | null
-  created_at: string
-  roles: string[]
 }
 
 export const adminPermissionsApi = {

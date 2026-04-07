@@ -18,10 +18,59 @@ import {
 import { PRESET_GENERATORS, type PresetId } from '@/utils/presetLayouts'
 
 const STORAGE_KEY = 'multiview_tree'
+const DANMAKU_SETTINGS_KEY = 'danmaku_settings'
+
+export interface DanmakuSettings {
+  enabled?: boolean
+  fontSize: number
+  speed: number
+  opacity: number
+  color: string
+  strokeEnabled: boolean
+  strokeColor: string
+  strokeWidth: number
+}
+
+export const DEFAULT_DANMAKU_SETTINGS: DanmakuSettings = {
+  enabled: false,
+  fontSize: 24,
+  speed: 2,
+  opacity: 1,
+  color: '#ffffff',
+  strokeEnabled: true,
+  strokeColor: '#000000',
+  strokeWidth: 2,
+}
 
 export const useMultiviewStore = defineStore('multiview', () => {
   const tree = ref<LayoutNode>(createEmptyLeaf())
   const activeChannels = computed(() => getActiveChannels(tree.value))
+
+  // ── 弹幕设置 ─────────────────────────────────────────────────────────────────
+  const danmakuSettings = ref<DanmakuSettings>({ ...DEFAULT_DANMAKU_SETTINGS })
+
+  function loadDanmakuSettings() {
+    try {
+      const saved = localStorage.getItem(DANMAKU_SETTINGS_KEY)
+      if (saved) danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS, ...JSON.parse(saved) }
+    } catch {
+      danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
+    }
+  }
+
+  function saveDanmakuSettings() {
+    localStorage.setItem(DANMAKU_SETTINGS_KEY, JSON.stringify(danmakuSettings.value))
+  }
+
+  function updateDanmakuSettings(partial: Partial<DanmakuSettings>) {
+    danmakuSettings.value = { ...danmakuSettings.value, ...partial }
+    saveDanmakuSettings()
+  }
+
+  function resetDanmakuSettings() {
+    danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
+    saveDanmakuSettings()
+  }
 
   // ── 持久化 ─────────────────────────────────────────────────────────────────
   function init() {
@@ -132,7 +181,12 @@ export const useMultiviewStore = defineStore('multiview', () => {
   return {
     tree,
     activeChannels,
+    danmakuSettings,
     init,
+    loadDanmakuSettings,
+    saveDanmakuSettings,
+    updateDanmakuSettings,
+    resetDanmakuSettings,
     addChannel,
     closeChannel,
     clearChannel,

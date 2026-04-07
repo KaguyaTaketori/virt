@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import GlobalHeader from '@/components/GlobalHeader.vue'
 import NavigationSidebar from '@/components/NavigationSidebar.vue'
@@ -13,12 +13,14 @@ function toggleSidebar(): void {
   localStorage.setItem('sidebarCollapsed', String(isSidebarCollapsed.value))
 }
 
-
 const route = useRoute()
 
 const isFullscreen = computed<boolean>(
   () => route.meta.fullscreen === true
 )
+
+const mainScrollRef = ref<HTMLElement | null>(null)
+provide('mainScrollRef', mainScrollRef)
 </script>
 
 <template>
@@ -35,7 +37,7 @@ const isFullscreen = computed<boolean>(
       />
       <div class="flex flex-1 min-h-0 overflow-hidden">
         <NavigationSidebar :is-collapsed="isSidebarCollapsed" />
-        <main class="flex-1 min-w-0 overflow-y-auto bg-zinc-900">
+        <main ref="mainScrollRef" class="flex-1 min-w-0 overflow-y-auto bg-zinc-900">
           <router-view />
         </main>
       </div>

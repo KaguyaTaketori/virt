@@ -2,25 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { streamApi } from '@/api'
+import type { Stream, StreamStatus } from '@/types'
 
-export interface Stream {
-  id: number
-  channel_id: number
-  platform: 'youtube' | 'bilibili'
-  video_id: string | null
-  title: string | null
-  thumbnail_url: string | null
-  viewer_count: number
-  status: 'live' | 'upcoming' | 'archive' | 'offline'
-  started_at: string | null
-  scheduled_at: string | null
-  channel_name: string | null
-  channel_avatar: string | null
-  channel_avatar_shape?: 'circle' | 'square'
-  org_id?: number | null
-}
-
-export type StreamStatus = 'live' | 'upcoming' | 'archive' | 'offline'
+export type { Stream, StreamStatus }
 
 export const useStreamStore = defineStore('stream', () => {
   const currentStatus = ref<StreamStatus>('live')

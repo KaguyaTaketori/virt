@@ -18,7 +18,6 @@ import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
 import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
 import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
 import GroupSelectorModal from '@/components/multiview/GroupSelectorModal.vue'
-import { DEFAULT_DANMAKU_SETTINGS } from '@/types/danmaku'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,20 +43,6 @@ const isRefreshing = ref(false)
 const allStreams = ref<Stream[]>([])
 const likedChannels = ref<ApiChannel[]>([])
 const likedOrgIds = ref<number[]>([])
-
-// === 弹幕设置逻辑 (UI 局部状态) ===
-const danmakuSettings = reactive({ ...DEFAULT_DANMAKU_SETTINGS })
-
-function loadDanmakuSettings() {
-  try {
-    const saved = localStorage.getItem('danmaku_settings')
-    if (saved) Object.assign(danmakuSettings, JSON.parse(saved))
-  } catch {}
-}
-
-function saveDanmakuSettings() {
-  localStorage.setItem('danmaku_settings', JSON.stringify(danmakuSettings))
-}
 
 // === 数据获取 ===
 async function fetchData() {
@@ -174,7 +159,7 @@ function handleApplyPreset(id: PresetId) {
 
 // === 生命周期 ===
 onMounted(async () => {
-  loadDanmakuSettings()
+  store.loadDanmakuSettings()
   
   // 加载机构数据
   await orgStore.fetchOrganizations()
@@ -240,7 +225,7 @@ onMounted(async () => {
     <VideoGrid
       :layout-tree="store.tree"
       :show-danmaku="showDanmaku"
-      :danmaku-settings="danmakuSettings"
+      :danmaku-settings="store.danmakuSettings"
       @request-add="openAddModal"
       @request-replace="openReplaceModal"
       @clear-channel="store.clearChannel"
@@ -321,40 +306,40 @@ onMounted(async () => {
 
           <div class="space-y-5">
             <div>
-              <label class="block text-sm text-zinc-400 mb-2">字体大小: {{ danmakuSettings.fontSize }}px</label>
+              <label class="block text-sm text-zinc-400 mb-2">字体大小: {{ store.danmakuSettings.fontSize }}px</label>
               <input
                 type="range"
-                v-model.number="danmakuSettings.fontSize"
+                v-model.number="store.danmakuSettings.fontSize"
                 min="12"
                 max="48"
                 class="w-full accent-rose-500"
-                @change="saveDanmakuSettings"
+                @change="store.saveDanmakuSettings()"
               />
             </div>
 
             <div>
-              <label class="block text-sm text-zinc-400 mb-2">弹幕速度: {{ danmakuSettings.speed }}</label>
+              <label class="block text-sm text-zinc-400 mb-2">弹幕速度: {{ store.danmakuSettings.speed }}</label>
               <input
                 type="range"
-                v-model.number="danmakuSettings.speed"
+                v-model.number="store.danmakuSettings.speed"
                 min="0.5"
                 max="6"
                 step="0.5"
                 class="w-full accent-rose-500"
-                @change="saveDanmakuSettings"
+                @change="store.saveDanmakuSettings()"
               />
             </div>
 
             <div>
-              <label class="block text-sm text-zinc-400 mb-2">不透明度: {{ danmakuSettings.opacity }}</label>
+              <label class="block text-sm text-zinc-400 mb-2">不透明度: {{ store.danmakuSettings.opacity }}</label>
               <input
                 type="range"
-                v-model.number="danmakuSettings.opacity"
+                v-model.number="store.danmakuSettings.opacity"
                 min="0.3"
                 max="1"
                 step="0.1"
                 class="w-full accent-rose-500"
-                @change="saveDanmakuSettings"
+                @change="store.saveDanmakuSettings()"
               />
             </div>
 
@@ -364,10 +349,10 @@ onMounted(async () => {
                 <button
                   v-for="c in ['#ffffff', '#ff6b6b', '#ffd700', '#90EE90', '#87CEEB', '#ff69b4']"
                   :key="c"
-                  @click="danmakuSettings.color = c; saveDanmakuSettings()"
+                  @click="store.updateDanmakuSettings({ color: c })"
                   class="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
                   :style="{ backgroundColor: c }"
-                  :class="danmakuSettings.color === c ? 'border-white' : 'border-transparent'"
+                  :class="store.danmakuSettings.color === c ? 'border-white' : 'border-transparent'"
                 />
               </div>
             </div>
@@ -376,34 +361,34 @@ onMounted(async () => {
               <label class="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  v-model="danmakuSettings.strokeEnabled"
+                  v-model="store.danmakuSettings.strokeEnabled"
                   class="w-4 h-4 accent-rose-500"
-                  @change="saveDanmakuSettings"
+                  @change="store.saveDanmakuSettings()"
                 />
                 <span class="text-sm text-zinc-300">描边</span>
               </label>
-              <template v-if="danmakuSettings.strokeEnabled">
+              <template v-if="store.danmakuSettings.strokeEnabled">
                 <input
-                  v-model="danmakuSettings.strokeColor"
+                  v-model="store.danmakuSettings.strokeColor"
                   type="color"
                   class="w-8 h-8 rounded cursor-pointer"
-                  @change="saveDanmakuSettings"
+                  @change="store.saveDanmakuSettings()"
                 />
                 <span class="text-xs text-zinc-500">宽度</span>
                 <input
                   type="range"
-                  v-model.number="danmakuSettings.strokeWidth"
+                  v-model.number="store.danmakuSettings.strokeWidth"
                   min="0"
                   max="4"
                   class="w-20 accent-rose-500"
-                  @change="saveDanmakuSettings"
+                  @change="store.saveDanmakuSettings()"
                 />
               </template>
             </div>
 
             <div class="pt-4 border-t border-zinc-700">
               <button
-                @click="Object.assign(danmakuSettings, DEFAULT_DANMAKU_SETTINGS); saveDanmakuSettings()"
+                @click="store.resetDanmakuSettings()"
                 class="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm transition-colors"
               >
                 恢复默认

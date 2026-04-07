@@ -14,17 +14,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
+import type { User } from '@/types'
 import { authApi } from '@/api'
 import router from '@/router'
 
-interface User {
-  id: number
-  username: string
-  email: string | null
-  created_at: string
-  roles: string[]
-  permissions?: string[]
-}
+export type { User }
 
 // module-level 持有 QueryClient 引用，在 main.ts 中注入
 let _sharedQueryClient: QueryClient | null = null

@@ -1,32 +1,9 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
+import type { Video, VideoFetchState, FetchConfig } from '@/types'
 import { channelApi } from '@/api'
 
-export interface Video {
-  id: string
-  title: string
-  thumbnail_url: string | null
-  duration: string | null
-  view_count: number
-  published_at: string | null
-  status: string
-}
-
-export interface VideoFetchState {
-  videos: Ref<Video[]>
-  page: Ref<number>
-  totalPages: Ref<number>
-  loading: Ref<boolean>
-  fetch: (channelId: number) => Promise<void>
-  reset: () => void
-}
-
-interface FetchConfig {
-  /** 单个状态字符串 或 多状态数组（多状态时自动合并结果） */
-  status: string | string[]
-  pageSize?: number
-  /** 多状态合并后的排序函数，默认不排序 */
-  mergeSort?: (a: Video, b: Video) => number
-}
+export type { Video, VideoFetchState, FetchConfig }
 
 
 export function useChannelVideos(config: FetchConfig): VideoFetchState {

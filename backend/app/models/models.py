@@ -169,7 +169,7 @@ class Stream(Base):
     channel = relationship("Channel", back_populates="streams")
 
     __table_args__ = (
-        UniqueConstraint('channel_id', 'video_id', name='uix_stream_channel_video'),
+        UniqueConstraint("channel_id", "video_id", name="uix_stream_channel_video"),
         Index("ix_stream_status_platform", "status", "platform"),
         Index("ix_stream_channel_status", "channel_id", "status"),
     )
@@ -203,6 +203,30 @@ class Video(Base):
     __table_args__ = (
         Index("ix_video_channel_published", "channel_id", "published_at"),
         Index("ix_video_unique", "channel_id", "video_id", unique=True),
+    )
+
+
+class BilibiliDynamic(Base):
+    """B站动态存储表"""
+
+    __tablename__ = "bilibili_dynamics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False, index=True)
+    dynamic_id = Column(String(50), unique=True, nullable=False)
+    uid = Column(String(50))
+    uname = Column(String(100))
+    type = Column(Integer)
+    content_nodes = Column(Text)
+    images = Column(Text)
+    repost_content = Column(Text)
+    timestamp = Column(Integer)
+    published_at = Column(DateTime, nullable=True)
+    raw_data = Column(Text)
+    fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_bilibili_dynamic_channel_published", "channel_id", "published_at"),
     )
 
 
