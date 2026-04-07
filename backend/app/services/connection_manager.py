@@ -16,6 +16,11 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
+    @property
+    def total_connections(self) -> int:
+        """计算全局所有视频的总连接数"""
+        return sum(len(connections) for connections in self.active_connections.values())
+
     async def connect(self, video_id: str, websocket: WebSocket) -> bool:
         # 全局连接数保护
         if self.total_connections >= _MAX_TOTAL_CONNECTIONS:

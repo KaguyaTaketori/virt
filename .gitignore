@@ -1,4 +1,4 @@
-node_modules/
+**/node_modules/
 .venv/
 __pycache__/
 *.pyc
@@ -6,9 +6,6 @@ __pycache__/
 .DS_Store
 *.log
 frontend/dist/
-
-# Local-only: Bilibili API notes / keys (do not commit)
-**/bilibili-api.txt
 
 *.db
 *.db-wal
