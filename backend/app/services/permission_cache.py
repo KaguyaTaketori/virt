@@ -3,14 +3,34 @@ from __future__ import annotations
 import json
 from time import time
 from typing import Any
+from abc import ABC, abstractmethod
 
 from app.loguru_config import logger
 
 
-class PermissionCache:
+class AbstractPermissionCache(ABC):
+    @abstractmethod
+    async def set_permissions(self, jti, roles, permissions, token_exp, user_id): ...
+    @abstractmethod
+    async def get_permissions(self, jti, user_id): ...
+    @abstractmethod
+    async def delete_permissions(self, jti, user_id): ...
+    @abstractmethod
+    async def delete_all_by_user(self, user_id): ...
+    @abstractmethod
+    async def delete_all(self): ...
+
+class NullPermissionCache(AbstractPermissionCache):
+    async def set_permissions(self, *args, **kwargs): pass
+    async def get_permissions(self, *args, **kwargs): return None
+    async def delete_permissions(self, *args, **kwargs): pass
+    async def delete_all_by_user(self, *args, **kwargs): pass
+    async def delete_all(self, *args, **kwargs): pass
+
+class RedisPermissionCache:
     PREFIX = "permission:"
 
-    def __init__(self, redis_client: Any):
+    def __init__(self, redis_client):
         self.redis = redis_client
 
     def _calc_ttl(self, token_exp: int) -> int:
@@ -58,7 +78,7 @@ class PermissionCache:
                 break
 
 
-permission_cache = PermissionCache(None)
+permission_cache = RedisPermissionCache(None)
 
 
 async def init_permission_cache(redis_client: Any) -> None:

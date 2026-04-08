@@ -83,11 +83,6 @@ class TokenBlacklistService:
         jti: Optional[str] = payload.get("jti")
         exp: Optional[int] = payload.get("exp")
 
-        if not jti:
-            # 旧格式 token（无 jti），按 sub+exp 生成伪 jti
-            sub = payload.get("sub", "unknown")
-            jti = f"{sub}:{exp}"
-
         expired_at = (
             datetime.fromtimestamp(exp, tz=timezone.utc)
             if exp

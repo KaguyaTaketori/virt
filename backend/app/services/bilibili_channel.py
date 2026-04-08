@@ -27,123 +27,9 @@ class BilibiliContext:
     db: AsyncSession
     channel_id: int
 
-
-def build_content_nodes(raw_text: str, emoji_map: dict[str, str]) -> list[dict]:
-    """将含表情符号的原始文本转换为节点列表。"""
-    if not raw_text:
-        return []
-    nodes = []
-    for part in re.split(r"(\[.*?\])", raw_text):
-        if not part:
-            continue
-        if part in emoji_map:
-            nodes.append({"type": "emoji", "text": part, "url": emoji_map[part]})
-        else:
-            nodes.append({"type": "text", "text": part})
-    return nodes
-
-
-def extract_emoji_map(display: dict) -> dict[str, str]:
-    """从 display 字段提取表情包映射。"""
-    emoji_details = (display.get("emoji_info") or {}).get("emoji_details") or []
-    return {
-        em["emoji_name"]: em["url"]
-        for em in emoji_details
-        if em.get("emoji_name") and em.get("url")
-    }
-
-
-class DynamicParser(ABC):
-    @abstractmethod
-    def parse(self, card: dict, card_item: dict, emoji_map: dict) -> dict:
-        """返回包含 content_nodes, images, repost_content 的字典。"""
-
-
-class TextDynamicParser(DynamicParser):
-    def parse(self, card, card_item, emoji_map):
-        return {
-            "content_nodes": build_content_nodes(
-                card_item.get("content", ""), emoji_map
-            ),
-            "images": [],
-            "repost_content": None,
-        }
-
-
-class ImageDynamicParser(DynamicParser):
-    def parse(self, card, card_item, emoji_map):
-        pics = card_item.get("pictures") or []
-        return {
-            "content_nodes": build_content_nodes(
-                card_item.get("description", ""), emoji_map
-            ),
-            "images": [
-                p["img_src"] for p in pics if isinstance(p, dict) and p.get("img_src")
-            ],
-            "repost_content": None,
-        }
-
-
-class VideoDynamicParser(DynamicParser):
-    def parse(self, card, card_item, emoji_map):
-        text = f"{card.get('title', '')}\n{card.get('desc', '')}".strip()
-        return {
-            "content_nodes": build_content_nodes(text, emoji_map),
-            "images": [],
-            "repost_content": None,
-        }
-
-
-class RepostDynamicParser(DynamicParser):
-    def parse(self, card, card_item, emoji_map):
-        origin_str = card.get("origin")
-        repost_content = None
-        if origin_str:
-            try:
-                origin_card = (
-                    json.loads(origin_str)
-                    if isinstance(origin_str, str)
-                    else origin_str
-                )
-                o_item = origin_card.get("item", {})
-                repost_content = (
-                    o_item.get("description")
-                    or o_item.get("content")
-                    or "[转发内容解析失败]"
-                )
-            except (json.JSONDecodeError, AttributeError):
-                repost_content = "[转发内容解析失败]"
-
-        return {
-            "content_nodes": build_content_nodes(
-                card_item.get("content", ""), emoji_map
-            ),
-            "images": [],
-            "repost_content": repost_content,
-        }
-
-
-class FallbackDynamicParser(DynamicParser):
-    def parse(self, card, card_item, emoji_map):
-        return {"content_nodes": [], "images": [], "repost_content": None}
-
-
-_PARSER_REGISTRY: dict[int, DynamicParser] = {
-    1: RepostDynamicParser(),
-    2: ImageDynamicParser(),
-    4: TextDynamicParser(),
-    8: VideoDynamicParser(),
-}
-_FALLBACK_PARSER = FallbackDynamicParser()
-
-
-def get_parser(dtype: int) -> DynamicParser:
-    return _PARSER_REGISTRY.get(dtype, _FALLBACK_PARSER)
-
-
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_NONE": 0,
-    "DYNAMIC_TYPE转发": 1,
+    "DYNAMIC_TYPE_FORWARD": 1,
     "DYNAMIC_TYPE_DRAW": 2,
     "DYNAMIC_TYPE_PIC": 2,
     "DYNAMIC_TYPE_TEXT": 4,
@@ -462,36 +348,6 @@ class BilibiliChannelService:
         except Exception as e:
             logger.error("Failed to get dynamics from db: {}", e)
             return []
-
-    def _parse_dynamic(self, d: dict) -> Optional[dict]:
-        try:
-            desc = d.get("desc", {})
-            display = d.get("display", {})
-            card_raw = d.get("card", {})
-            card = json.loads(card_raw) if isinstance(card_raw, str) else card_raw
-            card_item = card.get("item") or {}
-            dtype = desc.get("type", 0)
-
-            emoji_map = extract_emoji_map(display)
-            parser = get_parser(dtype)
-            parsed_content = parser.parse(card, card_item, emoji_map)
-
-            return {
-                "dynamic_id": desc.get("dynamic_id_str")
-                or str(desc.get("dynamic_id", "")),
-                "uid": desc.get("uid"),
-                "uname": desc.get("user_profile", {}).get("info", {}).get("uname", ""),
-                "type": dtype,
-                "timestamp": desc.get("timestamp"),
-                **parsed_content,
-            }
-        except Exception as e:
-            logger.warning(
-                "解析动态项失败: {} | dynamic_id={}",
-                e,
-                d.get("desc", {}).get("dynamic_id", "unknown"),
-            )
-            return None
 
     async def _save_dynamic_new(self, channel_id: int, parsed: dict, raw: dict) -> None:
         if not self._db_session:
