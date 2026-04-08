@@ -3,6 +3,7 @@ import { ref, provide, watch, computed } from 'vue'
 import { LayoutNode, swapNodes } from '@/utils/layoutEngine'
 import SplitPaneNode from './SplitPaneNode.vue'
 import { LayoutGrid } from 'lucide-vue-next'
+import { useEventListener } from '@vueuse/core';
 
 const props = defineProps<{
   layoutTree: LayoutNode
@@ -16,7 +17,7 @@ const emit = defineEmits<{
   (e: 'clearChannel', nodeId: string): void
   (e: 'closeChannel', nodeId: string): void
   (e: 'toggleDanmaku', channelId: string, enabled: boolean): void
-  (e: 'updateTree'): void // 用于通知父组件树结构改变需要保存
+  (e: 'updateTree'): void
 }>()
 
 // --- 全局拖拽防吞噬机制 ---
@@ -43,7 +44,7 @@ function onDrop(targetId: string) {
 }
 
 // 监听拖拽结束（以防拖到窗口外部松手）
-window.addEventListener('dragend', () => { isDragging.value = false })
+useEventListener(window, 'dragend', () => { isDragging.value = false })
 
 // 将核心状态 Provider 给所有嵌套的节点
 provide('isDragging', isDragging)

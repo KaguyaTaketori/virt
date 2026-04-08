@@ -9,10 +9,7 @@ from .youtube import (
     sync_youtube_videos_full,
     discover_live_streams_from_videos,
 )
-from .bilibili import (
-    update_bilibili_streams,
-    sync_bilibili_channels,
-)
+from .bilibili import update_bilibili_streams
 from .maintenance import (
     refresh_channel_details,
     daily_backfill_sync,
@@ -41,14 +38,6 @@ def start_scheduler() -> None:
         "interval",
         minutes=2,
         id="bili_update",
-        next_run_time=now,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        sync_bilibili_channels,
-        "interval",
-        hours=24,
-        id="bili_sync_ch",
         next_run_time=now,
         replace_existing=True,
     )

@@ -2,10 +2,7 @@ from fastapi import APIRouter
 
 from app.deps.guards import AdminUser
 from app.models.models import User
-from app.schedulers.bilibili import (
-    update_bilibili_streams,
-    sync_bilibili_channels,
-)
+from app.schedulers.bilibili import update_bilibili_streams
 from app.services.quota_guard import status as quota_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -17,14 +14,6 @@ async def trigger_bilibili_update(_: User = AdminUser):
     return {"status": "ok", "message": "Bilibili stream update completed"}
 
 
-@router.post("/trigger/bilibili-sync-channels")
-async def trigger_bilibili_sync_channels(_: User = AdminUser):
-    await sync_bilibili_channels()
-    return {"status": "ok", "message": "Bilibili channel sync completed"}
-
-
 @router.get("/quota")
-async def get_quota_status(
-    _: User = AdminUser
-):
+async def get_quota_status(_: User = AdminUser):
     return await quota_status()

@@ -5,7 +5,6 @@ B 站频道详情接口 - 支持实时获取 + 数据库 fallback
 
 from __future__ import annotations
 
-import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +72,11 @@ async def get_channel_bilibili_info(
             channel_id, offset=0, limit=dynamics_limit
         )
         next_offset = ""
+
+    # 实时获取并更新频道信息
+    info_data = await bilibili_channel_service.get_info(uid)
+    if info_data:
+        await bilibili_channel_service.update_channel(channel, info_data)
 
     info = {
         "mid": uid,

@@ -9,7 +9,6 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
-from sqlalchemy import text, select, func
 
 from app.routers import (
     streams,
@@ -23,19 +22,9 @@ from app.routers import (
     permissions,
     bilibili_auth,
 )
-from app.services.token_blacklist import token_blacklist
 from app.services.youtube_websub import (
     router as youtube_websub_router,
-    subscribe_all_active_channels,
 )
-from app.schedulers import start_scheduler, scheduler
-from app.database_async import AsyncSessionFactory, create_all_tables
-from app.database import engine, Base
-from app.models.models import WebSubSubscription
-from app.services.redis_client import RedisClient
-from app.services.permission_cache import init_permission_cache
-from app.services.room_counter import init_room_counter
-from app.services.danmaku_queue import init_danmaku_queue
 from app.startup import (
     check_production_secrets,
     init_databases,
@@ -44,32 +33,6 @@ from app.startup import (
     init_websub,
     register_scheduled_jobs,
 )
-
-def _assert_production_secrets() -> None:
-    env = settings.env.lower()
-    if env != "prod":
-        return
-
-    errors = []
-
-    if not settings.jwt_secret_key or len(settings.jwt_secret_key) < 32:
-        errors.append("JWT_SECRET_KEY 未设置或长度不足（生产环境必须 ≥32 字符）")
-
-    if not settings.websub_secret:
-        errors.append("WEBSUB_SECRET 未设置（生产环境必须配置）")
-
-    if not settings.youtube_api_keys_list:
-        logger.warning("YOUTUBE_API_KEY 未设置，YouTube 功能不可用")
-
-    if not settings.cors_origins:
-        errors.append("CORS_ORIGINS 未设置（生产环境必须显式指定允许的前端域名）")
-
-    if errors:
-        for e in errors:
-            logger.critical("启动安全检查失败: {}", e)
-        raise RuntimeError(
-            "生产环境安全检查未通过：\n" + "\n".join(f"  - {e}" for e in errors)
-        )
 
 
 @asynccontextmanager

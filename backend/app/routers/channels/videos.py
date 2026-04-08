@@ -10,7 +10,7 @@ from app.deps import get_db_session
 from app.models.models import Channel, Platform, Video
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
 from app.services.youtube_videos import get_channel_videos as fetch_yt_videos
-from app.services.bilibili_fetcher import sync_bilibili_channel_videos
+
 
 router = APIRouter()
 
@@ -46,19 +46,13 @@ async def _get_bilibili_videos(
     page_size: int,
     status: Optional[str],
 ) -> PaginatedVideosResponse:
-    exists_query = select(Video.id).where(Video.channel_id == channel.id).limit(1)
-    exists_result = await db.execute(exists_query)
-    
-    if exists_result.first() is None:
-        await sync_bilibili_channel_videos(db, channel.id, channel.channel_id)
-
     base_query = select(Video).where(Video.channel_id == channel.id)
     if status:
         base_query = base_query.where(Video.status == status)
 
     count_query = select(func.count()).select_from(base_query.subquery())
     total = (await db.execute(count_query)).scalar() or 0
-    
+
     total_pages = (total + page_size - 1) // page_size if total > 0 else 0
 
     paged_query = (
@@ -77,7 +71,9 @@ async def _get_bilibili_videos(
                 thumbnail_url=v.thumbnail_url or "",
                 duration=v.duration or "",
                 view_count=v.view_count or 0,
-                published_at=v.published_at.strftime("%Y-%m-%d") if v.published_at else None,
+                published_at=v.published_at.strftime("%Y-%m-%d")
+                if v.published_at
+                else None,
                 status=v.status or "archive",
             )
             for v in videos

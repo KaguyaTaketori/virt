@@ -20,12 +20,15 @@ MAX_RETRIES = 3
 BACKOFF_INIT = 2
 BACKOFF_MAX = 60
 
+
 @dataclass(frozen=True)
 class BilibiliContext:
     """封装单次请求的不可变上下文，线程安全"""
+
     credential: Optional[Credential]
     db: AsyncSession
     channel_id: int
+
 
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_NONE": 0,
@@ -114,6 +117,35 @@ class BilibiliChannelService:
             logger.error("Failed to get user info, uid={}: {}", uid, e)
             return None
 
+    async def update_channel(self, channel, info: dict) -> None:
+        """将用户信息应用到 Channel 对象"""
+        if not info:
+            return
+        try:
+            changed = False
+            if info.get("name") and channel.name != info["name"]:
+                channel.name = info["name"]
+                changed = True
+            if info.get("face") and channel.bilibili_face != info["face"]:
+                channel.bilibili_face = info["face"]
+                changed = True
+            if info.get("sign") and channel.bilibili_sign != info["sign"]:
+                channel.bilibili_sign = info["sign"]
+                changed = True
+            if info.get("fans") is not None:
+                channel.bilibili_fans = info["fans"]
+                changed = True
+            if info.get("archive_count") is not None:
+                channel.bilibili_archive_count = info["archive_count"]
+                changed = True
+            if info.get("attention") is not None:
+                channel.bilibili_following = info["attention"]
+                changed = True
+            if changed and self._db_session:
+                await self._db_session.commit()
+        except Exception as e:
+            logger.warning("Failed to update channel: {}", e)
+
     async def get_dynamics(
         self, uid: str, offset: str = "", limit: int = 100
     ) -> tuple[list, str]:
@@ -132,6 +164,8 @@ class BilibiliChannelService:
                 p = self._parse_dynamic_new(item)
                 if p:
                     parsed.append(p)
+                    if self._channel_id and self._db_session:
+                        await self._save_dynamic_new(self._channel_id, p, item)
 
             logger.info(
                 "uid={} 获取 {} 条动态, next_offset={}", uid, len(parsed), next_offset
@@ -152,7 +186,7 @@ class BilibiliChannelService:
             dynamic_id = d.get("id_str", "")
             dtype_str = d.get("type", "DYNAMIC_TYPE_NONE")
             dtype = DYNAMIC_TYPE_MAP.get(dtype_str, 0)
-            
+
             jump_url = d.get("basic", {}).get("jump_url", "")
             if jump_url and jump_url.startswith("//"):
                 jump_url = f"https:{jump_url}"
@@ -162,8 +196,10 @@ class BilibiliChannelService:
             face = module_author.get("face", "")
             timestamp = int(module_author.get("pub_ts") or 0)
 
-            is_top = (module_tag.get("text") == "置顶") or (module_author.get("is_top") is True)
-            
+            is_top = (module_tag.get("text") == "置顶") or (
+                module_author.get("is_top") is True
+            )
+
             stat = {
                 "forward": module_stat.get("forward", {}).get("count", 0),
                 "comment": module_stat.get("comment", {}).get("count", 0),
@@ -179,25 +215,25 @@ class BilibiliChannelService:
                 opus = major["opus"]
                 summary = opus.get("summary") or {}
                 nodes = summary.get("rich_text_nodes") or []
-                
+
                 for n in nodes:
                     ntype = n.get("type")
                     if ntype == "RICH_TEXT_NODE_TYPE_TEXT":
                         content_nodes.append({"type": "text", "text": n.get("text")})
                     elif ntype == "RICH_TEXT_NODE_TYPE_EMOJI":
                         emoji_data = n.get("emoji") or {}
-                        content_nodes.append({
-                            "type": "emoji",
-                            "text": n.get("text"),
-                            "url": emoji_data.get("icon_url")
-                        })
+                        content_nodes.append(
+                            {
+                                "type": "emoji",
+                                "text": n.get("text"),
+                                "url": emoji_data.get("icon_url"),
+                            }
+                        )
                     elif ntype == "RICH_TEXT_NODE_TYPE_AT":
-                        content_nodes.append({
-                            "type": "at",
-                            "text": n.get("text"),
-                            "rid": n.get("rid")
-                        })
-                
+                        content_nodes.append(
+                            {"type": "at", "text": n.get("text"), "rid": n.get("rid")}
+                        )
+
                 pics = opus.get("pics") or []
                 images = [p.get("url", "") for p in pics if p.get("url")]
 
@@ -205,7 +241,9 @@ class BilibiliChannelService:
                 archive = major["archive"]
                 title = archive.get("title", "")
                 desc = archive.get("desc", "")
-                content_nodes.append({"type": "text", "text": f"【发布视频】{title}\n{desc}".strip()})
+                content_nodes.append(
+                    {"type": "text", "text": f"【发布视频】{title}\n{desc}".strip()}
+                )
                 if archive.get("cover"):
                     images = [archive.get("cover")]
 
@@ -218,22 +256,26 @@ class BilibiliChannelService:
             if additional.get("type") == "ADDITIONAL_TYPE_RESERVE":
                 reserve = additional.get("reserve") or {}
                 reserve_title = reserve.get("title", "")
-                content_nodes.append({"type": "text", "text": f"\n🗓️ 直播预约：{reserve_title}"})
+                content_nodes.append(
+                    {"type": "text", "text": f"\n🗓️ 直播预约：{reserve_title}"}
+                )
 
             repost_content = None
             orig = d.get("orig")
             if orig:
                 o_modules = orig.get("modules") or {}
-                o_author = (o_modules.get("module_author") or {}).get("name", "未知用户")
+                o_author = (o_modules.get("module_author") or {}).get(
+                    "name", "未知用户"
+                )
                 o_dyn = o_modules.get("module_dynamic") or {}
-                
+
                 o_text = ""
                 o_major = o_dyn.get("major") or {}
                 if "opus" in o_major:
                     o_text = o_major["opus"].get("summary", {}).get("text", "")
                 else:
                     o_text = (o_dyn.get("desc") or {}).get("text", "")
-                
+
                 repost_content = f"@{o_author}: {o_text}"
 
             return {
@@ -253,65 +295,10 @@ class BilibiliChannelService:
             }
 
         except Exception as e:
-            logger.exception("解析新动态项失败: id=%s, error=%s", d.get("id_str", "unknown"), str(e))
+            logger.exception(
+                "解析新动态项失败: id=%s, error=%s", d.get("id_str", "unknown"), str(e)
+            )
             return None
-
-    async def _save_dynamic(self, channel_id: int, parsed: dict, raw: dict) -> None:
-        if not self._db_session:
-            return
-        try:
-            dynamic_id = parsed.get("dynamic_id", "")
-            if not dynamic_id:
-                return
-
-            result = await self._db_session.execute(
-                select(BilibiliDynamic).where(BilibiliDynamic.dynamic_id == dynamic_id)
-            )
-            existing = result.scalar_one_or_none()
-
-            published = None
-            ts = parsed.get("timestamp")
-            if ts:
-                try:
-                    published = datetime.fromtimestamp(ts, tz=timezone.utc)
-                except Exception:
-                    pass
-
-            content_nodes_json = json.dumps(
-                parsed.get("content_nodes", []), ensure_ascii=False
-            )
-            images_json = json.dumps(parsed.get("images", []), ensure_ascii=False)
-
-            if existing:
-                existing.uname = parsed.get("uname")
-                existing.type = parsed.get("type")
-                existing.content_nodes = content_nodes_json
-                existing.images = images_json
-                existing.repost_content = parsed.get("repost_content")
-                existing.timestamp = ts
-                existing.published_at = published
-                existing.raw_data = json.dumps(raw, ensure_ascii=False)
-                existing.fetched_at = datetime.now(timezone.utc)
-            else:
-                dynamic = BilibiliDynamic(
-                    channel_id=channel_id,
-                    dynamic_id=dynamic_id,
-                    uid=parsed.get("uid"),
-                    uname=parsed.get("uname"),
-                    type=parsed.get("type"),
-                    content_nodes=content_nodes_json,
-                    images=images_json,
-                    repost_content=parsed.get("repost_content"),
-                    timestamp=ts,
-                    published_at=published,
-                    raw_data=json.dumps(raw, ensure_ascii=False),
-                    fetched_at=datetime.now(timezone.utc),
-                )
-                self._db_session.add(dynamic)
-
-            await self._db_session.commit()
-        except Exception as e:
-            logger.warning("Failed to save dynamic: {}", e)
 
     async def get_dynamics_from_db(
         self, channel_id: int, offset: int = 0, limit: int = 30
@@ -335,6 +322,7 @@ class BilibiliChannelService:
                     "dynamic_id": d.dynamic_id,
                     "uid": d.uid,
                     "uname": d.uname,
+                    "face": d.face,
                     "type": d.type,
                     "timestamp": d.timestamp,
                     "content_nodes": json.loads(d.content_nodes)
@@ -342,6 +330,10 @@ class BilibiliChannelService:
                     else [],
                     "images": json.loads(d.images) if d.images else [],
                     "repost_content": d.repost_content,
+                    "url": d.url,
+                    "stat": json.loads(d.stat) if d.stat else {},
+                    "topic": d.topic,
+                    "is_top": d.is_top,
                 }
                 for d in dynamics
             ]
@@ -374,15 +366,21 @@ class BilibiliChannelService:
                 parsed.get("content_nodes", []), ensure_ascii=False
             )
             images_json = json.dumps(parsed.get("images", []), ensure_ascii=False)
+            stat_json = json.dumps(parsed.get("stat", {}), ensure_ascii=False)
 
             if existing:
                 existing.uname = parsed.get("uname")
+                existing.face = parsed.get("face")
                 existing.type = parsed.get("type")
                 existing.content_nodes = content_nodes_json
                 existing.images = images_json
                 existing.repost_content = parsed.get("repost_content")
                 existing.timestamp = ts
                 existing.published_at = published
+                existing.url = parsed.get("url")
+                existing.stat = stat_json
+                existing.topic = parsed.get("topic")
+                existing.is_top = parsed.get("is_top", False)
                 existing.raw_data = json.dumps(raw, ensure_ascii=False)
                 existing.fetched_at = datetime.now(timezone.utc)
             else:
@@ -391,12 +389,17 @@ class BilibiliChannelService:
                     dynamic_id=dynamic_id,
                     uid=parsed.get("uid"),
                     uname=parsed.get("uname"),
+                    face=parsed.get("face"),
                     type=parsed.get("type"),
                     content_nodes=content_nodes_json,
                     images=images_json,
                     repost_content=parsed.get("repost_content"),
                     timestamp=ts,
                     published_at=published,
+                    url=parsed.get("url"),
+                    stat=stat_json,
+                    topic=parsed.get("topic"),
+                    is_top=parsed.get("is_top", False),
                     raw_data=json.dumps(raw, ensure_ascii=False),
                     fetched_at=datetime.now(timezone.utc),
                 )
