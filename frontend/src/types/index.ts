@@ -80,9 +80,10 @@ export interface FetchConfig {
 }
 
 export interface ContentNode {
-  type: 'text' | 'emoji'
+  type: 'text' | 'emoji' | 'at'
   text: string
   url?: string
+  rid?: string
 }
 
 export interface BilibiliInfo {
@@ -103,12 +104,22 @@ export interface BilibiliInfo {
   } | null
   dynamics: Array<{
     dynamic_id: string
+    url: string
+    uid: string
+    uname: string
+    face: string
     type: number
     timestamp: number
-    content: string
     content_nodes: ContentNode[]
     images: string[]
     repost_content: string | null
+    stat: {
+      forward: number
+      comment: number
+      like: number
+    }
+    topic: string
+    is_top: boolean
   }>
   videos: Array<{
     bvid: string

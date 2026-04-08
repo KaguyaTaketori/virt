@@ -160,62 +160,94 @@
         <!-- Bilibili 动态 Tab -->
         <div v-if="activeTab === 'dynamics' && isBilibili">
           <div v-if="bilibiliDynamics.length > 0" class="space-y-4">
-            <div v-for="d in bilibiliDynamics" :key="d.dynamic_id" class="bg-zinc-900 rounded-lg p-5 shadow-sm">
+            <div v-for="d in bilibiliDynamics" :key="d.dynamic_id" class="bg-zinc-900 rounded-lg p-5 shadow-sm border border-zinc-800/50">
               
-              <!-- 1. 动态头部：类型标签与时间 -->
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2">
-                  <span class="text-[10px] px-1.5 py-0.5 bg-pink-600/20 text-pink-500 border border-pink-500/30 rounded">
-                    {{ getDynamicTypeLabel(d.type) }}
-                  </span>
-                  <span class="text-xs text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
+              <!-- 1. 动态头部：用户信息与置顶 -->
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                  <img :src="d.face" class="w-10 h-10 rounded-full border border-zinc-700" referrerpolicy="no-referrer" />
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-bold text-gray-200">{{ d.uname }}</span>
+                      <span v-if="d.is_top" class="text-[10px] px-1 bg-orange-500/20 text-orange-500 border border-orange-500/30 rounded">置顶</span>
+                    </div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="text-[10px] text-pink-500">{{ getDynamicTypeLabel(d.type) }}</span>
+                      <span class="text-[10px] text-gray-500">{{ formatTimestamp(d.timestamp) }}</span>
+                    </div>
+                  </div>
                 </div>
+                <a :href="d.url" target="_blank" class="text-gray-500 hover:text-pink-500 transition-colors">
+                  <ExternalLink class="w-4 h-4" />
+                </a>
               </div>
 
-              <!-- 2. 动态正文 -->
-              <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
+              <!-- 2. 话题 -->
+              <div v-if="d.topic" class="mb-2">
+                <span class="text-blue-400 text-sm cursor-pointer hover:underline">#{{ d.topic }}#</span>
+              </div>
+
+              <!-- 3. 动态正文 -->
+              <div class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
                 <template v-for="(node, idx) in d.content_nodes" :key="idx">
                   <span v-if="node.type === 'text'">{{ node.text }}</span>
+                  <!-- AT 节点 -->
+                  <a v-else-if="node.type === 'at'" :href="'https://space.bilibili.com/' + node.rid" target="_blank" class="text-blue-400 hover:underline mx-0.5">
+                    {{ node.text }}
+                  </a>
+                  <!-- 表情节点 -->
                   <img 
                     v-else-if="node.type === 'emoji'" 
                     :src="node.url" 
-                    :alt="node.text" 
-                    :title="node.text"
-                    class="bili-emoji-img inline-block w-[20px] h-[20px] mx-0.5 vertical-text-bottom"
+                    class="inline-block w-[20px] h-[20px] mx-0.5 align-text-bottom"
                     referrerpolicy="no-referrer"
                   />
                 </template>
               </div>
 
-              <!-- 3. 转发内容渲染 -->
-              <div v-if="d.repost_content" class="mt-3 p-3 bg-zinc-950/50 rounded border-l-4 border-zinc-700">
-                <p class="text-gray-500 text-xs italic leading-snug">
+              <!-- 4. 转发内容 -->
+              <div v-if="d.repost_content" class="mt-3 p-3 bg-zinc-950/50 rounded border-l-2 border-zinc-700">
+                <p class="text-gray-400 text-xs italic leading-snug">
                   {{ d.repost_content }}
                 </p>
               </div>
 
-              <!-- 4. 图片列表渲染 -->
-              <div v-if="d.images?.length > 0" class="mt-4 grid grid-cols-3 gap-2 max-w-2xl">
-                <div 
-                  v-for="(img, idx) in d.images" 
-                  :key="idx" 
-                  class="aspect-square rounded overflow-hidden bg-zinc-800"
-                >
+              <!-- 5. 图片展示 (多图适配) -->
+              <div v-if="d.images?.length > 0" 
+                  :class="['mt-4 grid gap-2 max-w-2xl', 
+                            d.images.length === 1 ? 'grid-cols-1' : d.images.length === 2 ? 'grid-cols-2' : 'grid-cols-3']">
+                <div v-for="(img, idx) in d.images" :key="idx" class="rounded overflow-hidden bg-zinc-800">
                   <img 
-                    :src="img + '@200w_200h_1c.webp'" 
-                    class="w-full h-full object-cover hover:scale-110 transition-transform duration-300 cursor-zoom-in" 
+                    :src="img + (d.images.length === 1 ? '@600w_600h.webp' : '@300w_300h_1c.webp')" 
+                    class="w-full h-full object-cover hover:scale-105 transition-transform duration-500 cursor-zoom-in" 
                     referrerpolicy="no-referrer" 
                     loading="lazy"
                   />
                 </div>
               </div>
 
+              <!-- 6. 底部统计信息 -->
+              <div class="mt-4 pt-4 border-t border-zinc-800/50 flex items-center gap-6 text-gray-500">
+                <div class="flex items-center gap-1.5 hover:text-pink-500 cursor-pointer transition-colors">
+                  <Share2 class="w-4 h-4" />
+                  <span class="text-xs">{{ d.stat.forward || '转发' }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 hover:text-pink-500 cursor-pointer transition-colors">
+                  <MessageSquare class="w-4 h-4" />
+                  <span class="text-xs">{{ d.stat.comment || '评论' }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 hover:text-pink-500 cursor-pointer transition-colors">
+                  <ThumbsUp class="w-4 h-4" />
+                  <span class="text-xs">{{ d.stat.like || '点赞' }}</span>
+                </div>
+              </div>
+
             </div>
             
             <!-- 加载更多 -->
-            <div v-if="bilibiliDynamicsHasMore.value" class="text-center py-4">
+            <div v-if="bilibiliDynamicsHasMore" class="text-center py-4">
               <n-button 
-                :loading="bilibiliDynamicsLoading.value" 
+                :loading="bilibiliDynamicsLoading" 
                 @click="loadMoreDynamics"
                 quaternary
               >
@@ -226,7 +258,7 @@
               没有更多了
             </div>
           </div>
-          <div v-else-if="bilibiliDynamicsLoading.value" class="text-center py-20">
+          <div v-else-if="bilibiliDynamicsLoading" class="text-center py-20">
             <n-spin size="medium" />
           </div>
           <div v-else class="text-center py-20">
@@ -308,7 +340,10 @@
 import { ref, computed, onMounted, onUnmounted, inject, type Ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPagination, useMessage } from 'naive-ui'
-import { Heart, Ban, Youtube } from 'lucide-vue-next'
+import { 
+  Heart, Ban, Youtube, 
+  ExternalLink, Share2, MessageSquare, ThumbsUp 
+} from 'lucide-vue-next'
 import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
 import { useMultiviewStore } from '@/stores/multiview'
@@ -317,19 +352,30 @@ import { useChannelVideos, type Video } from '@/composables/useChannelVideos'
 
 // --- 接口定义 ---
 interface ContentNode {
-  type: 'text' | 'emoji'
+  type: 'text' | 'emoji' | 'at'
   text: string
-  url?: string  // 表情包特有，文字节点没有此属性
+  url?: string  // 表情包 URL
+  rid?: string  // AT 用户的 UID
 }
 
 interface Dynamic {
   dynamic_id: string
+  url: string
+  uid: string
+  uname: string
+  face: string
   type: number
   timestamp: number
-  content: string        // 虽然现在主要用 nodes，但保留这个字段防止报错
-  content_nodes: ContentNode[] // <-- 核心：新增这个字段
+  content_nodes: ContentNode[]
   images: string[]
   repost_content: string | null
+  stat: {
+    forward: number
+    comment: number
+    like: number
+  }
+  topic: string
+  is_top: boolean
 }
 
 interface BilibiliVideo {
@@ -417,10 +463,9 @@ function formatPubDate(ts: number): string {
 }
 
 const displayVideos = computed(() => {
-  // 如果是 B站且有实时抓取的视频，将其转换成通用格式展示
   if (isBilibili.value && bilibiliVideos.value.length > 0) {
     return bilibiliVideos.value.map(v => ({
-      id: v.bvid, // 用 bvid 作为 key
+      id: v.bvid,
       thumbnail_url: v.pic,
       title: v.title,
       duration: v.duration,
@@ -428,10 +473,9 @@ const displayVideos = computed(() => {
       published_at: formatPubDate(v.pubdate),
       status: 'upload',
 
-      isRaw: true // 标记这是来自 B站接口的原始数据
+      isRaw: true
     }))
   }
-  // 否则返回通用的 uploadState 数据
   return uploadState.videos.value
 })
 
