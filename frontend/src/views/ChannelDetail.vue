@@ -16,10 +16,15 @@
   <!-- 主内容区 -->
   <div v-else-if="channel" class="min-h-screen bg-zinc-950">
     <!-- Banner 封面 -->
-    <div 
-      class="h-48 md:h-64 bg-cover bg-center relative"
-      :style="channel.banner_url ? { backgroundImage: `url(${channel.banner_url})` } : { background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)' }"
-    >
+    <div class="h-48 md:h-64 relative overflow-hidden bg-zinc-900">
+      <img 
+        v-if="channel.banner_url"
+        :src="channel.banner_url" 
+        class="absolute inset-0 w-full h-full object-cover"
+        referrerpolicy="no-referrer"
+      />
+      <div v-else class="absolute inset-0" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);"></div>
+      <!-- 渐变遮罩层 -->
       <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/50 to-transparent"></div>
     </div>
 
@@ -261,7 +266,8 @@
                   <img 
                     :src="v.pic + '@320w_200h_1c.webp'" 
                     class="object-cover w-full h-full" 
-                    referrerpolicy="no-referrer" 
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
                   />
                   <!-- 时长悬浮窗 -->
                   <span class="absolute bottom-1 right-1 bg-black/60 text-[10px] text-white px-1 rounded">
@@ -473,7 +479,6 @@ function goToLogin() {
   router.push({ name: 'Login' })
 }
 
-// --- 数据初始化抓取 ---
 async function fetchChannel(id: number) {
   loading.value = true
   bilibiliError.value = null
@@ -481,19 +486,16 @@ async function fetchChannel(id: number) {
     const { data } = await channelApi.get(id)
     channel.value = data
     
-    // 重置所有子状态
     uploadState.reset()
     liveState.reset()
     shortsState.reset()
 
     if (isBilibili.value) {
       activeTab.value = 'videos'
-      // B站视频不强制传 status='upload'，但在后端通用接口中可以复用 uploadState
       await uploadState.fetch(id)
       await fetchBilibiliRawData(id)
     } else {
       activeTab.value = 'live'
-      // 并发抓取 YouTube 各类初始数据
       await Promise.all([
         liveState.fetch(id),
         uploadState.fetch(id)
@@ -509,7 +511,6 @@ async function fetchChannel(id: number) {
   }
 }
 
-// 抓取 B站 动态和实时主页数据 (非数据库视频)
 async function fetchBilibiliRawData(channelId: number, append = false) {
   if (bilibiliDynamicsLoading.value) return
   
@@ -546,21 +547,18 @@ function loadMoreDynamics() {
   fetchBilibiliRawData(channel.value!.id, true)
 }
 
-// 页面滚动到底触发加载
 function onPageScroll() {
-  console.log('[scroll] fired!')
-  
   if (activeTab.value !== 'dynamics') return
+  if (bilibiliDynamicsLoading.value || !bilibiliDynamicsHasMore.value) return;
+
+  const target = mainScrollRef?.value || document.documentElement;
+  const { scrollTop, clientHeight, scrollHeight } = target;
   
-  const scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0
-  const docHeight = document.documentElement.scrollHeight || document.body.scrollHeight
-  const winHeight = window.innerHeight
+  const threshold = 50; 
+  const isBottom = scrollTop + clientHeight >= scrollHeight - threshold;
   
-  console.log('[scroll] top:', scrollTop, 'doc:', docHeight, 'win:', winHeight)
-  
-  if (winHeight + scrollTop >= docHeight - 200) {
-    console.log('[scroll] triggering loadMoreDynamics')
-    loadMoreDynamics()
+  if (isBottom) {
+    loadMoreDynamics();
   }
 }
 

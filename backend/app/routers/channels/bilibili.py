@@ -66,7 +66,7 @@ async def get_channel_bilibili_info(
 
     # 实时获取动态，失败则从数据库读取
     dynamics, next_offset = await bilibili_channel_service.get_dynamics(
-        uid, offset=dynamics_offset, limit=100
+        uid, offset=dynamics_offset
     )
     if not dynamics:
         dynamics = await bilibili_channel_service.get_dynamics_from_db(

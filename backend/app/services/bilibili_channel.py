@@ -220,6 +220,33 @@ class BilibiliChannelService:
             logger.error("Failed to get user info, uid={}: {}", uid, e)
             return None
 
+    async def get_dynamics(
+        self, uid: str, offset: str = "", limit: int = 100
+    ) -> tuple[list, str]:
+        if not self.credential:
+            logger.warning("No credential available for get_dynamics, uid={}", uid)
+            return [], ""
+
+        try:
+            u = user.User(uid=int(uid), credential=self.credential)
+            result = await u.get_dynamics_new(offset=offset)
+            items = result.get("items", []) or []
+            next_offset = result.get("offset", "") or ""
+
+            parsed = []
+            for item in items:
+                p = self._parse_dynamic_new(item)
+                if p:
+                    parsed.append(p)
+
+            logger.info(
+                "uid={} 获取 {} 条动态, next_offset={}", uid, len(parsed), next_offset
+            )
+            return parsed, next_offset
+        except Exception as e:
+            logger.error("Failed to get dynamics, uid={}: {}", uid, e)
+            return [], ""
+
     def _parse_dynamic_new(self, d: dict) -> Optional[dict]:
         try:
             modules = d.get("modules", {})
@@ -235,8 +262,8 @@ class BilibiliChannelService:
             face = module_author.get("face", "")
             timestamp = int(module_author.get("pub_ts", 0))
 
-            major = module_dynamic.get("major") or {} 
-            
+            major = module_dynamic.get("major") or {}
+
             opus = major.get("opus") or {}
             archive = major.get("archive") or {}
             article = major.get("article") or {}
@@ -271,14 +298,20 @@ class BilibiliChannelService:
 
             orig = d.get("orig")
             if orig:
-                orig_author = orig.get("modules", {}).get("module_author", {}).get("name", "未知用户")
+                orig_author = (
+                    orig.get("modules", {})
+                    .get("module_author", {})
+                    .get("name", "未知用户")
+                )
                 orig_dyn = orig.get("modules", {}).get("module_dynamic", {})
                 orig_text = ""
                 if orig_dyn.get("major") and orig_dyn["major"].get("opus"):
-                    orig_text = orig_dyn["major"]["opus"].get("summary", {}).get("text", "")
+                    orig_text = (
+                        orig_dyn["major"]["opus"].get("summary", {}).get("text", "")
+                    )
                 elif orig_dyn.get("desc"):
                     orig_text = orig_dyn["desc"].get("text", "")
-                
+
                 repost_content = f"@{orig_author}: {orig_text}"
 
             is_top = module_author.get("is_top", False)
