@@ -20,6 +20,7 @@ from app.services.danmaku_queue import init_danmaku_queue
 from app.services.token_blacklist import token_blacklist
 from app.services.bilibili_auth import bilibili_auth_service
 from app.services.youtube_websub import subscribe_all_active_channels
+from app.services.quota_guard import init_quota_guard
 
 
 async def check_production_secrets() -> None:
@@ -63,6 +64,7 @@ async def init_redis() -> bool:
         await init_permission_cache(redis)
         await init_room_counter(redis)
         await init_danmaku_queue(redis)
+        await init_quota_guard(redis) 
         logger.info("Redis connected and subsystems initialized")
         return True
     except Exception as e:

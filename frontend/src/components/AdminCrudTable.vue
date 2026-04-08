@@ -68,7 +68,7 @@ defineProps<{
   loading: boolean
   rowKey: (row: any) => any
   pagination?: object
-  checkedRowKeys?: any[]
+  checkedRowKeys?: DataTableRowKey[]
 }>()
 
 defineEmits<{

@@ -46,9 +46,9 @@ async def generate_qrcode(
 
 @router.get("/qrcode/{session_id}")
 async def check_qrcode_status(
+    session_id: str,
     current_user: User = Depends(check_bilibili_permission),
     db: AsyncSession = Depends(get_db_session),
-    session_id: str = None,
 ):
     """
     检查二维码登录状态，登录成功后自动保存凭证到用户账户

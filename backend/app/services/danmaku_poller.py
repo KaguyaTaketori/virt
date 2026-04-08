@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set
 
 from app.loguru_config import logger
 from app.services.connection_manager import manager
+from app.services.constants import DANMAKU_MAX_SEEN_IDS, DANMAKU_TRUNCATE_BATCH
 
 try:
     from yt_chat_downloader import YouTubeChatDownloader
@@ -13,8 +14,6 @@ try:
 except ImportError:
     _YT_DOWNLOADER_AVAILABLE = False
     YouTubeChatDownloader = None
-
-_MAX_SEEN_IDS = 10_000
 
 seen_ids_queue: deque[str] = deque()
 seen_ids_set: set[str] = set()
@@ -26,7 +25,7 @@ def add_seen(mid: str) -> bool:
     seen_ids_set.add(mid)
     seen_ids_queue.append(mid)
     
-    if len(seen_ids_queue) > _MAX_SEEN_IDS:
+    if len(seen_ids_queue) > DANMAKU_MAX_SEEN_IDS:
         oldest = seen_ids_queue.popleft()
         seen_ids_set.discard(oldest)
     return True
@@ -152,8 +151,8 @@ class DanmakuPoller:
             if mid and add_seen(mid):
                 new_msgs.append(m)
 
-        if len(new_msgs) > 50:
-            new_msgs = new_msgs[-50:]
+        if len(new_msgs) > DANMAKU_TRUNCATE_BATCH:
+            new_msgs = new_msgs[-DANMAKU_TRUNCATE_BATCH:]
 
         if new_msgs:
             await manager.send_message(video_id, {"type": "danmaku", "data": new_msgs})

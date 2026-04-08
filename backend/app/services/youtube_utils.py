@@ -7,17 +7,10 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from app.services.constants import PREMIERE_POSITIVE_THRESHOLD, YT_LIVE_STRONG, YT_LIVE_THRESHOLD, YT_PREMIERE_LONG, YT_PREMIERE_MEDIUM, YT_PREMIERE_SHORT, YT_SHORT_MAX_SECS
+
 
 def parse_duration(iso_duration: Optional[str]) -> tuple[Optional[str], int]:
-    """
-    解析 ISO 8601 时长字符串（如 'PT1H23M45S'）。
-
-    返回：
-        (格式化显示字符串, 总秒数)
-        示例：'PT1H23M45S' → ('1:23:45', 5025)
-              'PT45S'      → ('0:45', 45)
-              None         → (None, 0)
-    """
     if not iso_duration:
         return None, 0
 
@@ -56,15 +49,15 @@ def is_premiere_heuristic(item: dict, total_secs: int) -> bool:
     description = snippet.get("description", "")
     category_id = snippet.get("categoryId", "")
 
-    if total_secs < 300:
+    if total_secs < YT_PREMIERE_SHORT:
         score += 80
-    elif total_secs < 600:
+    elif total_secs < YT_PREMIERE_MEDIUM:
         score += 40
-    elif total_secs < 1800:
+    elif total_secs < YT_PREMIERE_LONG:
         score += 20
-    elif total_secs > 7200:
+    elif total_secs > YT_LIVE_STRONG:
         score -= 80
-    elif total_secs > 3600:
+    elif total_secs > YT_LIVE_THRESHOLD:
         score -= 40
 
     if PREMIERE_TITLE_KWS.search(title):
@@ -82,7 +75,7 @@ def is_premiere_heuristic(item: dict, total_secs: int) -> bool:
     elif category_id == "20":
         score -= 15
     
-    return score > 0
+    return score > PREMIERE_POSITIVE_THRESHOLD
 
 def determine_video_status(item: dict, total_secs: int) -> str:
     """
@@ -104,7 +97,7 @@ def determine_video_status(item: dict, total_secs: int) -> str:
         else:
             return "archive"
 
-    if 0 < total_secs <= 61:
+    if 0 < total_secs <= YT_SHORT_MAX_SECS:
         return "short"
 
     return "upload"

@@ -97,7 +97,7 @@
         <!-- 投稿/普通视频 (B站 & YouTube) -->
         <div v-if="activeTab === 'videos'">
           <div v-if="displayVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            <div v-for="video in displayVideos" :key="video.id" class="video-card bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video)">
+            <div v-for="video in displayVideos" :key="video.id" class="video-card bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
               <div class="aspect-video relative">
                 <img :src="video.thumbnail_url + (isBilibili ? '@.webp' : '')" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
                 <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">{{ video.duration }}</span>
@@ -119,7 +119,7 @@
         <div v-if="activeTab === 'live' && !isBilibili">
           <div v-if="liveState.videos.value.length > 0">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              <div v-for="video in liveState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video)">
+              <div v-for="video in liveState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
                 <div class="aspect-video relative">
                   <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
                   <span v-if="video.status === 'live'" class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
@@ -144,7 +144,7 @@
         <!-- YouTube Shorts Tab -->
         <div v-if="activeTab === 'shorts' && !isBilibili">
           <div v-if="shortsState.videos.value.length > 0" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            <div v-for="video in shortsState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video)">
+            <div v-for="video in shortsState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
               <div class="aspect-[9/16] relative">
                 <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
               </div>
@@ -339,72 +339,30 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, type Ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NPagination, useMessage } from 'naive-ui'
+import { NButton, NPagination } from 'naive-ui'
 import { 
   Heart, Ban, Youtube, 
   ExternalLink, Share2, MessageSquare, ThumbsUp 
 } from 'lucide-vue-next'
 import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
-import { useMultiviewStore } from '@/stores/multiview'
-import { channelApi, userChannelApi, type Channel as ApiChannel } from '@/api'
-import { useChannelVideos, type Video } from '@/composables/useChannelVideos'
-
-// --- 接口定义 ---
-interface ContentNode {
-  type: 'text' | 'emoji' | 'at'
-  text: string
-  url?: string  // 表情包 URL
-  rid?: string  // AT 用户的 UID
-}
-
-interface Dynamic {
-  dynamic_id: string
-  url: string
-  uid: string
-  uname: string
-  face: string
-  type: number
-  timestamp: number
-  content_nodes: ContentNode[]
-  images: string[]
-  repost_content: string | null
-  stat: {
-    forward: number
-    comment: number
-    like: number
-  }
-  topic: string
-  is_top: boolean
-}
-
-interface BilibiliVideo {
-  aid: number;           // 稿件id
-  bvid: string;          // 视频bvid
-  title: string;         // 标题
-  pic: string;           // 封面图
-  duration: string;      // 时长 (如 "03:56")
-  play: number;          // 播放量
-  pubdate: number;       // 发布时间戳
-  reply: number;         // 评论数
-  like: number;          // 点赞数
-  coin?: number;
-  favorite?: number;
-  share?: number;
-}
+import { channelApi, type Channel as ApiChannel } from '@/api'
+import { useChannelVideos } from '@/composables/useChannelVideos'
+import { useChannelActions } from '@/composables/useChannelActions'
+import { useBilibiliData }   from '@/composables/useBilibiliData'
 
 // --- 基础状态 ---
 const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
 const authStore = useAuthStore()
-const multiviewStore = useMultiviewStore()
-const message = useMessage()
 
 const channel = ref<ApiChannel | null>(null)
 const loading = ref(true)
 const bilibiliError = ref<string | null>(null)
 const activeTab = ref('videos')
+
+const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
 
 // --- Composables (核心逻辑封装) ---
 const uploadState = useChannelVideos({ status: 'upload', pageSize: 24 })
@@ -420,13 +378,18 @@ const liveState   = useChannelVideos({
   }
 })
 
+
 // --- B站专属数据 (不属于通用视频列表) ---
-const bilibiliInfo = ref<any>(null)
-const bilibiliAllDynamics = ref<Dynamic[]>([])
-const bilibiliVideos = ref<BilibiliVideo[]>([])
-const bilibiliDynamicsOffset = ref("")
-const bilibiliDynamicsLoading = ref(false)
-const bilibiliDynamicsHasMore = ref(true)
+const { 
+  dynamics: bilibiliAllDynamics, 
+  videos: bilibiliVideos, 
+  info: bilibiliInfo, 
+  loading: bilibiliDynamicsLoading, 
+  hasMore: bilibiliDynamicsHasMore, 
+  fetch: runBilibiliFetch, 
+  loadMore: runBilibiliLoadMore,
+  reset: resetBilibiliData 
+} = useBilibiliData()
 
 const bilibiliDynamics = computed(() => bilibiliAllDynamics.value)
 
@@ -484,41 +447,6 @@ function getOrgName(orgId: number | null): string {
   return orgStore.organizations.find(o => o.id === orgId)?.name || ''
 }
 
-async function toggleLike() {
-  if (!channel.value) return
-  const prev = channel.value.is_liked
-  channel.value.is_liked = !prev
-  try {
-    if (!prev) await userChannelApi.like(channel.value.id)
-    else await userChannelApi.unlike(channel.value.id)
-    message.success(prev ? '已取消收藏' : '已添加到收藏')
-  } catch {
-    channel.value.is_liked = prev
-    message.error('操作失败')
-  }
-}
-
-async function toggleBlock() {
-  if (!channel.value) return
-  const prev = channel.value.is_blocked
-  channel.value.is_blocked = !prev
-  try {
-    if (!prev) await userChannelApi.block(channel.value.id)
-    else await userChannelApi.unblock(channel.value.id)
-    message.success(prev ? '已取消屏蔽' : '已屏蔽频道')
-  } catch {
-    channel.value.is_blocked = prev
-    message.error('操作失败')
-  }
-}
-
-function addToMultiview(video?: Video) {
-  if (!channel.value) return
-  const id = video?.id ?? channel.value.channel_id
-  multiviewStore.addFromVideoId(channel.value.platform as 'youtube' | 'bilibili', id)
-  router.push({ name: 'MultiView' })
-}
-
 function goToLogin() {
   router.push({ name: 'Login' })
 }
@@ -533,11 +461,14 @@ async function fetchChannel(id: number) {
     uploadState.reset()
     liveState.reset()
     shortsState.reset()
+    resetBilibiliData()
 
     if (isBilibili.value) {
       activeTab.value = 'videos'
-      await uploadState.fetch(id)
-      await fetchBilibiliRawData(id)
+      await Promise.all([
+        uploadState.fetch(id),
+        runBilibiliFetch(id)
+      ])
     } else {
       activeTab.value = 'live'
       await Promise.all([
@@ -555,40 +486,10 @@ async function fetchChannel(id: number) {
   }
 }
 
-async function fetchBilibiliRawData(channelId: number, append = false) {
-  if (bilibiliDynamicsLoading.value) return
-  
-  bilibiliDynamicsLoading.value = true
-  try {
-    if (!append && bilibiliAllDynamics.value.length > 0) {
-      bilibiliDynamicsLoading.value = false
-      return
-    }
-    
-    const offset = append ? bilibiliDynamicsOffset.value : ""
-    const { data } = await channelApi.getBilibili(channelId, offset, 12)
-    
-    if (!append) {
-      bilibiliInfo.value = data.info
-      bilibiliAllDynamics.value = data.dynamics
-      bilibiliVideos.value = data.videos
-      bilibiliDynamicsOffset.value = data.next_offset || ""
-      bilibiliDynamicsHasMore.value = !!data.next_offset
-    } else {
-      bilibiliAllDynamics.value = [...bilibiliAllDynamics.value, ...data.dynamics]
-      bilibiliDynamicsOffset.value = data.next_offset || ""
-      bilibiliDynamicsHasMore.value = !!data.next_offset
-    }
-  } catch (err) {
-    console.error('Failed to fetch Bilibili raw data:', err)
-  } finally {
-    bilibiliDynamicsLoading.value = false
-  }
-}
-
 function loadMoreDynamics() {
-  if (!bilibiliDynamicsHasMore.value || bilibiliDynamicsLoading.value || !bilibiliDynamicsOffset.value) return
-  fetchBilibiliRawData(channel.value!.id, true)
+  if (channel.value) {
+    runBilibiliLoadMore(channel.value.id)
+  }
 }
 
 function onPageScroll() {
@@ -632,9 +533,9 @@ watch(activeTab, async (tab) => {
   } else if (tab === 'shorts' && shortsState.videos.value.length === 0) {
     await shortsState.fetch(channelId)
   } else if (tab === 'home' && !bilibiliInfo.value) {
-    await fetchBilibiliRawData(channelId)
+    await runBilibiliFetch(channelId)
   } else if (tab === 'dynamics' && bilibiliDynamics.value.length === 0) {
-    await fetchBilibiliRawData(channelId)
+    await runBilibiliFetch(channelId)
   }
 })
 

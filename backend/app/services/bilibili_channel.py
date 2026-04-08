@@ -1,34 +1,22 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import asyncio
-from dataclasses import dataclass
 import json
-import re
 from datetime import datetime, timezone
 from typing import Optional
-from bilibili_api import user, Credential
+from bilibili_api import user
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.loguru_config import logger
 from app.models.models import BilibiliDynamic, Video, Platform
+from app.services.bilibili_context import ChannelRequestContext
+from app.services.constants import BILIBILI_DEFAULT_PAGE_SIZE, BILIBILI_MAX_VIDEO_PAGES
 
 MAX_RETRIES = 3
 BACKOFF_INIT = 2
 BACKOFF_MAX = 60
-
-
-@dataclass(frozen=True)
-class BilibiliContext:
-    """封装单次请求的不可变上下文，线程安全"""
-
-    credential: Optional[Credential]
-    db: AsyncSession
-    channel_id: int
-
 
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_NONE": 0,
@@ -48,55 +36,17 @@ DYNAMIC_TYPE_MAP = {
 
 
 class BilibiliChannelService:
-    def __init__(self, credential: Optional[Credential] = None):
-        self._credential = credential
-        self._user_credential: Optional[Credential] = None
-        self._db_session: Optional[AsyncSession] = None
-        self._channel_id: Optional[int] = None
-
-    def set_user_credential(
-        self,
-        sessdata: str,
-        bili_jct: str,
-        buvid3: str,
-        dedeuserid: Optional[str] = None,
-    ) -> None:
-        try:
-            self._user_credential = Credential(
-                sessdata=sessdata,
-                bili_jct=bili_jct,
-                buvid3=buvid3,
-                dedeuserid=dedeuserid,
-            )
-            logger.info("User credential set successfully")
-        except Exception as e:
-            logger.warning("Failed to create user credential: {}", e)
-            self._user_credential = None
-
-    def set_db_context(self, db: AsyncSession, channel_id: int) -> None:
-        self._db_session = db
-        self._channel_id = channel_id
-
-    @property
-    def credential(self) -> Optional[Credential]:
-        if self._user_credential:
-            return self._user_credential
-        if self._credential:
-            return self._credential
-        if settings.bilibili_sessdata:
-            try:
-                self._credential = Credential(sessdata=settings.bilibili_sessdata)
-            except Exception as e:
-                logger.warning("Failed to create Bilibili credential: {}", e)
-        return self._credential
-
-    async def get_info(self, uid: str) -> Optional[dict]:
-        if not self.credential:
-            logger.warning("No credential available for get_info, uid={}", uid)
+    async def get_info(
+        self, 
+        uid: str,
+        ctx: ChannelRequestContext,
+    ) -> Optional[dict]:
+        if not ctx.credential:
+            logger.warning("No credential for get_info uid={}", uid)
             return None
 
         try:
-            u = user.User(uid=int(uid), credential=self.credential)
+            u = user.User(uid=int(uid), credential=ctx.credential)
             info = await u.get_user_info()
             return {
                 "mid": info.get("mid"),
@@ -117,7 +67,12 @@ class BilibiliChannelService:
             logger.error("Failed to get user info, uid={}: {}", uid, e)
             return None
 
-    async def update_channel(self, channel, info: dict) -> None:
+    async def update_channel(
+        self, 
+        channel, 
+        info: dict,
+        db: AsyncSession
+    ) -> None:
         """将用户信息应用到 Channel 对象"""
         if not info:
             return
@@ -141,20 +96,23 @@ class BilibiliChannelService:
             if info.get("attention") is not None:
                 channel.bilibili_following = info["attention"]
                 changed = True
-            if changed and self._db_session:
-                await self._db_session.commit()
+            if changed and db:
+                await db.commit()
         except Exception as e:
             logger.warning("Failed to update channel: {}", e)
 
     async def get_dynamics(
-        self, uid: str, offset: str = "", limit: int = 100
+        self, 
+        uid: str, 
+        ctx: ChannelRequestContext,
+        offset: str = "", 
     ) -> tuple[list, str]:
-        if not self.credential:
+        if not ctx.credential:
             logger.warning("No credential available for get_dynamics, uid={}", uid)
             return [], ""
 
         try:
-            u = user.User(uid=int(uid), credential=self.credential)
+            u = user.User(uid=int(uid), credential=ctx.credential)
             result = await u.get_dynamics_new(offset=offset)
             items = result.get("items", []) or []
             next_offset = result.get("offset", "") or ""
@@ -164,8 +122,7 @@ class BilibiliChannelService:
                 p = self._parse_dynamic_new(item)
                 if p:
                     parsed.append(p)
-                    if self._channel_id and self._db_session:
-                        await self._save_dynamic_new(self._channel_id, p, item)
+                    await self._save_dynamic_new(ctx, p, item)
 
             logger.info(
                 "uid={} 获取 {} 条动态, next_offset={}", uid, len(parsed), next_offset
@@ -301,9 +258,13 @@ class BilibiliChannelService:
             return None
 
     async def get_dynamics_from_db(
-        self, channel_id: int, offset: int = 0, limit: int = 30
+        self, 
+        channel_id: int, 
+        db: AsyncSession,
+        offset: int = 0, 
+        limit: int = BILIBILI_DEFAULT_PAGE_SIZE
     ) -> list:
-        if not self._db_session:
+        if not db:
             return []
 
         try:
@@ -314,7 +275,7 @@ class BilibiliChannelService:
                 .offset(offset)
                 .limit(limit)
             )
-            result = await self._db_session.execute(query)
+            result = await db.execute(query)
             dynamics = result.scalars().all()
 
             return [
@@ -341,15 +302,18 @@ class BilibiliChannelService:
             logger.error("Failed to get dynamics from db: {}", e)
             return []
 
-    async def _save_dynamic_new(self, channel_id: int, parsed: dict, raw: dict) -> None:
-        if not self._db_session:
-            return
+    async def _save_dynamic_new(
+        self, 
+        ctx: ChannelRequestContext,
+        parsed: dict, 
+        raw: dict
+    ) -> None:
         try:
             dynamic_id = parsed.get("dynamic_id", "")
             if not dynamic_id:
                 return
 
-            result = await self._db_session.execute(
+            result = await ctx.db.execute(
                 select(BilibiliDynamic).where(BilibiliDynamic.dynamic_id == dynamic_id)
             )
             existing = result.scalar_one_or_none()
@@ -385,7 +349,7 @@ class BilibiliChannelService:
                 existing.fetched_at = datetime.now(timezone.utc)
             else:
                 dynamic = BilibiliDynamic(
-                    channel_id=channel_id,
+                    channel_id=ctx.channel_id,
                     dynamic_id=dynamic_id,
                     uid=parsed.get("uid"),
                     uname=parsed.get("uname"),
@@ -403,21 +367,27 @@ class BilibiliChannelService:
                     raw_data=json.dumps(raw, ensure_ascii=False),
                     fetched_at=datetime.now(timezone.utc),
                 )
-                self._db_session.add(dynamic)
+                ctx.db.add(dynamic)
 
-            await self._db_session.commit()
+            await ctx.db.commit()
         except Exception as e:
             logger.warning("Failed to save dynamic new: {}", e)
 
-    async def get_videos(self, uid: str, page: int = 1, page_size: int = 30) -> list:
-        if not self.credential:
+    async def get_videos(
+        self, 
+        uid: str, 
+        ctx: ChannelRequestContext,
+        page: int = 1, 
+        page_size: int = BILIBILI_DEFAULT_PAGE_SIZE,
+    ) -> list:
+        if not ctx.credential:
             logger.warning("No credential available for get_videos, uid={}", uid)
             return []
 
         backoff = BACKOFF_INIT
         for attempt in range(MAX_RETRIES):
             try:
-                u = user.User(uid=int(uid), credential=self.credential)
+                u = user.User(uid=int(uid), credential=ctx.credential)
                 videos_data = await u.get_videos(pn=page, ps=page_size)
 
                 vlist = (videos_data.get("list") or {}).get("vlist") or []
@@ -436,9 +406,7 @@ class BilibiliChannelService:
                         "reply": v.get("comment", 0),
                     }
                     result.append(video_data)
-
-                    if self._db_session and self._channel_id:
-                        await self._save_video(self._channel_id, v)
+                    await self._save_video(ctx, v)
 
                 return result
             except Exception as e:
@@ -459,17 +427,22 @@ class BilibiliChannelService:
         logger.warning("uid={} 获取视频重试耗尽", uid)
         return []
 
-    async def get_all_videos(self, uid: str, page_size: int = 30) -> list:
-        if not self.credential:
+    async def get_all_videos(
+        self, 
+        uid: str, 
+        ctx: ChannelRequestContext,
+        page_size: int = BILIBILI_DEFAULT_PAGE_SIZE,
+    ) -> list:
+        if not ctx.credential:
             logger.warning("No credential available for get_all_videos, uid={}", uid)
             return []
 
         all_videos = []
         page = 1
-        max_pages = 10
+        max_pages = BILIBILI_MAX_VIDEO_PAGES
 
         for page in range(1, max_pages + 1):
-            videos = await self.get_videos(uid, page=page, page_size=page_size)
+            videos = await self.get_videos(uid, ctx, page=page, page_size=page_size)
             if not videos:
                 break
             all_videos.extend(videos)
@@ -480,17 +453,19 @@ class BilibiliChannelService:
         logger.info("uid={} 共获取 {} 个视频", uid, len(all_videos))
         return all_videos
 
-    async def _save_video(self, channel_id: int, v: dict) -> None:
-        if not self._db_session:
-            return
+    async def _save_video(
+        self, 
+        ctx: ChannelRequestContext,
+        v: dict
+    ) -> None:
         try:
             bvid = v.get("bvid", "")
             if not bvid:
                 return
 
-            result = await self._db_session.execute(
+            result = await ctx.db.execute(
                 select(Video).where(
-                    Video.channel_id == channel_id, Video.video_id == bvid
+                    Video.channel_id == ctx.channel_id, Video.video_id == bvid
                 )
             )
             existing = result.scalar_one_or_none()
@@ -510,7 +485,7 @@ class BilibiliChannelService:
                 existing.published_at = published
             else:
                 video = Video(
-                    channel_id=channel_id,
+                    channel_id=ctx.channel_id,
                     platform=Platform.BILIBILI,
                     video_id=bvid,
                     title=v.get("title", ""),
@@ -520,16 +495,20 @@ class BilibiliChannelService:
                     published_at=published,
                     status="archive",
                 )
-                self._db_session.add(video)
+                ctx.db.add(video)
 
-            await self._db_session.commit()
+            await ctx.db.commit()
         except Exception as e:
             logger.warning("Failed to save video: {}", e)
 
     async def get_videos_from_db(
-        self, channel_id: int, page: int = 1, page_size: int = 30
+        self, 
+        channel_id: int, 
+        db: AsyncSession,
+        page: int = 1, 
+        page_size: int = BILIBILI_DEFAULT_PAGE_SIZE
     ) -> list:
-        if not self._db_session:
+        if not db:
             return []
 
         try:
@@ -543,7 +522,7 @@ class BilibiliChannelService:
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
-            result = await self._db_session.execute(query)
+            result = await db.execute(query)
             videos = result.scalars().all()
 
             return [

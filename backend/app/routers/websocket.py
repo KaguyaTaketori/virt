@@ -7,6 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.loguru_config import logger
 from app.services.connection_manager import manager
 from app.services.danmaku_poller import poller
+from app.services.constants import WS_HEARTBEAT_INTERVAL_SECS
 
 try:
     from app.services.danmaku_youtube import get_chat_from_file
@@ -17,8 +18,6 @@ except ImportError:
 
 router = APIRouter(tags=["websocket"])
 
-_HEARTBEAT_INTERVAL = 25
-
 
 # ── 独立协程：心跳 ────────────────────────────────────────────────────────────
 
@@ -28,7 +27,7 @@ async def _heartbeat_task(websocket: WebSocket) -> None:
     与消息处理协程并发运行，互不阻塞。
     """
     while True:
-        await asyncio.sleep(_HEARTBEAT_INTERVAL)
+        await asyncio.sleep(WS_HEARTBEAT_INTERVAL_SECS)
         try:
             await websocket.send_json({"type": "ping"})
         except Exception:

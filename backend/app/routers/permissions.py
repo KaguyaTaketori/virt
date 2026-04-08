@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from typing import List
 from app.deps import get_db_session
@@ -171,26 +172,27 @@ async def list_users(
     db: AsyncSession = Depends(get_db_session),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(User).offset(skip).limit(limit))
-    users = result.scalars().all()
-
-    user_ids = [u.id for u in users]
-    roles_result = await db.execute(
-        select(UserRole.user_id, Role.name)
-        .join(Role, UserRole.role_id == Role.id)
-        .where(UserRole.user_id.in_(user_ids))
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.user_roles).selectinload(UserRole.role)
+        )
+        .offset(skip)
+        .limit(limit)
     )
-    user_roles_map: dict[int, list[str]] = {}
-    for user_id, role_name in roles_result.all():
-        user_roles_map.setdefault(user_id, []).append(role_name)
+    users = result.scalars().unique().all()
 
-    result_list = []
-    for user in users:
-        resp = UserResponse.model_validate(user)
-        resp.roles = user_roles_map.get(user.id, [])
-        result_list.append(resp)
-    return result_list
-
+    return [
+        UserResponse(
+            id=u.id,
+            username=u.username,
+            email=u.email,
+            created_at=u.created_at,
+            roles={ur.role.name for ur in u.user_roles},
+            permissions=[],
+        )
+        for u in users
+    ]
 
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(

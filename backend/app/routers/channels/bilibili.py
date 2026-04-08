@@ -15,6 +15,7 @@ from app.models.models import Channel, Platform, User
 from app.auth import get_current_user_optional
 from app.services.bilibili_channel import bilibili_channel_service
 from app.services.bilibili_user import bilibili_user_service
+from app.services.bilibili_context import ChannelRequestContext
 
 router = APIRouter()
 
@@ -25,14 +26,9 @@ async def get_channel_bilibili_info(
     dynamics_offset: str = Query("", ge=""),
     dynamics_limit: int = Query(12, ge=1, le=100),
     db: AsyncSession = Depends(get_db_session),
-    ctx: PlatformContext = PlatformGuardDep,
+    ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: User = Depends(get_current_user_optional),
 ):
-    """
-    返回 B 站频道信息、动态列表、视频列表。
-    - 动态和视频优先实时获取，失败时 fallback 到数据库
-    - 动态支持分页 (offset, limit)
-    """
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
     if not channel:
@@ -40,43 +36,36 @@ async def get_channel_bilibili_info(
     if channel.platform != Platform.BILIBILI:
         raise HTTPException(status_code=400, detail="Channel is not a Bilibili channel")
 
-    ctx.assert_bilibili_access()
+    ctx_platform.assert_bilibili_access()
 
-    # 设置数据库上下文
-    bilibili_channel_service.set_db_context(db, channel_id)
-
-    # 尝试使用用户凭证
-    if current_user:
-        user_cred = await bilibili_user_service.get_credential(current_user.id, db)
-        if user_cred:
-            bilibili_channel_service.set_user_credential(
-                sessdata=user_cred["sessdata"],
-                bili_jct=user_cred["bili_jct"],
-                buvid3=user_cred["buvid3"],
-                dedeuserid=user_cred.get("dedeuserid"),
-            )
+    ctx = await ChannelRequestContext.build(
+        db=db,
+        channel_id=channel_id,
+        current_user=current_user,
+        bilibili_user_service=bilibili_user_service,
+    )
 
     uid = channel.channel_id
 
     # 实时获取所有视频，失败则从数据库读取
-    videos = await bilibili_channel_service.get_all_videos(uid)
+    videos = await bilibili_channel_service.get_all_videos(uid, ctx)
     if not videos:
-        videos = await bilibili_channel_service.get_videos_from_db(channel_id)
+        videos = await bilibili_channel_service.get_videos_from_db(channel_id, db)
 
     # 实时获取动态，失败则从数据库读取
     dynamics, next_offset = await bilibili_channel_service.get_dynamics(
-        uid, offset=dynamics_offset
+        uid, ctx, offset=dynamics_offset
     )
     if not dynamics:
         dynamics = await bilibili_channel_service.get_dynamics_from_db(
-            channel_id, offset=0, limit=dynamics_limit
+            channel_id, db, offset=0, limit=dynamics_limit
         )
         next_offset = ""
 
     # 实时获取并更新频道信息
-    info_data = await bilibili_channel_service.get_info(uid)
+    info_data = await bilibili_channel_service.get_info(uid, ctx)
     if info_data:
-        await bilibili_channel_service.update_channel(channel, info_data)
+        await bilibili_channel_service.update_channel(channel, info_data, db)
 
     info = {
         "mid": uid,
