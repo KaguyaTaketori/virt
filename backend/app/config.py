@@ -35,8 +35,6 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
-    youtube_full_sync_completed: bool = False
-
     max_ws_connections_per_video: int = 1000
     max_ws_connections_total: int = 10000
 

@@ -9,11 +9,14 @@ from .database import Base
 
 logger = logging.getLogger(__name__)
 
+
 def _to_async_url(db_url: str) -> str:
     if db_url.startswith("sqlite:///"):
         return db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     if db_url.startswith("postgresql://") or db_url.startswith("postgres://"):
-        return db_url.replace("postgresql://", "postgresql+asyncpg://", 1).replace("postgres://", "postgresql+asyncpg://", 1)
+        return db_url.replace("postgresql://", "postgresql+asyncpg://", 1).replace(
+            "postgres://", "postgresql+asyncpg://", 1
+        )
     return db_url
 
 
@@ -27,23 +30,22 @@ _engine_kwargs: dict = {
 }
 
 if _IS_SQLITE:
-    _connect_args = {"check_same_thread": False, "timeout": 30}
+    _connect_args = {"check_same_thread": False, "timeout": 60}
 else:
-    _engine_kwargs.update({
-        "pool_size": 10,
-        "max_overflow": 20,
-        "pool_recycle": 1800,
-    })
+    _engine_kwargs.update(
+        {
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_recycle": 1800,
+        }
+    )
 
 
-engine = create_async_engine(
-    _ASYNC_URL,
-    connect_args=_connect_args,
-    **_engine_kwargs
-)
+engine = create_async_engine(_ASYNC_URL, connect_args=_connect_args, **_engine_kwargs)
 
 
 if _IS_SQLITE:
+
     @event.listens_for(engine.sync_engine, "connect")
     def _set_sqlite_pragmas(dbapi_conn, _record) -> None:
         cur = dbapi_conn.cursor()
@@ -53,7 +55,7 @@ if _IS_SQLITE:
         cur.execute("PRAGMA temp_store=MEMORY")
         cur.execute("PRAGMA mmap_size=134217728")
         cur.execute("PRAGMA foreign_keys=ON")
-        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA busy_timeout=30000")
         cur.close()
 
 
@@ -65,10 +67,12 @@ AsyncSessionFactory = async_sessionmaker(
     autocommit=False,
 )
 
+
 async def create_all_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables verified/created.")
+
 
 async def dispose_engine() -> None:
     await engine.dispose()

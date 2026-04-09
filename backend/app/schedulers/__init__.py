@@ -7,6 +7,7 @@ from app.loguru_config import logger
 from .youtube import (
     update_youtube_streams,
     sync_youtube_videos_full,
+    sync_youtube_videos_incremental,
     discover_live_streams_from_videos,
 )
 from .bilibili import update_bilibili_streams
@@ -50,9 +51,17 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        sync_youtube_videos_full,
+        sync_youtube_videos_incremental,
         "cron",
         hour=3,
+        minute=0,
+        id="yt_incremental_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        sync_youtube_videos_full,
+        "cron",
+        hour="*/1",
         minute=0,
         id="yt_full_sync",
         replace_existing=True,
@@ -88,7 +97,8 @@ def start_scheduler() -> None:
     scheduler.start()
     logger.info(
         "Scheduler started | "
-        "yt_update=5min | bili_update=2min | yt_full_sync=03:00 | "
+        "yt_update=5min | bili_update=2min | "
+        "yt_incremental_sync=03:00 UTC | yt_full_sync=hourly | "
         "yt_live_discover=5min | daily_backfill=04:00 | "
         "websub_renew=8d | wiki_scrape=Sun 02:00"
     )

@@ -80,26 +80,52 @@ class NijisanjiWikiScraper(BaseWikiScraper):
         if not name:
             return None
 
-        # 检查是否毕业（背景色为#ddd）
-        wikicolor = item.find("span", class_="wikicolor")
-        status = "active"
-        if wikicolor:
-            style = wikicolor.get("style", "")
-            if "#ddd" in style or "background-color:#ddd" in style:
-                status = "graduated"
+        links = item.find_all("a", href=True)
+
+        # 分类链接：非灰色(活跃)和灰色(毕业)
+        active_links = []
+        graduated_links = []
+
+        for link in links:
+            href = link.get("href", "")
+            if "youtube.com" not in href:
+                continue
+
+            # 检查链接是否在灰色背景内
+            is_graduated = False
+            parent = link.parent
+            while parent:
+                if parent.name == "span" and parent.get("class") == ["wikicolor"]:
+                    style = parent.get("style", "")
+                    if "#ddd" in style or "background-color:#ddd" in style:
+                        is_graduated = True
+                    break
+                parent = parent.parent
+
+            if is_graduated:
+                graduated_links.append(href)
+            else:
+                active_links.append(href)
+
+        # 优先使用非灰色链接
+        priority_links = active_links if active_links else graduated_links
+
+        if not priority_links:
+            return None
+
+        status = "active" if active_links else "graduated"
 
         channel = VtuberChannel(name=name, group=group, status=status)
 
-        links = item.find_all("a", href=True)
-        for link in links:
-            href = link.get("href", "")
+        for href in priority_links:
+            yt_result = self.extract_youtube_channel_id(href)
+            if yt_result[0]:
+                channel.youtube_channel_id = yt_result[0]
+            elif yt_result[1]:
+                channel.youtube_handle = yt_result[1]
 
-            if "youtube.com" in href:
-                yt_result = self.extract_youtube_channel_id(href)
-                if yt_result[0]:
-                    channel.youtube_channel_id = yt_result[0]
-                elif yt_result[1]:
-                    channel.youtube_handle = yt_result[1]
+            if channel.youtube_channel_id or channel.youtube_handle:
+                break
 
         if not channel.youtube_channel_id and not channel.youtube_handle:
             return None

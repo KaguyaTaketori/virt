@@ -11,6 +11,14 @@ from app.models.models import Channel, Platform, Stream, StreamStatus, Video
 from app.services.youtube_fetcher import get_videos_details, parse_youtube_stream
 from app.services.quota_guard import can_spend, spend, status as quota_status
 from app.services.api_key_manager import get_api_key, is_api_available
+from app.services.youtube_sync_state import (
+    get_incremental_state,
+    set_incremental_state,
+    get_full_state,
+    set_full_completed,
+    is_all_full_completed,
+    set_all_full_completed,
+)
 from app.db_utils import upsert_stream
 
 
@@ -60,26 +68,17 @@ async def update_youtube_streams() -> None:
         logger.info("刷新 {} 条 | 配额剩余 {}", len(active), remaining)
 
 
-async def sync_youtube_videos_full() -> None:
-    from app.config import settings
-    from app.services.youtube_sync import (
-        sync_channel_videos,
-        is_channel_full_sync_completed,
-    )
+async def sync_youtube_videos_incremental() -> None:
+    """每天执行一次，对所有频道进行增量同步"""
+    from app.services.youtube_sync import sync_channel_videos
 
     if not await is_api_available():
-        logger.info("API 不可用，跳过全量同步")
-        return
-
-    if settings.youtube_full_sync_completed:
-        logger.info("全量同步已完成，跳过")
+        logger.info("API 不可用，跳过增量同步")
         return
 
     api_key = await get_api_key()
     if not api_key:
         return
-
-    BATCH_SIZE = 50
 
     async with AsyncSessionFactory() as session:
         result = await session.execute(
@@ -94,24 +93,93 @@ async def sync_youtube_videos_full() -> None:
     if not channels:
         return
 
-    total_channels = len(channels)
-    total_batches = (total_channels + BATCH_SIZE - 1) // BATCH_SIZE
+    logger.info("开始增量同步，共 {} 个频道", len(channels))
+
+    for ch in channels:
+        try:
+            async with AsyncSessionFactory() as session:
+                ch_obj = await session.get(Channel, ch.id)
+                if not ch_obj:
+                    continue
+
+                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
+                await session.commit()
+
+                result = await session.execute(
+                    select(Video).where(Video.channel_id == ch_obj.id)
+                )
+                video_count = len(result.scalars().all())
+                await set_incremental_state(ch_obj.id, video_count)
+
+                logger.info("增量同步完成: {} ({} videos)", ch_obj.name, video_count)
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.warning("增量同步错误 channel_id={}: {}", ch.id, e)
+
+    logger.info("增量同步全部完成")
+
+
+async def sync_youtube_videos_full() -> None:
+    """每批次10个频道进行全量同步，全部完成后停止"""
+    from app.services.youtube_sync import sync_channel_videos
+
+    if not await is_api_available():
+        logger.info("API 不可用，跳过全量同步")
+        return
+
+    if await is_all_full_completed():
+        logger.info("所有频道全量同步已完成，跳过")
+        return
+
+    api_key = await get_api_key()
+    if not api_key:
+        return
+
+    BATCH_SIZE = 10
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(Channel).where(
+                Channel.platform == Platform.YOUTUBE,
+                Channel.is_active.is_(True),
+                Channel.status != "graduated",
+            )
+        )
+        channels: List[Channel] = result.scalars().all()
+
+    if not channels:
+        return
+
+    incomplete_channels = [
+        ch
+        for ch in channels
+        if not (await get_full_state(ch.id) or {}).get("completed")
+    ]
+
+    if not incomplete_channels:
+        logger.info("所有频道已完成全量同步，跳过")
+        return
+
+    total_incomplete = len(incomplete_channels)
+    total_batches = (total_incomplete + BATCH_SIZE - 1) // BATCH_SIZE
     current_batch = int(time.time()) // 3600 % total_batches
 
-    start_idx = current_batch * BATCH_SIZE
-    end_idx = min(start_idx + BATCH_SIZE, total_channels)
-    batch_channels = channels[start_idx:end_idx]
+    batch_start = current_batch * BATCH_SIZE
+    batch_end = min(batch_start + BATCH_SIZE, total_incomplete)
+    batch_channels = incomplete_channels[batch_start:batch_end]
 
     logger.info(
-        "全量同步批次 {}/{}，频道 {}-{}，共 {} 个",
+        "全量同步批次 {}/{}，频道 {}-{}，共 {} 个（剩余未完成: {}）",
         current_batch + 1,
         total_batches,
-        start_idx + 1,
-        end_idx,
+        batch_start + 1,
+        batch_end,
         len(batch_channels),
+        total_incomplete,
     )
 
     completed_count = 0
+    newly_completed = 0
 
     for ch in batch_channels:
         try:
@@ -120,10 +188,8 @@ async def sync_youtube_videos_full() -> None:
                 if not ch_obj:
                     continue
 
-                is_completed = await is_channel_full_sync_completed(
-                    session, ch_obj, api_key
-                )
-                if is_completed:
+                full_state = await get_full_state(ch_obj.id)
+                if full_state and full_state.get("completed"):
                     completed_count += 1
                     logger.info(
                         "频道已全量同步: {} ({}/{})",
@@ -135,7 +201,15 @@ async def sync_youtube_videos_full() -> None:
 
                 await sync_channel_videos(session, ch_obj, api_key, full_refresh=True)
                 await session.commit()
+
+                result = await session.execute(
+                    select(Video).where(Video.channel_id == ch_obj.id)
+                )
+                video_count = len(result.scalars().all())
+                await set_full_completed(ch_obj.id, video_count)
+
                 completed_count += 1
+                newly_completed += 1
                 logger.info(
                     "全量同步频道: {} ({}/{})",
                     ch_obj.name,
@@ -146,12 +220,33 @@ async def sync_youtube_videos_full() -> None:
         except Exception as e:
             logger.warning("全量同步错误 channel_id={}: {}", ch.id, e)
 
+    if newly_completed > 0:
+        all_completed = True
+        for ch in channels:
+            full_state = await get_full_state(ch.id)
+            if not (full_state and full_state.get("completed")):
+                all_completed = False
+                break
+        if all_completed:
+            await set_all_full_completed(True)
+            logger.info("所有频道全量同步已完成！")
+
     logger.info(
         "批次同步完成! 批次 {}/{}，已处理 {} 个频道",
         current_batch + 1,
         total_batches,
         completed_count,
     )
+
+
+async def reset_all_youtube_sync_states() -> int:
+    """重置所有同步状态（用于手动重新开始）"""
+    from app.services.youtube_sync_state import clear_all_sync_states
+
+    deleted = await clear_all_sync_states()
+    await set_all_full_completed(False)
+    logger.info("已重置所有 YouTube 同步状态")
+    return deleted
 
 
 async def discover_live_streams_from_videos() -> None:
