@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { X, LayoutGrid } from 'lucide-vue-next'
 
@@ -8,8 +8,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useOrgStore } from '@/stores/org'
 
 import { streamApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
-
-import { type Channel } from '@/utils/layoutEngine'
+import { type LayoutChannel } from '@/utils/layoutEngine'
 import { PRESET_GROUPS, PRESET_META, type PresetId } from '@/utils/presetLayouts'
 
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
@@ -36,7 +35,7 @@ const replaceTargetNodeId = ref<string | null>(null)
 
 // === 分组选择状态 ===
 const isGroupSelectorOpen = ref(false)
-const selectedGroup = ref<string | null>(null) // 'favorites' | orgId (number)
+const selectedGroup = ref<'favorites' | number | null>(null) 
 const isRefreshing = ref(false)
 
 // === 数据状态 ===
@@ -68,15 +67,14 @@ async function fetchData() {
 
 // === 计算当前分组直播成员 ===
 const groupMembers = computed<Stream[]>(() => {
-  if (!selectedGroup.value) return []
+  if (selectedGroup.value === null) return []
   
   let filtered: Stream[]
-  
   if (selectedGroup.value === 'favorites') {
     const likedChannelIds = new Set(likedChannels.value.map(ch => ch.id))
     filtered = allStreams.value.filter(s => likedChannelIds.has(s.channel_id))
   } else {
-    const orgId = Number(selectedGroup.value)
+    const orgId = selectedGroup.value
     filtered = allStreams.value.filter(s => s.org_id === orgId)
   }
   
@@ -87,9 +85,10 @@ const groupMembers = computed<Stream[]>(() => {
   })
 })
 
+
 const organizationName = computed(() => {
-  if (!selectedGroup.value || selectedGroup.value === 'favorites') return null
-  const orgId = Number(selectedGroup.value)
+  if (selectedGroup.value === null || selectedGroup.value === 'favorites') return null
+  const orgId = selectedGroup.value
   const org = orgStore.organizations.find(o => o.id === orgId)
   return org?.name || null
 })
@@ -139,7 +138,7 @@ function openReplaceModal(nodeId: string) {
   isAddModalOpen.value = true
 }
 
-function handleAddChannel(channel: Channel) {
+function handleAddChannel(channel: LayoutChannel) {
   if (replaceTargetNodeId.value) {
     store.replaceChannel(replaceTargetNodeId.value, channel)
   } else {

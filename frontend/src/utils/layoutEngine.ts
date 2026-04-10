@@ -1,5 +1,4 @@
-// src/utils/layoutEngine.ts
-export interface Channel {
+export interface LayoutChannel {
   platform: 'youtube' | 'bilibili' | 'empty'
   id: string
   danmakuEnabled?: boolean
@@ -8,10 +7,10 @@ export interface Channel {
 export interface LayoutNode {
   id: string
   type: 'split' | 'leaf'
-  direction?: 'horizontal' | 'vertical' // split 节点专属
-  ratio?: number // split 节点专属：0.1 ~ 0.9
-  children?: [LayoutNode, LayoutNode] // split 节点必定有 2 个子节点
-  channel?: Channel // leaf 节点专属
+  direction?: 'horizontal' | 'vertical'
+  ratio?: number
+  children?: [LayoutNode, LayoutNode]
+  channel?: LayoutChannel
 }
 
 const PRESET_METADATA: Record<string, { label: string; icon?: string }> = {
@@ -33,7 +32,7 @@ export function generateId() {
   return Math.random().toString(36).substring(2, 9)
 }
 
-export function createLeaf(channel: Channel): LayoutNode {
+export function createLeaf(channel: LayoutChannel): LayoutNode {
   return { id: generateId(), type: 'leaf', channel }
 }
 
@@ -41,8 +40,7 @@ export function createEmptyLeaf(): LayoutNode {
   return createLeaf({ platform: 'empty', id: `empty-${generateId()}` })
 }
 
-// 获取树中所有的视频 (剔除 empty)
-export function getActiveChannels(node: LayoutNode): Channel[] {
+export function getActiveChannels(node: LayoutNode): LayoutChannel[] {
   if (node.type === 'leaf') {
     return node.channel?.platform !== 'empty' && node.channel ? [node.channel] : []
   }
@@ -72,7 +70,7 @@ function findFirstEmpty(node: LayoutNode): LayoutNode | null {
 }
 
 // 添加视频：优先填补空位，否则切分最大面积的窗口
-export function addChannelToTree(root: LayoutNode, channel: Channel) {
+export function addChannelToTree(root: LayoutNode, channel: LayoutChannel) {
   const emptyNode = findFirstEmpty(root)
   if (emptyNode) {
     emptyNode.channel = channel

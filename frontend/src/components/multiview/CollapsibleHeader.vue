@@ -6,25 +6,21 @@ import {
   RefreshCw, Star, CirclePlus
 } from 'lucide-vue-next'
 import { NPopover, NTooltip } from 'naive-ui'
-import type { Channel as StreamChannel } from '@/api'
+import type { Stream } from '@/api'
+import type { LayoutChannel } from '@/utils/layoutEngine'
 import { type PresetId, PRESET_META as GLOBAL_PRESET_META } from '@/utils/presetLayouts'
+
+export type GroupType = 'favorites' | number
 
 interface Props {
   isCollapsed: boolean
-  channels: Channel[]
+  channels: LayoutChannel[]
   showDanmaku: boolean
-  selectedGroup: string | null
+  selectedGroup: GroupType | null // 修改点：对齐类型
   organizationName: string | null
-  groupMembers: StreamChannel[]
+  groupMembers: Stream[]
   isRefreshing: boolean
 }
-
-interface Channel {
-  platform: string
-  id: string
-}
-
-export type GroupType = 'favorites' | number
 
 const props = defineProps<Props>()
 
@@ -41,7 +37,7 @@ const emit = defineEmits<{
   (e: 'selectGroup', group: GroupType): void
   (e: 'clearGroup'): void
   (e: 'refresh'): void
-  (e: 'addMember', member: StreamChannel): void
+  (e: 'addMember', member: Stream): void
   (e: 'openGroupSelector'): void
 }>()
 
@@ -99,7 +95,7 @@ function handleRefresh() {
   emit('refresh')
 }
 
-function handleAddMember(member: StreamChannel) {
+function handleAddMember(member: Stream) {
   emit('addMember', member)
 }
 </script>
@@ -169,20 +165,20 @@ function handleAddMember(member: StreamChannel) {
                     class="avatar-wrapper relative shrink-0"
                   >
                     <img
-                      v-if="member.avatar_url"
-                      :src="member.avatar_url"
+                      v-if="member.channel_avatar"
+                      :src="member.channel_avatar"
                       class="avatar-img"
                       referrerpolicy="no-referrer"
                     />
                     <div v-else class="avatar-placeholder">
-                      {{ member.name?.charAt(0) || '?' }}
+                      {{ member.channel_name?.charAt(0) || '?' }}
                     </div>
                     <span v-if="member.started_at" class="avatar-badge">
                       {{ formatLiveDuration(member.started_at) }}
                     </span>
                   </button>
                 </template>
-                <span class="text-xs">{{ member.name }}</span>
+                <span class="text-xs">{{ member.channel_name }}</span>
               </n-tooltip>
 
               <!-- 添加按钮 (在头像旁边) -->

@@ -82,7 +82,7 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        renew_websub, "interval", days=8, id="websub_renew", replace_existing=True
+        renew_websub, "interval", days=9, id="websub_renew", replace_existing=True
     )
     scheduler.add_job(
         scheduled_scrape_all,

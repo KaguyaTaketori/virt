@@ -1,4 +1,4 @@
-import { type Channel, type LayoutNode, createLeaf, generateId } from '@/utils/layoutEngine'
+import { type LayoutChannel, type LayoutNode, createLeaf, generateId } from '@/utils/layoutEngine'
 
 function split(
   direction: 'horizontal' | 'vertical',
@@ -9,13 +9,13 @@ function split(
   return { id: generateId(), type: 'split', direction, ratio, children: [a, b] }
 }
 
-function L(channels: Channel[], i: number): LayoutNode {
+function L(channels: LayoutChannel[], i: number): LayoutNode {
   return createLeaf(channels[i] ?? { platform: 'empty', id: `empty-${generateId()}` })
 }
 
 export type PresetId = '1-s' | '2-h' | '2-v' | '3-1+2' | '3-cols' | '4-grid' | '4-1+3'
 
-export const PRESET_GENERATORS: Record<PresetId, (channels: Channel[]) => LayoutNode> = {
+export const PRESET_GENERATORS: Record<PresetId, (channels: LayoutChannel[]) => LayoutNode> = {
   '1-s'  : (v) => L(v, 0),
 
   '2-h'  : (v) => split('horizontal', 0.5, L(v, 0), L(v, 1)),

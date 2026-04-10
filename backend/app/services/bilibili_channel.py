@@ -16,10 +16,7 @@ from app.constants import BILIBILI_DEFAULT_PAGE_SIZE, BILIBILI_MAX_VIDEO_PAGES
 from app.services.bilibili_api_client import BilibiliApiClient
 from app.services.bilibili_parser import BilibiliParser
 from app.services.bilibili_repository import BilibiliRepository
-
-MAX_RETRIES = 3
-BACKOFF_INIT = 2
-BACKOFF_MAX = 60
+from app.services.bilibili_constants import BACKOFF_INIT, BACKOFF_MAX, MAX_RETRIES
 
 class BilibiliChannelService:
     def __init__(

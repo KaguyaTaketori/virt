@@ -9,7 +9,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import {
   type LayoutNode,
-  type Channel,
+  type LayoutChannel,
   createEmptyLeaf,
   addChannelToTree,
   removeNodeAndMerge,
@@ -87,7 +87,7 @@ export const useMultiviewStore = defineStore('multiview', () => {
   }
 
   // ── 频道操作 ───────────────────────────────────────────────────────────────
-  function addChannel(channel: Channel) {
+  function addChannel(channel: LayoutChannel) {
     addChannelToTree(tree.value, channel)
     persist()
   }
@@ -104,7 +104,7 @@ export const useMultiviewStore = defineStore('multiview', () => {
     persist()
   }
 
-  function replaceChannel(nodeId: string, channel: Channel) {
+  function replaceChannel(nodeId: string, channel: LayoutChannel) {
     _traverseLeaf(tree.value, nodeId, (node) => { node.channel = channel })
     persist()
   }
@@ -147,7 +147,7 @@ export const useMultiviewStore = defineStore('multiview', () => {
         .split(',')
         .map((item) => {
           const [platform, id] = item.split('_')
-          return { platform, id } as Channel
+          return { platform, id } as LayoutChannel
         })
         .filter((c) => c.platform && c.id)
 
@@ -168,7 +168,7 @@ export const useMultiviewStore = defineStore('multiview', () => {
 
   function addFromVideoId(platform: 'youtube' | 'bilibili', videoId: string) {
     if (!videoId) return
-    const channel: Channel = { platform, id: videoId }
+    const channel: LayoutChannel = { platform, id: videoId }
     const alreadyAdded = activeChannels.value.some(
       c => c.id === channel.id && c.platform === channel.platform
     )

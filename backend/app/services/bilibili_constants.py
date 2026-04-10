@@ -1,11 +1,10 @@
-# backend/app/services/bilibili_constants.py
 from typing import Final
 
 BILIBILI_LIVE_API: Final[str] = "https://api.live.bilibili.com"
 BILIBILI_API: Final[str] = "https://api.bilibili.com"
 
-BACKOFF_INIT: Final[int] = 60
-BACKOFF_MAX: Final[int] = 600
+BACKOFF_INIT: Final[int] = 2
+BACKOFF_MAX: Final[int] = 60
 BACKOFF_FACTOR: Final[int] = 2
 MAX_RETRIES: Final[int] = 3
 BATCH_SIZE: Final[int] = 15
