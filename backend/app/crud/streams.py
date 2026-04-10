@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select, func, and_, or_, desc
@@ -99,7 +99,7 @@ class StreamRepository(CRUDBase[Stream]):
         if stream:
             stream.status = status
             if status == StreamStatus.LIVE and not stream.started_at:
-                stream.started_at = datetime.utcnow()
+                stream.started_at = datetime.now(timezone.utc)
             if status == StreamStatus.ARCHIVE and ended_at:
                 stream.ended_at = ended_at
             await self.session.flush()
@@ -116,7 +116,7 @@ class StreamRepository(CRUDBase[Stream]):
                     Stream.status.in_([StreamStatus.LIVE, StreamStatus.UPCOMING]),
                 )
             )
-            .values(status=StreamStatus.ARCHIVE, ended_at=datetime.utcnow())
+            .values(status=StreamStatus.ARCHIVE, ended_at=datetime.now(timezone.utc))
         )
         result = await self.session.execute(query)
         return result.rowcount

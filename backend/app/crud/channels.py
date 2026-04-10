@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select, func, and_
@@ -96,7 +96,7 @@ class ChannelRepository(CRUDBase[Channel]):
         """更新 videos_last_fetched 时间戳。"""
         channel = await self.get(channel_id)
         if channel:
-            channel.videos_last_fetched = datetime.utcnow()
+            channel.videos_last_fetched = datetime.now(timezone.utc)
             await self.session.flush()
 
     async def get_with_streams(self, channel_id: int) -> Optional[Channel]:
@@ -225,20 +225,14 @@ class OrganizationRepository(CRUDBase[Organization]):
         return result.scalar_one_or_none()
 
     async def get_all_with_channel_count(self) -> list[tuple[Organization, int]]:
-        """获取所有组织及其频道数量。"""
-        query = select(Organization)
+        channel_count = (
+            func.count(Channel.id).label("channel_count")
+        )
+        query = (
+            select(Organization, channel_count)
+            .outerjoin(Channel, Channel.org_id == Organization.id)
+            .group_by(Organization.id)
+            .order_by(Organization.name)
+        )
         result = await self.session.execute(query)
-        orgs = result.scalars().all()
-
-        result_list = []
-        for org in orgs:
-            count_query = (
-                select(func.count())
-                .select_from(Channel)
-                .where(Channel.org_id == org.id)
-            )
-            count_result = await self.session.execute(count_query)
-            count = count_result.scalar() or 0
-            result_list.append((org, count))
-
-        return result_list
+        return [(row.Organization, row.channel_count) for row in result.all()]

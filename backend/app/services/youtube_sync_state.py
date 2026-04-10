@@ -1,6 +1,6 @@
 from typing import Optional
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.loguru_config import logger
 from app.services.redis_client import RedisClient
@@ -42,7 +42,7 @@ async def set_incremental_state(channel_id: int, video_count: int) -> bool:
     try:
         state = {
             "video_count": video_count,
-            "synced_at": datetime.utcnow().isoformat(),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
         await redis.set(f"{_INCREMENTAL_PREFIX}{channel_id}", json.dumps(state))
         return True
@@ -90,7 +90,7 @@ async def set_full_completed(channel_id: int, playlist_total: int) -> bool:
         state = {
             "completed": True,
             "playlist_total": playlist_total,
-            "synced_at": datetime.utcnow().isoformat(),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
         await redis.set(f"{_FULL_PREFIX}{channel_id}", json.dumps(state))
         return True

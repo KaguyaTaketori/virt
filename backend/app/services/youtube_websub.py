@@ -9,10 +9,17 @@ from app.models.models import User
 
 from app.integrations.websub.subscription_service import websub_service
 from app.services.websub.atom_parser import parse_atom_feed
-from app.services.websub.security import verify_hmac_signature
+from app.integrations.websub.security import verify_hmac_signature
+
 
 router = APIRouter(prefix="/api/websub", tags=["websub"])
 _TOPIC_BASE = ".xml?channel_id="
+
+
+# Backward compatibility alias
+async def subscribe_all_active_channels(callback_url: str, secret: str = "") -> None:
+    """Legacy alias for subscribe_all_active"""
+    await websub_service.subscribe_all_active(callback_url, secret=secret)
 
 
 @router.get("/youtube", response_class=PlainTextResponse)
@@ -38,10 +45,16 @@ async def websub_receive(
     request: Request,
     background_tasks: BackgroundTasks,
     x_hub_signature: Optional[str] = Header(None, alias="X-Hub-Signature"),
+    x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
 ) -> dict:
     raw_body = await request.body()
 
-    if not verify_hmac_signature(raw_body, x_hub_signature, settings.websub_secret):
+    if not verify_hmac_signature(
+        raw_body,
+        x_hub_signature,
+        settings.websub_secret,
+        preferred_header=x_hub_signature_256,
+    ):
         raise HTTPException(status_code=403, detail="Signature invalid")
 
     entries = parse_atom_feed(raw_body)

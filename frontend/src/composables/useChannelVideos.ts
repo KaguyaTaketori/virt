@@ -1,41 +1,60 @@
 /**
- * @deprecated 请使用 hooks/useQueryVideos 中的 useChannelVideos
- * 此文件保留用于向后兼容，新代码应使用 TanStack Query hooks
+ * @deprecated 此兼容层已被废弃，请直接使用 hooks/useQueryVideos。
+ * 
+ * 迁移示例（ChannelDetail.vue）：
+ *   旧: const state = useChannelVideos({ status: 'upload', pageSize: 24 })
+ *       await state.fetch(channelId)
+ * 
+ *   新: const { data, isLoading, refetch } = useChannelVideos(channelIdRef, { 
+ *         status: 'upload', pageSize: 24 
+ *       })
  */
-import { ref, computed } from 'vue'
-import type { Ref } from 'vue'
+
+import { ref } from 'vue'
 import type { Video, VideoFetchState, FetchConfig } from '@/types'
-import { useChannelVideos as useTqChannelVideos } from '@/hooks'
+import { channelApi } from '@/api'
 
-export type { Video, VideoFetchState, FetchConfig }
-
+// 保留接口向后兼容，但修复核心逻辑
 export function useChannelVideos(config: FetchConfig): VideoFetchState {
-  const channelId = computed(() => config.status as unknown as number)
-  
-  const { data, isLoading, error, refetch } = useTqChannelVideos(channelId, {
-    page: 1,
-    pageSize: config.pageSize ?? 24,
-    status: Array.isArray(config.status) ? config.status[0] : config.status ?? undefined,
-  })
-  
-  const videos = computed(() => data.value?.videos ?? [])
-  const totalPages = computed(() => data.value?.total_pages ?? 0)
-  const loading = isLoading
+  const videos = ref<Video[]>([])
+  const page = ref(1)
+  const totalPages = ref(0)
+  const loading = ref(false)
 
   async function fetch(channelId: number): Promise<void> {
-    await refetch()
+    if (!channelId) return
+    loading.value = true
+    try {
+      const statuses = Array.isArray(config.status) ? config.status : [config.status]
+      
+      // 多状态合并请求
+      const results = await Promise.all(
+        statuses.map(status =>
+          channelApi.getVideos(channelId, page.value, config.pageSize ?? 24, status)
+            .then(r => r.data)
+        )
+      )
+      
+      let merged = results.flatMap(r => r.videos)
+      if (config.mergeSort) {
+        merged = merged.sort(config.mergeSort)
+      }
+      
+      videos.value = merged
+      // totalPages 取第一个结果的分页信息（单状态场景）
+      totalPages.value = results[0]?.total_pages ?? 0
+    } catch (err) {
+      console.error('[useChannelVideos] fetch failed:', err)
+    } finally {
+      loading.value = false
+    }
   }
 
   function reset() {
-    // TanStack Query 会自动处理缓存失效
+    videos.value = []
+    page.value = 1
+    totalPages.value = 0
   }
 
-  return { 
-    videos: videos as unknown as Ref<Video[]>, 
-    page: ref(1) as Ref<number>, 
-    totalPages, 
-    loading, 
-    fetch, 
-    reset 
-  }
+  return { videos, page, totalPages, loading, fetch, reset }
 }

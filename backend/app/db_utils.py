@@ -32,6 +32,28 @@ async def upsert(
     )
     await session.execute(upsert_stmt)
 
+async def upsert_batch(
+    session: AsyncSession,
+    model,
+    index_elements: list[str],
+    values: list[dict],
+    update_cols: dict = None,
+) -> None:
+    if not values:
+        return
+
+    stmt = _insert_fn(model).values(values)
+    
+    if update_cols:
+        upsert_stmt = stmt.on_conflict_do_update(
+            index_elements=index_elements,
+            set_=update_cols,
+        )
+    else:
+        upsert_stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
+        
+    await session.execute(upsert_stmt)
+
 
 async def upsert_stream(
     db: AsyncSession,

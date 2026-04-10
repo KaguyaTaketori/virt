@@ -1,50 +1,79 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, type Ref, watch } from 'vue'
+import { ref, computed, inject, type Ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NPagination } from 'naive-ui'
+import { NButton, NPagination, NSpin } from 'naive-ui'
 import { 
   Heart, Ban, Youtube, 
   ExternalLink, Share2, MessageSquare, ThumbsUp 
 } from 'lucide-vue-next'
-
 import { useInfiniteScroll } from '@vueuse/core'
+import { useQuery } from '@tanstack/vue-query'
 
 import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
-import { channelApi, type Channel as ApiChannel } from '@/api'
-import { useChannelVideos } from '@/composables/useChannelVideos'
+import { channelApi } from '@/api'
 import { useChannelActions } from '@/composables/useChannelActions'
-import { useBilibiliData }   from '@/composables/useBilibiliData'
+import { useBilibiliData } from '@/composables/useBilibiliData'
+import { useChannelVideos } from '@/hooks/useQueryVideos'
 
 // --- 基础状态 ---
 const route = useRoute()
 const router = useRouter()
 const orgStore = useOrgStore()
 const authStore = useAuthStore()
+const channelId = computed(() => Number(route.params.id))
 
-const channel = ref<ApiChannel | null>(null)
-const loading = ref(true)
-const bilibiliError = ref<string | null>(null)
-  
-const activeTab = ref('videos')
-
-const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
-
-// --- Composables ---
-const uploadState = useChannelVideos({ status: 'upload', pageSize: 24 })
-const shortsState = useChannelVideos({ status: 'short',  pageSize: 48 })
-const liveState   = useChannelVideos({
-  status: ['live', 'upcoming'],
-  pageSize: 48,
-  mergeSort: (a, b) => {
-    if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
-    if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
-    return 0
-  }
+// --- 1. 频道基础信息 Query ---
+const { data: channel, isLoading: channelLoading, error: channelQueryError } = useQuery({
+  queryKey: ['channel', channelId],
+  queryFn: async () => {
+    const { data } = await channelApi.get(channelId.value)
+    return data
+  },
+  enabled: computed(() => !!channelId.value),
+  staleTime: 300_000
 })
 
+const activeTab = ref('videos')
+const isBilibili = computed(() => channel.value?.platform === 'bilibili')
+
+// --- 2. 交互与 Action (保持原样) ---
+const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
+
+// --- 3. 视频分页状态 ---
+const uploadPage = ref(1)
+const shortsPage = ref(1)
+const livePage = ref(1)
+
+// --- 4. 使用 useQueryVideos 获取不同类型的视频 ---
+
+// 投稿视频
+const uploadQuery = useChannelVideos(channelId, {
+  page: uploadPage,
+  pageSize: 24,
+  status: 'upload',
+  enabled: computed(() => activeTab.value === 'videos' && !isBilibili.value) 
+})
+
+// YouTube Shorts
+const shortsQuery = useChannelVideos(channelId, {
+  page: shortsPage,
+  pageSize: 48,
+  status: 'short',
+  enabled: computed(() => activeTab.value === 'shorts')
+})
+
+// YouTube 直播 (处理状态数组)
+const liveQuery = useChannelVideos(channelId, {
+  page: livePage,
+  pageSize: 48,
+  status: 'live,upcoming', // 假设后端支持逗号分隔，或根据 API 调整
+  enabled: computed(() => activeTab.value === 'live')
+})
+
+// --- 5. Bilibili 数据逻辑 (兼容原有 composable) ---
 const { 
-  dynamics: bilibiliAllDynamics, 
+  dynamics: bilibiliDynamics, 
   videos: bilibiliVideos, 
   info: bilibiliInfo, 
   loading: bilibiliDynamicsLoading, 
@@ -54,24 +83,57 @@ const {
   reset: resetBilibiliData 
 } = useBilibiliData()
 
-const bilibiliDynamics = computed(() => bilibiliAllDynamics.value)
+function loadMoreDynamics() {
+  if (channel.value) {
+    runBilibiliLoadMore(channel.value.id)
+  }
+}
 
-const isBilibili = computed(() => channel.value?.platform === 'bilibili')
-
-// --- 生命周期与监听 ---
-const mainScrollRef = inject<Ref<HTMLElement | null>>('mainScrollRef')
-
-useInfiniteScroll(
-  mainScrollRef,
-  () => {
-    if (activeTab.value === 'dynamics' && bilibiliDynamicsHasMore.value && !bilibiliDynamicsLoading.value) {
-      loadMoreDynamics()
+// 处理 B站 初始化加载
+watch(channelId, (newId) => {
+  if (newId) {
+    resetBilibiliData()
+    if (isBilibili.value) {
+      runBilibiliFetch(newId)
     }
-  },
-  { distance: 100 }
-)
+  }
+}, { immediate: true })
 
-// --- 逻辑方法 ---
+// --- 6. 视图聚合 ---
+const displayVideos = computed(() => {
+  if (isBilibili.value && bilibiliVideos.value.length > 0) {
+    return bilibiliVideos.value.map(v => ({
+      id: v.bvid,
+      thumbnail_url: v.pic,
+      title: v.title,
+      duration: v.duration,
+      view_count: v.play,
+      published_at: formatPubDate(v.pubdate),
+      status: 'upload',
+      isRaw: true
+    }))
+  }
+  return uploadQuery.data.value?.videos || []
+})
+
+// 对直播进行排序处理 (模拟原有的 mergeSort)
+const sortedLiveVideos = computed(() => {
+  const items = [...(liveQuery.data.value?.videos || [])]
+  return items.sort((a, b) => {
+    if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
+    if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
+    return 0
+  })
+})
+
+// --- 其他逻辑 ---
+const mainScrollRef = inject<Ref<HTMLElement | null>>('mainScrollRef')
+useInfiniteScroll(mainScrollRef, () => {
+  if (activeTab.value === 'dynamics' && bilibiliDynamicsHasMore.value && !bilibiliDynamicsLoading.value) {
+    runBilibiliLoadMore(channelId.value)
+  }
+}, { distance: 100 })
+
 const tabs = computed(() => {
   if (isBilibili.value) {
     return [
@@ -88,137 +150,32 @@ const tabs = computed(() => {
   ]
 })
 
-
-const displayVideos = computed(() => {
-  if (isBilibili.value && bilibiliVideos.value.length > 0) {
-    return bilibiliVideos.value.map(v => ({
-      id: v.bvid,
-      thumbnail_url: v.pic,
-      title: v.title,
-      duration: v.duration,
-      view_count: v.play,
-      published_at: formatPubDate(v.pubdate),
-      status: 'upload',
-      isRaw: true
-    }))
-  }
-  return uploadState.videos.value
+// 错误处理转换
+const bilibiliError = computed(() => {
+  const err = channelQueryError.value as any
+  if (err?.response?.status === 403) return err.response.data?.detail || 'B站功能需要登录'
+  return null
 })
 
-
-
-function goToLogin() {
-  router.push({ name: 'Login' })
-}
-
-async function fetchChannel(id: number) {
-  loading.value = true
-  bilibiliError.value = null
-  try {
-    const { data } = await channelApi.get(id)
-    channel.value = data
-    
-    uploadState.reset()
-    liveState.reset()
-    shortsState.reset()
-    resetBilibiliData()
-
-    if (isBilibili.value) {
-      activeTab.value = 'videos'
-      await Promise.all([
-        uploadState.fetch(id),
-        runBilibiliFetch(id)
-      ])
-    } else {
-      activeTab.value = 'live'
-      await Promise.all([
-        liveState.fetch(id),
-        uploadState.fetch(id)
-      ])
-    }
-  } catch (err: any) {
-    if (err.response?.status === 403) {
-      bilibiliError.value = err.response.data?.detail || 'B站功能需要登录'
-    }
-    console.error('Failed to fetch channel:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-function loadMoreDynamics() {
-  if (channel.value) {
-    runBilibiliLoadMore(channel.value.id)
-  }
-}
-
-// function onPageScroll() {
-//   if (activeTab.value !== 'dynamics') return
-//   if (bilibiliDynamicsLoading.value || !bilibiliDynamicsHasMore.value) return;
-
-//   const target = mainScrollRef?.value || document.documentElement;
-//   const { scrollTop, clientHeight, scrollHeight } = target;
-  
-//   const threshold = 50; 
-//   const isBottom = scrollTop + clientHeight >= scrollHeight - threshold;
-  
-//   if (isBottom) {
-//     loadMoreDynamics();
-//   }
-// }
-
-onMounted(async () => {
-  await orgStore.invalidate()
-  const channelId = Number(route.params.id)
-  await fetchChannel(channelId)
-})
-
-watch(activeTab, async (tab) => {
-  if (!channel.value) return
-  const channelId = channel.value.id
-
-  // 按需加载数据
-  if (tab === 'videos' && uploadState.videos.value.length === 0) {
-    await uploadState.fetch(channelId)
-  } else if (tab === 'live' && liveState.videos.value.length === 0) {
-    await liveState.fetch(channelId)
-  } else if (tab === 'shorts' && shortsState.videos.value.length === 0) {
-    await shortsState.fetch(channelId)
-  } else if (tab === 'home' && !bilibiliInfo.value) {
-    await runBilibiliFetch(channelId)
-  } else if (tab === 'dynamics' && bilibiliDynamics.value.length === 0) {
-    await runBilibiliFetch(channelId)
-  }
-})
-
-// --- 格式化工具函数 ---
-function formatCount(num: number): string {
-  return num >= 10000 ? (num / 10000).toFixed(1) + '万' : num.toString()
-}
-
-function formatPubDate(ts: number): string {
-  return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : ''
-}
-
-function formatTimestamp(ts: number): string {
+function goToLogin() { router.push({ name: 'Login' }) }
+function formatCount(num: number) { return num >= 10000 ? (num / 10000).toFixed(1) + '万' : num.toString() }
+function formatPubDate(ts: number) { return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '' }
+function formatTimestamp(ts: number) {
   const date = new Date(ts * 1000)
   return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
-
-function getDynamicTypeLabel(type: number): string {
+function getDynamicTypeLabel(type: number) {
   const map: Record<number, string> = { 1: '转发', 2: '图文', 4: '文字', 8: '视频', 64: '专栏' }
   return map[type] || '动态'
 }
-
-function getOrgName(orgId: number | null): string {
-  if (!orgId) return ''
+function getOrgName(orgId: number | null) {
   return orgStore.organizations.find(o => o.id === orgId)?.name || ''
 }
 </script>
 
 <template>
   <!-- 全局加载状态 -->
-  <div v-if="loading" class="flex justify-center py-16">
+  <div v-if="channelLoading" class="flex justify-center py-16">
     <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-pink-500"></div>
   </div>
 
@@ -326,43 +283,42 @@ function getOrgName(orgId: number | null): string {
               </div>
             </div>
           </div>
-          <div v-else-if="!uploadState.loading.value" class="text-center py-12 text-gray-500">暂无投稿</div>
+          <div v-else class="text-center py-12 text-gray-500">暂无投稿</div>
           
-          <div v-if="uploadState.totalPages.value > 1" class="flex justify-center mt-6">
-            <n-pagination v-model:page="uploadState.page.value" :page-count="uploadState.totalPages.value" @update:page="uploadState.fetch(Number(route.params.id))" />
+          <div v-if="!isBilibili && (uploadQuery.data.value?.total_pages || 0) > 1" class="flex justify-center mt-6">
+              <n-pagination v-model:page="uploadPage" :page-count="uploadQuery.data.value?.total_pages" />
           </div>
         </div>
 
         <!-- YouTube 直播 Tab -->
         <div v-if="activeTab === 'live' && !isBilibili">
-          <div v-if="liveState.videos.value.length > 0">
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              <div v-for="video in liveState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
-                <div class="aspect-video relative">
-                  <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-                  <span v-if="video.status === 'live'" class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
-                    <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>直播中
-                  </span>
-                  <span v-else-if="video.status === 'upcoming'" class="absolute top-2 left-2 bg-yellow-600 text-white text-xs px-2 py-0.5 rounded">预约</span>
-                  <span v-if="video.duration" class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">{{ video.duration }}</span>
-                </div>
-                <div class="p-3">
-                  <h4 class="text-sm text-white line-clamp-2">{{ video.title }}</h4>
-                  <p class="text-xs text-gray-500 mt-1">{{ video.view_count }} views · {{ video.published_at }}</p>
-                </div>
+          <div v-if="liveQuery.isLoading.value" class="flex justify-center py-12"><n-spin /></div>
+          <div v-if="liveQuery.data.value?.videos.length" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div v-for="video in liveQuery.data.value.videos" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
+              <div class="aspect-video relative">
+                <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
+                <span v-if="video.status === 'live'" class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>直播中
+                </span>
+                <span v-else-if="video.status === 'upcoming'" class="absolute top-2 left-2 bg-yellow-600 text-white text-xs px-2 py-0.5 rounded">预约</span>
+                <span v-if="video.duration" class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">{{ video.duration }}</span>
+              </div>
+              <div class="p-3">
+                <h4 class="text-sm text-white line-clamp-2">{{ video.title }}</h4>
+                <p class="text-xs text-gray-500 mt-1">{{ video.view_count }} views · {{ video.published_at }}</p>
               </div>
             </div>
-            <div v-if="liveState.totalPages.value > 1" class="flex justify-center mt-6">
-              <n-pagination v-model:page="liveState.page.value" :page-count="liveState.totalPages.value" @update:page="liveState.fetch(Number(route.params.id))" />
+            <div v-if="(liveQuery.data.value?.total_pages || 0) > 1" class="flex justify-center mt-6">
+              <n-pagination v-model:page="livePage" :page-count="liveQuery.data.value?.total_pages" />
             </div>
           </div>
-          <div v-else-if="!liveState.loading.value" class="text-center py-12 text-gray-500">暂无直播</div>
+          <div v-else class="text-center py-12 text-gray-500">暂无直播</div>
         </div>
 
         <!-- YouTube Shorts Tab -->
         <div v-if="activeTab === 'shorts' && !isBilibili">
-          <div v-if="shortsState.videos.value.length > 0" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            <div v-for="video in shortsState.videos.value" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
+          <div v-if="shortsQuery.data.value?.videos.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div v-for="video in shortsQuery.data.value.videos" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
               <div class="aspect-[9/16] relative">
                 <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
               </div>
@@ -372,7 +328,7 @@ function getOrgName(orgId: number | null): string {
               </div>
             </div>
           </div>
-          <div v-else-if="!shortsState.loading.value" class="text-center py-12 text-gray-500">暂无 Shorts</div>
+          <div v-else class="text-center py-12 text-gray-500">暂无 Shorts</div>
         </div>
 
         <!-- Bilibili 动态 Tab -->

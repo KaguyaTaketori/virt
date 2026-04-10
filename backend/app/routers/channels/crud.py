@@ -21,19 +21,17 @@ from app.models.models import (
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
 from app.services.youtube_channel import get_channel_details
 from app.services.youtube_sync import sync_channel_videos
-from app.services.youtube_websub import subscribe_channel
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.constants import UserChannelStatus
 from app.services.channel_service import ChannelService
 
+
 router = APIRouter()
 
 
-async def _bg_sync_channel(channel_id: int, callback_url: str) -> None:
+async def _bg_sync_channel(channel_id: int) -> None:
     if not await is_api_available():
-        logger.warning(
-            "No YouTube API available, skipping sync for channel_id={}", channel_id
-        )
+        logger.warning("No YouTube API available, skipping sync for channel_id={}", channel_id)
         return
 
     api_key = await get_api_key()
@@ -46,40 +44,39 @@ async def _bg_sync_channel(channel_id: int, callback_url: str) -> None:
             logger.warning("Channel {} not found during bg sync", channel_id)
             return
         await sync_channel_videos(session, ch, api_key, full_refresh=True)
+        logger.info("Video sync completed for channel_id={}", channel_id)
 
-    _safe_callback = settings.websub_callback_url
-    if callback_url and callback_url != "https://your-domain.com/api/websub/youtube":
-        async with session_scope() as session:
-            ch = await session.get(Channel, channel_id)
-            if ch:
-                await subscribe_channel(
-                    ch.channel_id,
-                    callback_url,
-                    secret=settings.websub_secret or None,
-                )
+    callback_url = settings.websub_callback_url
+    if not callback_url:
+        logger.debug("WebSub callback_url not configured, skipping subscription")
         return
 
-    api_key = await get_api_key()
-    if not api_key:
-        return
-
-    async with AsyncSessionFactory() as session:
+    async with session_scope() as session:
         ch = await session.get(Channel, channel_id)
-        if not ch:
-            logger.warning("Channel {} not found during bg sync", channel_id)
-            return
-        await sync_channel_videos(session, ch, api_key, full_refresh=True)
+        if ch:
+            await subscribe_channel(
+                ch.channel_id,
+                callback_url,
+                secret=settings.websub_secret or None,
+            )
+            logger.info("WebSub subscription registered for channel_id={}", channel_id)
 
-    _safe_callback = settings.websub_callback_url
-    if callback_url and callback_url != "https://your-domain.com/api/websub/youtube":
-        async with AsyncSessionFactory() as session:
-            ch = await session.get(Channel, channel_id)
-            if ch:
-                await subscribe_channel(
-                    ch.channel_id,
-                    callback_url,
-                    secret=settings.websub_secret or None,
-                )
+
+
+@router.post("/", response_model=ChannelResponse)
+async def create_channel(
+    channel_in: ChannelCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db_session),
+    _: User = AdminUser,
+):
+    service = ChannelService(db)
+    db_channel = await service.create_channel(channel_in)
+
+    if db_channel.platform == Platform.YOUTUBE:
+        background_tasks.add_task(_bg_sync_channel, db_channel.id)
+
+    return db_channel
 
 
 @router.get("/", response_model=List[ChannelResponse])
@@ -145,29 +142,6 @@ async def get_channel_by_id(
             resp.is_liked = uc.status == UserChannelStatus.LIKED
             resp.is_blocked = uc.status == UserChannelStatus.BLOCKED
     return resp
-
-
-@router.post("/", response_model=ChannelResponse)
-async def create_channel(
-    channel_in: ChannelCreate,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
-    _: User = AdminUser,
-):
-    service = ChannelService(db)
-
-    # 1. 核心业务：创建频道
-    db_channel = await service.create_channel(channel_in)
-
-    # 2. 外部副作用：触发同步（只在成功入库后执行）
-    if db_channel.platform == Platform.YOUTUBE:
-        background_tasks.add_task(
-            _bg_sync_channel,
-            db_channel.id,
-            settings.websub_callback_url,
-        )
-
-    return db_channel
 
 
 @router.put("/{channel_id}", response_model=ChannelResponse)
