@@ -7,12 +7,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from sqlalchemy import select
 
 from app.loguru_config import logger
 from app.crud.session import session_scope
 from app.crud import ChannelRepository, StreamRepository, VideoRepository
-from app.models.models import Channel, Platform
+from app.models.models import Platform
 from app.services.bilibili_live import get_rooms_by_uids, parse_bilibili_room
 from app.services.youtube_channel import get_channel_details
 from app.services.youtube_sync import sync_channel_videos

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.models.models import Channel, Organization, Platform
 from app.services.youtube_channel import get_youtube_channel_info
 from app.services.youtube_sync import sync_channel_videos
-from app.database_async import AsyncSessionFactory
+from app.crud.session import session_scope
 from app.loguru_config import logger
 from app.services.api_key_manager import get_api_key, is_api_available
 from .base import VtuberChannel
@@ -123,7 +123,7 @@ async def _sync_single_channel(
     try:
         from app.config import settings
 
-        async with AsyncSessionFactory() as session:
+        async with session_scope() as session:
             ch_obj = await session.get(Channel, new_channel.id)
             if ch_obj and await is_api_available():
                 from app.services.youtube_sync import sync_channel_videos
@@ -205,5 +205,5 @@ async def scrape_and_sync_all(db: AsyncSession) -> dict:
 
 async def scheduled_scrape_all():
     """定时任务：爬取并同步所有VTuber Wiki"""
-    async with AsyncSessionFactory() as db:
-        return await scrape_and_sync_all(db)
+    async with session_scope() as session:
+        return await scrape_and_sync_all(session)

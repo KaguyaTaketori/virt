@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.loguru_config import logger
-from app.database_async import AsyncSessionFactory
+from app.crud.session import session_scope
 from app.deps import get_db_session
 from app.deps.guards import AdminUser
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
@@ -28,9 +28,35 @@ from app.services.channel_service import ChannelService
 
 router = APIRouter()
 
+
 async def _bg_sync_channel(channel_id: int, callback_url: str) -> None:
     if not await is_api_available():
-        logger.warning("No YouTube API available, skipping sync for channel_id={}", channel_id)
+        logger.warning(
+            "No YouTube API available, skipping sync for channel_id={}", channel_id
+        )
+        return
+
+    api_key = await get_api_key()
+    if not api_key:
+        return
+
+    async with session_scope() as session:
+        ch = await session.get(Channel, channel_id)
+        if not ch:
+            logger.warning("Channel {} not found during bg sync", channel_id)
+            return
+        await sync_channel_videos(session, ch, api_key, full_refresh=True)
+
+    _safe_callback = settings.websub_callback_url
+    if callback_url and callback_url != "https://your-domain.com/api/websub/youtube":
+        async with session_scope() as session:
+            ch = await session.get(Channel, channel_id)
+            if ch:
+                await subscribe_channel(
+                    ch.channel_id,
+                    callback_url,
+                    secret=settings.websub_secret or None,
+                )
         return
 
     api_key = await get_api_key()
@@ -50,7 +76,8 @@ async def _bg_sync_channel(channel_id: int, callback_url: str) -> None:
             ch = await session.get(Channel, channel_id)
             if ch:
                 await subscribe_channel(
-                    ch.channel_id, callback_url,
+                    ch.channel_id,
+                    callback_url,
                     secret=settings.websub_secret or None,
                 )
 
@@ -83,10 +110,9 @@ async def get_channels(
     status_map = {}
     if ctx.user_id:
         channel_ids = [ch.id for ch in channels]
-        
+
         user_channel_query = select(UserChannel).where(
-            UserChannel.user_id == ctx.user_id,
-            UserChannel.channel_id.in_(channel_ids)
+            UserChannel.user_id == ctx.user_id, UserChannel.channel_id.in_(channel_ids)
         )
         uc_result = await db.execute(user_channel_query)
         status_map = {uc.channel_id: uc.status for uc in uc_result.scalars().all()}
@@ -129,7 +155,7 @@ async def create_channel(
     _: User = AdminUser,
 ):
     service = ChannelService(db)
-    
+
     # 1. 核心业务：创建频道
     db_channel = await service.create_channel(channel_in)
 
@@ -142,6 +168,7 @@ async def create_channel(
         )
 
     return db_channel
+
 
 @router.put("/{channel_id}", response_model=ChannelResponse)
 async def update_channel(
