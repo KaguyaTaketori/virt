@@ -67,7 +67,7 @@ const shortsQuery = useChannelVideos(channelId, {
 const liveQuery = useChannelVideos(channelId, {
   page: livePage,
   pageSize: 48,
-  status: 'live,upcoming', // 假设后端支持逗号分隔，或根据 API 调整
+  status: 'live,upcoming,archive',
   enabled: computed(() => activeTab.value === 'live')
 })
 
@@ -293,8 +293,8 @@ function getOrgName(orgId: number | null) {
         <!-- YouTube 直播 Tab -->
         <div v-if="activeTab === 'live' && !isBilibili">
           <div v-if="liveQuery.isLoading.value" class="flex justify-center py-12"><n-spin /></div>
-          <div v-if="liveQuery.data.value?.videos.length" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            <div v-for="video in liveQuery.data.value.videos" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
+          <div v-if="sortedLiveVideos.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div v-for="video in sortedLiveVideos" :key="video.id" class="bg-zinc-900 rounded-lg overflow-hidden hover:bg-zinc-800 transition-colors cursor-pointer" @click="addToMultiview(video.id)">
               <div class="aspect-video relative">
                 <img :src="video.thumbnail_url || '/placeholder.png'" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
                 <span v-if="video.status === 'live'" class="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
@@ -308,10 +308,12 @@ function getOrgName(orgId: number | null) {
                 <p class="text-xs text-gray-500 mt-1">{{ video.view_count }} views · {{ video.published_at }}</p>
               </div>
             </div>
-            <div v-if="(liveQuery.data.value?.total_pages || 0) > 1" class="flex justify-center mt-6">
-              <n-pagination v-model:page="livePage" :page-count="liveQuery.data.value?.total_pages" />
-            </div>
           </div>
+          
+          <div v-if="(liveQuery.data.value?.total_pages || 0) > 1" class="flex justify-center mt-6">
+            <n-pagination v-model:page="livePage" :page-count="liveQuery.data.value?.total_pages" />
+          </div>
+
           <div v-else class="text-center py-12 text-gray-500">暂无直播</div>
         </div>
 

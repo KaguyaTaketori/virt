@@ -33,12 +33,21 @@ class VideoRepository(CRUDBase[Video]):
         status: Optional[str] = None,
     ) -> list[Video]:
         """获取某个频道的视频列表。"""
+        status_list = self._parse_status(status)
         query = select(Video).where(Video.channel_id == channel_id)
-        if status is not None:
-            query = query.where(Video.status == status)
+        if status_list:
+            if len(status_list) == 1:
+                query = query.where(Video.status == status_list[0])
+            else:
+                query = query.where(Video.status.in_(status_list))
         query = query.order_by(desc(Video.published_at)).offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    def _parse_status(self, status: Optional[str]) -> Optional[list[str]]:
+        if not status:
+            return None
+        return [s.strip() for s in status.split(",") if s.strip()]
 
     async def get_paginated_by_channel(
         self,
@@ -49,20 +58,27 @@ class VideoRepository(CRUDBase[Video]):
     ) -> tuple[list[Video], int]:
         """分页获取频道视频。"""
         skip = (page - 1) * page_size
+        status_list = self._parse_status(status)
 
         count_query = (
             select(func.count())
             .select_from(Video)
             .where(Video.channel_id == channel_id)
         )
-        if status is not None:
-            count_query = count_query.where(Video.status == status)
+        if status_list:
+            if len(status_list) == 1:
+                count_query = count_query.where(Video.status == status_list[0])
+            else:
+                count_query = count_query.where(Video.status.in_(status_list))
         count_result = await self.session.execute(count_query)
         total = count_result.scalar() or 0
 
         data_query = select(Video).where(Video.channel_id == channel_id)
-        if status is not None:
-            data_query = data_query.where(Video.status == status)
+        if status_list:
+            if len(status_list) == 1:
+                data_query = data_query.where(Video.status == status_list[0])
+            else:
+                data_query = data_query.where(Video.status.in_(status_list))
         data_query = (
             data_query.order_by(desc(Video.published_at)).offset(skip).limit(page_size)
         )
@@ -135,13 +151,17 @@ class VideoRepository(CRUDBase[Video]):
         self, channel_id: int, status: Optional[str] = None
     ) -> int:
         """统计频道视频数量。"""
+        status_list = self._parse_status(status)
         query = (
             select(func.count())
             .select_from(Video)
             .where(Video.channel_id == channel_id)
         )
-        if status is not None:
-            query = query.where(Video.status == status)
+        if status_list:
+            if len(status_list) == 1:
+                query = query.where(Video.status == status_list[0])
+            else:
+                query = query.where(Video.status.in_(status_list))
         result = await self.session.execute(query)
         return result.scalar() or 0
 

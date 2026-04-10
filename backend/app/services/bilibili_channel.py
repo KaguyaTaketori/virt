@@ -18,6 +18,7 @@ from app.services.bilibili_parser import BilibiliParser
 from app.services.bilibili_repository import BilibiliRepository
 from app.services.bilibili_constants import BACKOFF_INIT, BACKOFF_MAX, MAX_RETRIES
 
+
 class BilibiliChannelService:
     def __init__(
         self,
@@ -30,7 +31,7 @@ class BilibiliChannelService:
         self._repo = repo
 
     async def get_info(
-        self, 
+        self,
         uid: str,
         ctx: ChannelRequestContext,
     ) -> Optional[dict]:
@@ -46,12 +47,7 @@ class BilibiliChannelService:
             logger.error("Failed to get user info, uid={}: {}", uid, e)
             return None
 
-    async def update_channel(
-        self, 
-        channel, 
-        info: dict,
-        db: AsyncSession
-    ) -> None:
+    async def update_channel(self, channel, info: dict, db: AsyncSession) -> None:
         """将用户信息应用到 Channel 对象"""
         if not info:
             return
@@ -95,11 +91,11 @@ class BilibiliChannelService:
         return parsed, raw_result.get("offset", "")
 
     async def get_dynamics_from_db(
-        self, 
-        channel_id: int, 
+        self,
+        channel_id: int,
         db: AsyncSession,
-        offset: int = 0, 
-        limit: int = BILIBILI_DEFAULT_PAGE_SIZE
+        offset: int = 0,
+        limit: int = BILIBILI_DEFAULT_PAGE_SIZE,
     ) -> list:
         if not db:
             return []
@@ -140,10 +136,10 @@ class BilibiliChannelService:
             return []
 
     async def get_videos(
-        self, 
-        uid: str, 
+        self,
+        uid: str,
         ctx: ChannelRequestContext,
-        page: int = 1, 
+        page: int = 1,
         page_size: int = BILIBILI_DEFAULT_PAGE_SIZE,
     ) -> list:
         if not ctx.credential:
@@ -162,7 +158,6 @@ class BilibiliChannelService:
                 for v in vlist:
                     video_data = self._parser.parse_video(v)
                     result.append(video_data)
-                    await self._save_video(ctx, v)
 
                 return result
             except Exception as e:
@@ -184,8 +179,8 @@ class BilibiliChannelService:
         return []
 
     async def get_all_videos(
-        self, 
-        uid: str, 
+        self,
+        uid: str,
         ctx: ChannelRequestContext,
         page_size: int = BILIBILI_DEFAULT_PAGE_SIZE,
     ) -> list:
@@ -210,11 +205,11 @@ class BilibiliChannelService:
         return all_videos
 
     async def get_videos_from_db(
-        self, 
-        channel_id: int, 
+        self,
+        channel_id: int,
         db: AsyncSession,
-        page: int = 1, 
-        page_size: int = BILIBILI_DEFAULT_PAGE_SIZE
+        page: int = 1,
+        page_size: int = BILIBILI_DEFAULT_PAGE_SIZE,
     ) -> list:
         if not db:
             return []

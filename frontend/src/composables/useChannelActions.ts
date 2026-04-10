@@ -3,7 +3,7 @@ import { useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { userChannelApi, type Channel } from '@/api'
 import { useMultiviewStore } from '@/stores/multiview'
-import { useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 
 export function useChannelActions(channel: Ref<Channel | null | undefined>) {
   const message = useMessage()
@@ -36,7 +36,7 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
       return { previousChannel }
     },
     // 3. 如果失败，回滚到旧值
-    onError: (context: { previousChannel: unknown }) => {
+    onError: (_err, _variables, context) => {
       if (context?.previousChannel) {
         queryClient.setQueryData(['channel', channel.value?.id], context.previousChannel)
       }
@@ -46,19 +46,48 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['channel', channel.value?.id] })
     },
-    onSuccess: (_: any, variables: { isLiked: any }) => {
+    onSuccess: (_data, variables) => {
       message.success(variables.isLiked ? '已取消收藏' : '已添加到收藏')
     }
   })
 
   const blockMutation = useMutation({
     mutationFn: async ({ id, isBlocked }: { id: number; isBlocked: boolean }) => {
-      // 假设你有对应的屏蔽接口
-      // return isBlocked ? api.unblock(id) : api.block(id)
+      if (isBlocked) return await userChannelApi.unblock(id)
+      return await userChannelApi.block(id)
     },
-    onSuccess: () => {
+
+    onMutate: async ({ isBlocked }) => {
+      await queryClient.cancelQueries({ queryKey: ['channel', channel.value?.id] })
+
+      const previousChannel = queryClient.getQueryData(['channel', channel.value?.id])
+
+      if (channel.value) {
+        queryClient.setQueryData(['channel', channel.value.id], (old: any) => ({
+          ...old,
+          is_blocked: !isBlocked
+        }))
+      }
+
+      return { previousChannel }
+    },
+
+    // 3. 错误处理：回滚
+    onError: (_err, _variables, context) => {
+      if (context?.previousChannel) {
+        queryClient.setQueryData(['channel', channel.value?.id], context.previousChannel)
+      }
+      message.error('操作失败，请稍后重试')
+    },
+
+    // 4. 无论成功失败，都刷新服务器最新数据
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['channel', channel.value?.id] })
-      message.success('操作成功')
+    },
+
+    // 5. 成功提示
+    onSuccess: (_data, variables) => {
+      message.success(variables.isBlocked ? '已取消屏蔽' : '已屏蔽该频道')
     }
   })
 
@@ -70,9 +99,17 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
     })
   }
 
-  function toggleBlock() {
-    if (!channel.value) return
-    // blockMutation.mutate(...)
+ function toggleBlock() {
+    if (!channel.value) {
+      message.warning('频道信息未加载')
+      return
+    }
+
+    blockMutation.mutate({
+      id: channel.value.id,
+      // 注意：这里使用 !! 确保转换为 boolean，且字段名需与 API 返回的一致（这里假设是 is_blocked）
+      isBlocked: !!channel.value.is_blocked 
+    })
   }
 
   function addToMultiview(videoId?: string) {

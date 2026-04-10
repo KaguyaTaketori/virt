@@ -2,8 +2,8 @@ from fastapi import APIRouter
 
 from app.deps.guards import AdminUser
 from app.models.models import User
-from app.schedulers.bilibili import update_bilibili_streams
 from app.services.quota_guard import status as quota_status
+from app.worker.tasks import update_bilibili_streams
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

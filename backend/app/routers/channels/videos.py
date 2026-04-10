@@ -15,6 +15,12 @@ from app.services.youtube_videos import get_channel_videos as fetch_yt_videos
 router = APIRouter()
 
 
+def parse_status_filter(status: Optional[str]) -> Optional[list[str]]:
+    if not status:
+        return None
+    return [s.strip() for s in status.split(",") if s.strip()]
+
+
 @router.get("/{channel_id}/videos", response_model=PaginatedVideosResponse)
 async def get_channel_videos(
     channel_id: int,
@@ -47,8 +53,12 @@ async def _get_bilibili_videos(
     status: Optional[str],
 ) -> PaginatedVideosResponse:
     base_query = select(Video).where(Video.channel_id == channel.id)
-    if status:
-        base_query = base_query.where(Video.status == status)
+    status_list = parse_status_filter(status)
+    if status_list:
+        if len(status_list) == 1:
+            base_query = base_query.where(Video.status == status_list[0])
+        else:
+            base_query = base_query.where(Video.status.in_(status_list))
 
     count_query = select(func.count()).select_from(base_query.subquery())
     total = (await db.execute(count_query)).scalar() or 0

@@ -3,6 +3,7 @@
 应用启动/关闭生命周期的各项初始化职责。
 每个函数单一职责，可独立测试，可独立禁用。
 """
+
 from __future__ import annotations
 
 from sqlalchemy import text, select, func
@@ -41,12 +42,13 @@ async def check_production_secrets() -> None:
     if errors:
         for e in errors:
             logger.critical("启动安全检查失败: {}", e)
-        raise RuntimeError("生产环境安全检查未通过：\n" + "\n".join(f"  - {e}" for e in errors))
+        raise RuntimeError(
+            "生产环境安全检查未通过：\n" + "\n".join(f"  - {e}" for e in errors)
+        )
 
 
 async def init_databases() -> None:
     """建表（幂等），同步引擎 + 异步引擎均初始化。"""
-
 
     Base.metadata.create_all(bind=engine)
     await create_all_tables()
@@ -64,7 +66,7 @@ async def init_redis() -> bool:
         await init_permission_cache(redis)
         await init_room_counter(redis)
         await init_danmaku_queue(redis)
-        await init_quota_guard(redis) 
+        await init_quota_guard(redis)
         logger.info("Redis connected and subsystems initialized")
         return True
     except Exception as e:
@@ -101,6 +103,7 @@ async def init_websub() -> None:
 async def register_scheduled_jobs() -> None:
     """注册所有定时任务，与调度器启动解耦。"""
     bilibili_auth_service.start_cleanup_task()
+
     async def _cleanup_blacklist():
         try:
             async with AsyncSessionFactory() as session:
@@ -111,9 +114,10 @@ async def register_scheduled_jobs() -> None:
             logger.error("Blacklist cleanup error: {}", e)
 
     start_scheduler()
-    scheduler.add_job(
+    scheduler.add_cron_job(
         _cleanup_blacklist,
-        "cron", hour=3, minute=30,
-        id="blacklist_cleanup", replace_existing=True,
+        job_id="blacklist_cleanup",
+        hour=3,
+        minute=30,
     )
     logger.info("Scheduler started with all jobs registered")

@@ -24,6 +24,7 @@ from app.services.youtube_sync import sync_channel_videos
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.constants import UserChannelStatus
 from app.services.channel_service import ChannelService
+from app.integrations.websub.subscription_service import websub_service
 
 
 router = APIRouter()
@@ -31,7 +32,9 @@ router = APIRouter()
 
 async def _bg_sync_channel(channel_id: int) -> None:
     if not await is_api_available():
-        logger.warning("No YouTube API available, skipping sync for channel_id={}", channel_id)
+        logger.warning(
+            "No YouTube API available, skipping sync for channel_id={}", channel_id
+        )
         return
 
     api_key = await get_api_key()
@@ -54,13 +57,12 @@ async def _bg_sync_channel(channel_id: int) -> None:
     async with session_scope() as session:
         ch = await session.get(Channel, channel_id)
         if ch:
-            await subscribe_channel(
+            await websub_service.subscribe_channel(
                 ch.channel_id,
                 callback_url,
                 secret=settings.websub_secret or None,
             )
             logger.info("WebSub subscription registered for channel_id={}", channel_id)
-
 
 
 @router.post("/", response_model=ChannelResponse)
