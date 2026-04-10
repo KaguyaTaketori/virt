@@ -1,3 +1,221 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, inject, type Ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NButton, NPagination } from 'naive-ui'
+import { 
+  Heart, Ban, Youtube, 
+  ExternalLink, Share2, MessageSquare, ThumbsUp 
+} from 'lucide-vue-next'
+
+import { useInfiniteScroll } from '@vueuse/core'
+
+import { useOrgStore } from '@/stores/org'
+import { useAuthStore } from '@/stores/auth'
+import { channelApi, type Channel as ApiChannel } from '@/api'
+import { useChannelVideos } from '@/composables/useChannelVideos'
+import { useChannelActions } from '@/composables/useChannelActions'
+import { useBilibiliData }   from '@/composables/useBilibiliData'
+
+// --- 基础状态 ---
+const route = useRoute()
+const router = useRouter()
+const orgStore = useOrgStore()
+const authStore = useAuthStore()
+
+const channel = ref<ApiChannel | null>(null)
+const loading = ref(true)
+const bilibiliError = ref<string | null>(null)
+  
+const activeTab = ref('videos')
+
+const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
+
+// --- Composables ---
+const uploadState = useChannelVideos({ status: 'upload', pageSize: 24 })
+const shortsState = useChannelVideos({ status: 'short',  pageSize: 48 })
+const liveState   = useChannelVideos({
+  status: ['live', 'upcoming'],
+  pageSize: 48,
+  mergeSort: (a, b) => {
+    if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
+    if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
+    return 0
+  }
+})
+
+const { 
+  dynamics: bilibiliAllDynamics, 
+  videos: bilibiliVideos, 
+  info: bilibiliInfo, 
+  loading: bilibiliDynamicsLoading, 
+  hasMore: bilibiliDynamicsHasMore, 
+  fetch: runBilibiliFetch, 
+  loadMore: runBilibiliLoadMore,
+  reset: resetBilibiliData 
+} = useBilibiliData()
+
+const bilibiliDynamics = computed(() => bilibiliAllDynamics.value)
+
+const isBilibili = computed(() => channel.value?.platform === 'bilibili')
+
+// --- 生命周期与监听 ---
+const mainScrollRef = inject<Ref<HTMLElement | null>>('mainScrollRef')
+
+useInfiniteScroll(
+  mainScrollRef,
+  () => {
+    if (activeTab.value === 'dynamics' && bilibiliDynamicsHasMore.value && !bilibiliDynamicsLoading.value) {
+      loadMoreDynamics()
+    }
+  },
+  { distance: 100 }
+)
+
+// --- 逻辑方法 ---
+const tabs = computed(() => {
+  if (isBilibili.value) {
+    return [
+      { value: 'videos', label: '投稿' },
+      { value: 'dynamics', label: '动态' },
+      { value: 'home', label: '主页' }
+    ]
+  }
+  return [
+    { value: 'live', label: '直播' },
+    { value: 'videos', label: '视频' },
+    { value: 'shorts', label: 'Shorts' },
+    { value: 'streams', label: '概要' }
+  ]
+})
+
+
+const displayVideos = computed(() => {
+  if (isBilibili.value && bilibiliVideos.value.length > 0) {
+    return bilibiliVideos.value.map(v => ({
+      id: v.bvid,
+      thumbnail_url: v.pic,
+      title: v.title,
+      duration: v.duration,
+      view_count: v.play,
+      published_at: formatPubDate(v.pubdate),
+      status: 'upload',
+      isRaw: true
+    }))
+  }
+  return uploadState.videos.value
+})
+
+
+
+function goToLogin() {
+  router.push({ name: 'Login' })
+}
+
+async function fetchChannel(id: number) {
+  loading.value = true
+  bilibiliError.value = null
+  try {
+    const { data } = await channelApi.get(id)
+    channel.value = data
+    
+    uploadState.reset()
+    liveState.reset()
+    shortsState.reset()
+    resetBilibiliData()
+
+    if (isBilibili.value) {
+      activeTab.value = 'videos'
+      await Promise.all([
+        uploadState.fetch(id),
+        runBilibiliFetch(id)
+      ])
+    } else {
+      activeTab.value = 'live'
+      await Promise.all([
+        liveState.fetch(id),
+        uploadState.fetch(id)
+      ])
+    }
+  } catch (err: any) {
+    if (err.response?.status === 403) {
+      bilibiliError.value = err.response.data?.detail || 'B站功能需要登录'
+    }
+    console.error('Failed to fetch channel:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+function loadMoreDynamics() {
+  if (channel.value) {
+    runBilibiliLoadMore(channel.value.id)
+  }
+}
+
+// function onPageScroll() {
+//   if (activeTab.value !== 'dynamics') return
+//   if (bilibiliDynamicsLoading.value || !bilibiliDynamicsHasMore.value) return;
+
+//   const target = mainScrollRef?.value || document.documentElement;
+//   const { scrollTop, clientHeight, scrollHeight } = target;
+  
+//   const threshold = 50; 
+//   const isBottom = scrollTop + clientHeight >= scrollHeight - threshold;
+  
+//   if (isBottom) {
+//     loadMoreDynamics();
+//   }
+// }
+
+onMounted(async () => {
+  await orgStore.invalidate()
+  const channelId = Number(route.params.id)
+  await fetchChannel(channelId)
+})
+
+watch(activeTab, async (tab) => {
+  if (!channel.value) return
+  const channelId = channel.value.id
+
+  // 按需加载数据
+  if (tab === 'videos' && uploadState.videos.value.length === 0) {
+    await uploadState.fetch(channelId)
+  } else if (tab === 'live' && liveState.videos.value.length === 0) {
+    await liveState.fetch(channelId)
+  } else if (tab === 'shorts' && shortsState.videos.value.length === 0) {
+    await shortsState.fetch(channelId)
+  } else if (tab === 'home' && !bilibiliInfo.value) {
+    await runBilibiliFetch(channelId)
+  } else if (tab === 'dynamics' && bilibiliDynamics.value.length === 0) {
+    await runBilibiliFetch(channelId)
+  }
+})
+
+// --- 格式化工具函数 ---
+function formatCount(num: number): string {
+  return num >= 10000 ? (num / 10000).toFixed(1) + '万' : num.toString()
+}
+
+function formatPubDate(ts: number): string {
+  return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : ''
+}
+
+function formatTimestamp(ts: number): string {
+  const date = new Date(ts * 1000)
+  return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function getDynamicTypeLabel(type: number): string {
+  const map: Record<number, string> = { 1: '转发', 2: '图文', 4: '文字', 8: '视频', 64: '专栏' }
+  return map[type] || '动态'
+}
+
+function getOrgName(orgId: number | null): string {
+  if (!orgId) return ''
+  return orgStore.organizations.find(o => o.id === orgId)?.name || ''
+}
+</script>
+
 <template>
   <!-- 全局加载状态 -->
   <div v-if="loading" class="flex justify-center py-16">
@@ -335,223 +553,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject, type Ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { NButton, NPagination } from 'naive-ui'
-import { 
-  Heart, Ban, Youtube, 
-  ExternalLink, Share2, MessageSquare, ThumbsUp 
-} from 'lucide-vue-next'
-import { useOrgStore } from '@/stores/org'
-import { useAuthStore } from '@/stores/auth'
-import { channelApi, type Channel as ApiChannel } from '@/api'
-import { useChannelVideos } from '@/composables/useChannelVideos'
-import { useChannelActions } from '@/composables/useChannelActions'
-import { useBilibiliData }   from '@/composables/useBilibiliData'
-
-// --- 基础状态 ---
-const route = useRoute()
-const router = useRouter()
-const orgStore = useOrgStore()
-const authStore = useAuthStore()
-
-const channel = ref<ApiChannel | null>(null)
-const loading = ref(true)
-const bilibiliError = ref<string | null>(null)
-const activeTab = ref('videos')
-
-const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
-
-// --- Composables (核心逻辑封装) ---
-const uploadState = useChannelVideos({ status: 'upload', pageSize: 24 })
-const shortsState = useChannelVideos({ status: 'short',  pageSize: 48 })
-const liveState   = useChannelVideos({
-  status: ['live', 'upcoming'],
-  pageSize: 48,
-  mergeSort: (a, b) => {
-    // 预约中的排在最前面
-    if (a.status === 'upcoming' && b.status !== 'upcoming') return -1
-    if (a.status !== 'upcoming' && b.status === 'upcoming') return 1
-    return 0
-  }
-})
-
-
-// --- B站专属数据 (不属于通用视频列表) ---
-const { 
-  dynamics: bilibiliAllDynamics, 
-  videos: bilibiliVideos, 
-  info: bilibiliInfo, 
-  loading: bilibiliDynamicsLoading, 
-  hasMore: bilibiliDynamicsHasMore, 
-  fetch: runBilibiliFetch, 
-  loadMore: runBilibiliLoadMore,
-  reset: resetBilibiliData 
-} = useBilibiliData()
-
-const bilibiliDynamics = computed(() => bilibiliAllDynamics.value)
-
-const isBilibili = computed(() => channel.value?.platform === 'bilibili')
-
-const tabs = computed(() => {
-  if (isBilibili.value) {
-    return [
-      { value: 'videos', label: '投稿' },
-      { value: 'dynamics', label: '动态' },
-      { value: 'home', label: '主页' }
-    ]
-  }
-  return [
-    { value: 'live', label: '直播' },
-    { value: 'videos', label: '视频' },
-    { value: 'shorts', label: 'Shorts' },
-    { value: 'streams', label: '概要' }
-  ]
-})
-
-// --- 方法逻辑 ---
-function formatCount(num: number): string {
-  if (num >= 10000) {
-    return (num / 10000).toFixed(1) + '万'
-  }
-  return num.toString()
-}
-
-function formatPubDate(ts: number): string {
-  if (!ts) return ''
-  const date = new Date(ts * 1000)
-  return date.toLocaleDateString('zh-CN')
-}
-
-const displayVideos = computed(() => {
-  if (isBilibili.value && bilibiliVideos.value.length > 0) {
-    return bilibiliVideos.value.map(v => ({
-      id: v.bvid,
-      thumbnail_url: v.pic,
-      title: v.title,
-      duration: v.duration,
-      view_count: v.play,
-      published_at: formatPubDate(v.pubdate),
-      status: 'upload',
-
-      isRaw: true
-    }))
-  }
-  return uploadState.videos.value
-})
-
-function getOrgName(orgId: number | null): string {
-  if (!orgId) return ''
-  return orgStore.organizations.find(o => o.id === orgId)?.name || ''
-}
-
-function goToLogin() {
-  router.push({ name: 'Login' })
-}
-
-async function fetchChannel(id: number) {
-  loading.value = true
-  bilibiliError.value = null
-  try {
-    const { data } = await channelApi.get(id)
-    channel.value = data
-    
-    uploadState.reset()
-    liveState.reset()
-    shortsState.reset()
-    resetBilibiliData()
-
-    if (isBilibili.value) {
-      activeTab.value = 'videos'
-      await Promise.all([
-        uploadState.fetch(id),
-        runBilibiliFetch(id)
-      ])
-    } else {
-      activeTab.value = 'live'
-      await Promise.all([
-        liveState.fetch(id),
-        uploadState.fetch(id)
-      ])
-    }
-  } catch (err: any) {
-    if (err.response?.status === 403) {
-      bilibiliError.value = err.response.data?.detail || 'B站功能需要登录'
-    }
-    console.error('Failed to fetch channel:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-function loadMoreDynamics() {
-  if (channel.value) {
-    runBilibiliLoadMore(channel.value.id)
-  }
-}
-
-function onPageScroll() {
-  if (activeTab.value !== 'dynamics') return
-  if (bilibiliDynamicsLoading.value || !bilibiliDynamicsHasMore.value) return;
-
-  const target = mainScrollRef?.value || document.documentElement;
-  const { scrollTop, clientHeight, scrollHeight } = target;
-  
-  const threshold = 50; 
-  const isBottom = scrollTop + clientHeight >= scrollHeight - threshold;
-  
-  if (isBottom) {
-    loadMoreDynamics();
-  }
-}
-
-// --- 生命周期与监听 ---
-const mainScrollRef = inject<Ref<HTMLElement | null>>('mainScrollRef')
-
-onMounted(async () => {
-  console.log('[onMounted] adding scroll listener')
-  await orgStore.invalidate()
-  const channelId = Number(route.params.id)
-  await fetchChannel(channelId)
-  
-  const scrollEl = mainScrollRef?.value || window
-  scrollEl.addEventListener('scroll', onPageScroll)
-  console.log('[onMounted] scroll listener added on', scrollEl === window ? 'window' : 'main element')
-})
-
-watch(activeTab, async (tab) => {
-  if (!channel.value) return
-  const channelId = channel.value.id
-
-  // 按需加载数据
-  if (tab === 'videos' && uploadState.videos.value.length === 0) {
-    await uploadState.fetch(channelId)
-  } else if (tab === 'live' && liveState.videos.value.length === 0) {
-    await liveState.fetch(channelId)
-  } else if (tab === 'shorts' && shortsState.videos.value.length === 0) {
-    await shortsState.fetch(channelId)
-  } else if (tab === 'home' && !bilibiliInfo.value) {
-    await runBilibiliFetch(channelId)
-  } else if (tab === 'dynamics' && bilibiliDynamics.value.length === 0) {
-    await runBilibiliFetch(channelId)
-  }
-})
-
-// --- 格式化工具函数 ---
-function formatTimestamp(ts: number): string {
-  const date = new Date(ts * 1000)
-  return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-function getDynamicTypeLabel(type: number): string {
-  const map: Record<number, string> = { 1: '转发', 2: '图文', 4: '文字', 8: '视频', 64: '专栏' }
-  return map[type] || '动态'
-}
-
-onUnmounted(() => {
-  const scrollEl = mainScrollRef?.value || window
-  scrollEl.removeEventListener('scroll', onPageScroll)
-})
-</script>

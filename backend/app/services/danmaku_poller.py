@@ -74,10 +74,10 @@ class DanmakuPoller:
         ctx = await self._init_poll_context(video_id)
         if ctx is None:
             return
-        if ctx["is_live"]:
+        if ctx.is_live:
             await self._run_live_loop(video_id, ctx)
         else:
-            await self._fetch_and_send(video_id, **ctx)
+            await self._fetch_and_send(video_id, ctx)
 
     async def _init_poll_context(self, video_id: str) -> Optional[PollContext]:
         downloader = YouTubeChatDownloader()
@@ -107,7 +107,7 @@ class DanmakuPoller:
             logger.error("poll init failed for {}: {}", video_id, e)
             return None
 
-    async def _run_live_loop(self, video_id: str, ctx: dict) -> None:
+    async def _run_live_loop(self, video_id: str, ctx: PollContext) -> None:
         while True:
             if not manager.active_connections.get(video_id):
                 logger.info("no subscribers for {}, stopping", video_id)
@@ -148,12 +148,14 @@ class DanmakuPoller:
             logger.error("fetch error for {}: {}", video_id, e)
             return ctx.continuation
 
-        new_msgs = [
-            m for m in messages
-            if (mid := m.get("message_id", "")) and await self._add_seen(mid)
-        ]
-        if len(new_msgs) > DANMAKU_TRUNCATE_BATCH:
-            new_msgs = new_msgs[-DANMAKU_TRUNCATE_BATCH:]
+        new_msgs: list[dict] = []
+        for m in messages:
+            mid = m.get("message_id", "")
+            if mid and await self._add_seen(mid):
+                new_msgs.append(m)
+            if len(new_msgs) >= DANMAKU_TRUNCATE_BATCH:
+                break
+
         if new_msgs:
             await manager.send_message(video_id, {"type": "danmaku", "data": new_msgs})
         return next_cont
