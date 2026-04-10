@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.loguru_config import logger
 from app.models.models import BilibiliDynamic, Video, Platform
 from app.services.bilibili_context import ChannelRequestContext
-from app.services.constants import BILIBILI_DEFAULT_PAGE_SIZE, BILIBILI_MAX_VIDEO_PAGES
+from app.constants import BILIBILI_DEFAULT_PAGE_SIZE, BILIBILI_MAX_VIDEO_PAGES
+from app.services.bilibili_api_client import BilibiliApiClient
+from app.services.bilibili_parser import BilibiliParser
+from app.services.bilibili_repository import BilibiliRepository
 
 MAX_RETRIES = 3
 BACKOFF_INIT = 2
@@ -36,6 +39,16 @@ DYNAMIC_TYPE_MAP = {
 
 
 class BilibiliChannelService:
+    def __init__(
+        self,
+        client: BilibiliApiClient,
+        parser: BilibiliParser,
+        repo: BilibiliRepository,
+    ):
+        self._client = client
+        self._parser = parser
+        self._repo = repo
+
     async def get_info(
         self, 
         uid: str,
@@ -48,21 +61,7 @@ class BilibiliChannelService:
         try:
             u = user.User(uid=int(uid), credential=ctx.credential)
             info = await u.get_user_info()
-            return {
-                "mid": info.get("mid"),
-                "name": info.get("name"),
-                "sex": info.get("sex"),
-                "face": info.get("face"),
-                "sign": info.get("sign"),
-                "level": info.get("level"),
-                "fans": info.get("fans"),
-                "attention": info.get("attention"),
-                "archive_count": info.get("archive_count"),
-                "article_count": info.get("article_count"),
-                "following": info.get("following"),
-                "like_num": info.get("like_num"),
-                "official_verify": info.get("official_verify"),
-            }
+            return self._parser.parse_user_info(info)
         except Exception as e:
             logger.error("Failed to get user info, uid={}: {}", uid, e)
             return None
@@ -102,160 +101,18 @@ class BilibiliChannelService:
             logger.warning("Failed to update channel: {}", e)
 
     async def get_dynamics(
-        self, 
-        uid: str, 
-        ctx: ChannelRequestContext,
-        offset: str = "", 
+        self, uid: str, ctx: ChannelRequestContext, offset: str = ""
     ) -> tuple[list, str]:
         if not ctx.credential:
-            logger.warning("No credential available for get_dynamics, uid={}", uid)
             return [], ""
 
-        try:
-            u = user.User(uid=int(uid), credential=ctx.credential)
-            result = await u.get_dynamics_new(offset=offset)
-            items = result.get("items", []) or []
-            next_offset = result.get("offset", "") or ""
+        raw_result = await self._client.fetch_dynamics(uid, ctx.credential, offset)
+        raw_items = raw_result.get("items", [])
 
-            parsed = []
-            for item in items:
-                p = self._parse_dynamic_new(item)
-                if p:
-                    parsed.append(p)
-                    await self._save_dynamic_new(ctx, p, item)
+        parsed = [p for item in raw_items if (p := self._parser.parse_dynamic(item))]
+        await self._repo.upsert_dynamics(ctx.db, ctx.channel_id, parsed, raw_items)
 
-            logger.info(
-                "uid={} 获取 {} 条动态, next_offset={}", uid, len(parsed), next_offset
-            )
-            return parsed, next_offset
-        except Exception as e:
-            logger.error("Failed to get dynamics, uid={}: {}", uid, e)
-            return [], ""
-
-    def _parse_dynamic_new(self, d: dict) -> Optional[dict]:
-        try:
-            modules = d.get("modules") or {}
-            module_author = modules.get("module_author") or {}
-            module_dynamic = modules.get("module_dynamic") or {}
-            module_stat = modules.get("module_stat") or {}
-            module_tag = modules.get("module_tag") or {}
-
-            dynamic_id = d.get("id_str", "")
-            dtype_str = d.get("type", "DYNAMIC_TYPE_NONE")
-            dtype = DYNAMIC_TYPE_MAP.get(dtype_str, 0)
-
-            jump_url = d.get("basic", {}).get("jump_url", "")
-            if jump_url and jump_url.startswith("//"):
-                jump_url = f"https:{jump_url}"
-
-            uid = str(module_author.get("mid", ""))
-            uname = module_author.get("name", "")
-            face = module_author.get("face", "")
-            timestamp = int(module_author.get("pub_ts") or 0)
-
-            is_top = (module_tag.get("text") == "置顶") or (
-                module_author.get("is_top") is True
-            )
-
-            stat = {
-                "forward": module_stat.get("forward", {}).get("count", 0),
-                "comment": module_stat.get("comment", {}).get("count", 0),
-                "like": module_stat.get("like", {}).get("count", 0),
-            }
-
-            major = module_dynamic.get("major") or {}
-            content_nodes = []
-            images = []
-            topic_name = (module_dynamic.get("topic") or {}).get("name", "")
-
-            if "opus" in major:
-                opus = major["opus"]
-                summary = opus.get("summary") or {}
-                nodes = summary.get("rich_text_nodes") or []
-
-                for n in nodes:
-                    ntype = n.get("type")
-                    if ntype == "RICH_TEXT_NODE_TYPE_TEXT":
-                        content_nodes.append({"type": "text", "text": n.get("text")})
-                    elif ntype == "RICH_TEXT_NODE_TYPE_EMOJI":
-                        emoji_data = n.get("emoji") or {}
-                        content_nodes.append(
-                            {
-                                "type": "emoji",
-                                "text": n.get("text"),
-                                "url": emoji_data.get("icon_url"),
-                            }
-                        )
-                    elif ntype == "RICH_TEXT_NODE_TYPE_AT":
-                        content_nodes.append(
-                            {"type": "at", "text": n.get("text"), "rid": n.get("rid")}
-                        )
-
-                pics = opus.get("pics") or []
-                images = [p.get("url", "") for p in pics if p.get("url")]
-
-            elif "archive" in major:
-                archive = major["archive"]
-                title = archive.get("title", "")
-                desc = archive.get("desc", "")
-                content_nodes.append(
-                    {"type": "text", "text": f"【发布视频】{title}\n{desc}".strip()}
-                )
-                if archive.get("cover"):
-                    images = [archive.get("cover")]
-
-            if not content_nodes:
-                self_text = (module_dynamic.get("desc") or {}).get("text", "").strip()
-                if self_text:
-                    content_nodes.append({"type": "text", "text": self_text})
-
-            additional = d.get("additional") or {}
-            if additional.get("type") == "ADDITIONAL_TYPE_RESERVE":
-                reserve = additional.get("reserve") or {}
-                reserve_title = reserve.get("title", "")
-                content_nodes.append(
-                    {"type": "text", "text": f"\n🗓️ 直播预约：{reserve_title}"}
-                )
-
-            repost_content = None
-            orig = d.get("orig")
-            if orig:
-                o_modules = orig.get("modules") or {}
-                o_author = (o_modules.get("module_author") or {}).get(
-                    "name", "未知用户"
-                )
-                o_dyn = o_modules.get("module_dynamic") or {}
-
-                o_text = ""
-                o_major = o_dyn.get("major") or {}
-                if "opus" in o_major:
-                    o_text = o_major["opus"].get("summary", {}).get("text", "")
-                else:
-                    o_text = (o_dyn.get("desc") or {}).get("text", "")
-
-                repost_content = f"@{o_author}: {o_text}"
-
-            return {
-                "dynamic_id": dynamic_id,
-                "url": jump_url,
-                "uid": uid,
-                "uname": uname,
-                "face": face,
-                "type": dtype,
-                "timestamp": timestamp,
-                "content_nodes": content_nodes,
-                "images": images,
-                "repost_content": repost_content,
-                "stat": stat,
-                "topic": topic_name,
-                "is_top": is_top,
-            }
-
-        except Exception as e:
-            logger.exception(
-                "解析新动态项失败: id=%s, error=%s", d.get("id_str", "unknown"), str(e)
-            )
-            return None
+        return parsed, raw_result.get("offset", "")
 
     async def get_dynamics_from_db(
         self, 
@@ -302,77 +159,6 @@ class BilibiliChannelService:
             logger.error("Failed to get dynamics from db: {}", e)
             return []
 
-    async def _save_dynamic_new(
-        self, 
-        ctx: ChannelRequestContext,
-        parsed: dict, 
-        raw: dict
-    ) -> None:
-        try:
-            dynamic_id = parsed.get("dynamic_id", "")
-            if not dynamic_id:
-                return
-
-            result = await ctx.db.execute(
-                select(BilibiliDynamic).where(BilibiliDynamic.dynamic_id == dynamic_id)
-            )
-            existing = result.scalar_one_or_none()
-
-            published = None
-            ts = parsed.get("timestamp")
-            if ts:
-                try:
-                    published = datetime.fromtimestamp(ts, tz=timezone.utc)
-                except Exception:
-                    pass
-
-            content_nodes_json = json.dumps(
-                parsed.get("content_nodes", []), ensure_ascii=False
-            )
-            images_json = json.dumps(parsed.get("images", []), ensure_ascii=False)
-            stat_json = json.dumps(parsed.get("stat", {}), ensure_ascii=False)
-
-            if existing:
-                existing.uname = parsed.get("uname")
-                existing.face = parsed.get("face")
-                existing.type = parsed.get("type")
-                existing.content_nodes = content_nodes_json
-                existing.images = images_json
-                existing.repost_content = parsed.get("repost_content")
-                existing.timestamp = ts
-                existing.published_at = published
-                existing.url = parsed.get("url")
-                existing.stat = stat_json
-                existing.topic = parsed.get("topic")
-                existing.is_top = parsed.get("is_top", False)
-                existing.raw_data = json.dumps(raw, ensure_ascii=False)
-                existing.fetched_at = datetime.now(timezone.utc)
-            else:
-                dynamic = BilibiliDynamic(
-                    channel_id=ctx.channel_id,
-                    dynamic_id=dynamic_id,
-                    uid=parsed.get("uid"),
-                    uname=parsed.get("uname"),
-                    face=parsed.get("face"),
-                    type=parsed.get("type"),
-                    content_nodes=content_nodes_json,
-                    images=images_json,
-                    repost_content=parsed.get("repost_content"),
-                    timestamp=ts,
-                    published_at=published,
-                    url=parsed.get("url"),
-                    stat=stat_json,
-                    topic=parsed.get("topic"),
-                    is_top=parsed.get("is_top", False),
-                    raw_data=json.dumps(raw, ensure_ascii=False),
-                    fetched_at=datetime.now(timezone.utc),
-                )
-                ctx.db.add(dynamic)
-
-            await ctx.db.commit()
-        except Exception as e:
-            logger.warning("Failed to save dynamic new: {}", e)
-
     async def get_videos(
         self, 
         uid: str, 
@@ -394,17 +180,7 @@ class BilibiliChannelService:
 
                 result = []
                 for v in vlist:
-                    video_data = {
-                        "bvid": v.get("bvid"),
-                        "title": v.get("title"),
-                        "pic": v.get("pic"),
-                        "aid": v.get("aid"),
-                        "duration": v.get("length"),
-                        "pubdate": v.get("created"),
-                        "play": v.get("play"),
-                        "like": (v.get("stat") or {}).get("like", 0),
-                        "reply": v.get("comment", 0),
-                    }
+                    video_data = self._parser.parse_video(v)
                     result.append(video_data)
                     await self._save_video(ctx, v)
 
@@ -453,54 +229,6 @@ class BilibiliChannelService:
         logger.info("uid={} 共获取 {} 个视频", uid, len(all_videos))
         return all_videos
 
-    async def _save_video(
-        self, 
-        ctx: ChannelRequestContext,
-        v: dict
-    ) -> None:
-        try:
-            bvid = v.get("bvid", "")
-            if not bvid:
-                return
-
-            result = await ctx.db.execute(
-                select(Video).where(
-                    Video.channel_id == ctx.channel_id, Video.video_id == bvid
-                )
-            )
-            existing = result.scalar_one_or_none()
-
-            published = None
-            if v.get("created"):
-                try:
-                    published = datetime.fromtimestamp(v.get("created"))
-                except Exception:
-                    pass
-
-            if existing:
-                existing.title = v.get("title")
-                existing.thumbnail_url = v.get("pic", "")
-                existing.view_count = v.get("play", 0)
-                existing.duration = v.get("length", "")
-                existing.published_at = published
-            else:
-                video = Video(
-                    channel_id=ctx.channel_id,
-                    platform=Platform.BILIBILI,
-                    video_id=bvid,
-                    title=v.get("title", ""),
-                    thumbnail_url=v.get("pic", ""),
-                    duration=v.get("length", ""),
-                    view_count=v.get("play", 0),
-                    published_at=published,
-                    status="archive",
-                )
-                ctx.db.add(video)
-
-            await ctx.db.commit()
-        except Exception as e:
-            logger.warning("Failed to save video: {}", e)
-
     async def get_videos_from_db(
         self, 
         channel_id: int, 
@@ -544,4 +272,8 @@ class BilibiliChannelService:
             return []
 
 
-bilibili_channel_service = BilibiliChannelService()
+bilibili_channel_service = BilibiliChannelService(
+    client=BilibiliApiClient(),
+    parser=BilibiliParser(),
+    repo=BilibiliRepository(),
+)

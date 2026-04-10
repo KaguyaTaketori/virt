@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db_session
-from app.deps.guards import require_permission
+from app.deps.guards import ChannelManage
 from app.loguru_config import logger
 from app.services.scraper import sync as scraper_sync
 
 router = APIRouter(
     tags=["scraper"],
-    dependencies=[Depends(require_permission("channel", "manage"))],
+    dependencies=[ChannelManage],
 )
 
 

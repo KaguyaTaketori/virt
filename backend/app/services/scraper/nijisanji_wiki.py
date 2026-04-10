@@ -1,8 +1,9 @@
 from app.loguru_config import logger
 from typing import Optional
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Tag
 
 from .base import BaseWikiScraper, VtuberChannel
+from app.constants import ChannelStatus
 
 NIJISANJI_WIKI_URL = (
     "https://wikiwiki.jp/nijisanji/%E6%B4%BB%E5%8B%95%E5%A0%B4%E6%89%80/YouTube"
@@ -113,7 +114,7 @@ class NijisanjiWikiScraper(BaseWikiScraper):
         if not priority_links:
             return None
 
-        status = "active" if active_links else "graduated"
+        status = ChannelStatus.ACTIVE if active_links else ChannelStatus.GRADUATED
 
         channel = VtuberChannel(name=name, group=group, status=status)
 

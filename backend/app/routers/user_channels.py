@@ -7,6 +7,7 @@ from app.deps import get_db_session
 from app.models.models import User, Channel, UserChannel
 from app.schemas.schemas import ChannelResponse
 from app.auth import get_current_user
+from app.constants import UserChannelStatus
 
 router = APIRouter(prefix="/api/users/channels", tags=["user-channels"])
 
@@ -26,7 +27,7 @@ async def like_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "liked",
+            UserChannel.status == UserChannelStatus.LIKED,
         )
     )
     existing = result.scalar_one_or_none()
@@ -37,15 +38,15 @@ async def like_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "blocked",
+            UserChannel.status == UserChannelStatus.BLOCKED,
         )
     )
     existing_blocked = result.scalar_one_or_none()
     if existing_blocked:
-        existing_blocked.status = "liked"
+        existing_blocked.status = UserChannelStatus.LIKED
     else:
         user_channel = UserChannel(
-            user_id=current_user.id, channel_id=channel_id, status="liked"
+            user_id=current_user.id, channel_id=channel_id, status=UserChannelStatus.LIKED
         )
         db.add(user_channel)
 
@@ -63,7 +64,7 @@ async def unlike_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "liked",
+            UserChannel.status == UserChannelStatus.LIKED,
         )
     )
     user_channel = result.scalar_one_or_none()
@@ -90,7 +91,7 @@ async def block_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "blocked",
+            UserChannel.status == UserChannelStatus.BLOCKED,
         )
     )
     existing = result.scalar_one_or_none()
@@ -101,15 +102,15 @@ async def block_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "liked",
+            UserChannel.status == UserChannelStatus.LIKED,
         )
     )
     existing_liked = result.scalar_one_or_none()
     if existing_liked:
-        existing_liked.status = "blocked"
+        existing_liked.status = UserChannelStatus.BLOCKED
     else:
         user_channel = UserChannel(
-            user_id=current_user.id, channel_id=channel_id, status="blocked"
+            user_id=current_user.id, channel_id=channel_id, status=UserChannelStatus.BLOCKED
         )
         db.add(user_channel)
 
@@ -127,7 +128,7 @@ async def unblock_channel(
         select(UserChannel).where(
             UserChannel.user_id == current_user.id,
             UserChannel.channel_id == channel_id,
-            UserChannel.status == "blocked",
+            UserChannel.status == UserChannelStatus.BLOCKED,
         )
     )
     user_channel = result.scalar_one_or_none()
@@ -163,8 +164,8 @@ async def get_user_channels(
         ch = channel_dict.get(uc.channel_id)
         if ch:
             response = ChannelResponse.model_validate(ch)
-            response.is_liked = uc.status == "liked"
-            response.is_blocked = uc.status == "blocked"
+            response.is_liked = uc.status == UserChannelStatus.LIKED
+            response.is_blocked = uc.status == UserChannelStatus.BLOCKED
             result_list.append(response)
 
     return result_list

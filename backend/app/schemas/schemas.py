@@ -3,7 +3,7 @@ import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
-from app.models.models import Platform, StreamStatus
+from app.models.models import Platform, StreamStatus, User
 
 
 class UserCreate(BaseModel):
@@ -40,8 +40,18 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     created_at: datetime
-    roles: Optional[set[str]] = []
-    permissions: Optional[list[str]] = []
+    roles: set[str] = set()
+    permissions: list[str] = []
+
+    @classmethod
+    def from_orm_with_roles(cls, user: "User") -> "UserResponse":
+        return cls(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            created_at=user.created_at,
+            roles={ur.role.name for ur in user.user_roles},
+        )
 
     class Config:
         from_attributes = True

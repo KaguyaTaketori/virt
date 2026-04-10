@@ -10,6 +10,7 @@ from app.models.models import User
 from app.auth import get_current_user_optional
 from app.deps.base import get_db_session
 from app.loguru_config import logger
+from app.constants import PermissionAction, PermissionResource
 
 
 router = APIRouter(prefix="/api/bilibili/auth", tags=["bilibili"])
@@ -27,7 +28,7 @@ async def check_bilibili_permission(
     db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_active_user),
 ):
-    has_perm = await has_permission(current_user.id, "bilibili", "access", db)
+    has_perm = await has_permission(current_user.id, PermissionResource.BILIBILI, PermissionAction.ACCESS, db)
     if not has_perm:
         raise HTTPException(status_code=403, detail="没有 B 站访问权限")
     return current_user

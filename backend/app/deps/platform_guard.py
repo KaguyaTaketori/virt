@@ -12,6 +12,7 @@ from app.deps.base import get_db_session
 from app.models.models import Platform, User
 from app.auth import get_current_user_optional
 from app.services.permissions import has_permission
+from app.constants import PermissionAction, PermissionResource
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +84,7 @@ async def _build_platform_context(
     """构建权限上下文"""
     can_bilibili = False
     if current_user is not None:
-        can_bilibili = await has_permission(current_user.id, "bilibili", "access", db)
+        can_bilibili = await has_permission(current_user.id, PermissionResource.BILIBILI, PermissionAction.ACCESS, db)
 
     return PlatformContext(
         current_user=current_user,

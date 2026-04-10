@@ -20,6 +20,7 @@ from app.services.youtube_sync_state import (
     set_all_full_completed,
 )
 from app.db_utils import upsert_stream
+from app.constants import ChannelStatus
 
 
 async def update_youtube_streams() -> None:
@@ -85,7 +86,7 @@ async def sync_youtube_videos_incremental() -> None:
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active.is_(True),
-                Channel.status != "graduated",
+                Channel.status != ChannelStatus.GRADUATED,
             )
         )
         channels: List[Channel] = result.scalars().all()
@@ -142,7 +143,7 @@ async def sync_youtube_videos_full() -> None:
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active.is_(True),
-                Channel.status != "graduated",
+                Channel.status != ChannelStatus.GRADUATED,
             )
         )
         channels: List[Channel] = result.scalars().all()

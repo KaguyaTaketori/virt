@@ -1,17 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Path as FPath
+from fastapi import APIRouter, Depends, Path as FPath
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.deps import get_db_session
-from app.deps.guards import BilibiliAccess
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.services.danmaku import get_live_chat_messages
 from app.services.danmaku_bilibili import get_bilibili_danmaku
 from app.config import settings
 from app.models.models import User
-from app.services.permissions import get_user_roles, has_permission
-from app.auth import get_current_user, get_current_user_optional
+from app.services.permissions import get_user_roles
+from app.auth import get_current_user
 from app.services.api_key_manager import is_api_available
+from app.constants import UserRole
 
 try:
     from app.services.danmaku_youtube import (
@@ -38,10 +38,10 @@ async def require_registered_user(db: AsyncSession, current_user: Optional[User]
         return False
     roles = await get_user_roles(current_user.id, db)
     return (
-        "superadmin" in roles
-        or "admin" in roles
-        or "operator" in roles
-        or "user" in roles
+        UserRole.SUPERADMIN in roles
+        or UserRole.ADMIN in roles
+        or UserRole.OPERATOR in roles
+        or UserRole.USER in roles
     )
 
 
@@ -70,7 +70,7 @@ async def get_youtube_danmaku_from_db(
 
 @router.post("/youtube/download/{video_id}")
 async def download_youtube_danmaku(
-    video_id: str,
+    video_id: str = FPath(..., pattern=r"^[a-zA-Z0-9_\-]{11}$"),
     stream_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db_session),
     _: User = Depends(get_current_user),

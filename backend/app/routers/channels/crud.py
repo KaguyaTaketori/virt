@@ -26,6 +26,7 @@ from app.services.youtube_channel import get_channel_details, get_youtube_channe
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_channel
 from app.services.api_key_manager import get_api_key, is_api_available
+from app.constants import UserChannelStatus
 
 router = APIRouter()
 
@@ -111,8 +112,8 @@ async def get_channel_by_id(
         )
         uc = result.scalar_one_or_none()
         if uc:
-            resp.is_liked = uc.status == "liked"
-            resp.is_blocked = uc.status == "blocked"
+            resp.is_liked = uc.status == UserChannelStatus.LIKED
+            resp.is_blocked = uc.status == UserChannelStatus.BLOCKED
     return resp
 
 
@@ -236,6 +237,6 @@ async def _get_or_404(db: AsyncSession, channel_id: int) -> Channel:
 
 
 def _with_user_status(resp: ChannelResponse, status: Optional[str]) -> ChannelResponse:
-    resp.is_liked = status == "liked"
-    resp.is_blocked = status == "blocked"
+    resp.is_liked = status == UserChannelStatus.LIKED
+    resp.is_blocked = status == UserChannelStatus.BLOCKED
     return resp

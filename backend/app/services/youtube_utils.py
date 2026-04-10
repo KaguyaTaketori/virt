@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from app.services.constants import PREMIERE_POSITIVE_THRESHOLD, YT_LIVE_STRONG, YT_LIVE_THRESHOLD, YT_PREMIERE_LONG, YT_PREMIERE_MEDIUM, YT_PREMIERE_SHORT, YT_SHORT_MAX_SECS
+from app.constants import PREMIERE_POSITIVE_THRESHOLD, YT_LIVE_STRONG, YT_LIVE_THRESHOLD, YT_PREMIERE_LONG, YT_PREMIERE_MEDIUM, YT_PREMIERE_SHORT, YT_SHORT_MAX_SECS
 
 
 def parse_duration(iso_duration: Optional[str]) -> tuple[Optional[str], int]:

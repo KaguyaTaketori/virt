@@ -14,9 +14,10 @@ from app.config import settings
 from app.auth import get_current_user
 from app.deps.base import get_db_session
 from app.models.models import User
-from app.services.permissions import get_user_roles, has_permission, get_all_permissions_for_user
+from app.services.permissions import get_user_roles, get_all_permissions_for_user
 from app.services.permission_cache import permission_cache
 from app.services.token_blacklist import token_blacklist
+from app.constants import UserRole, PermissionResource, PermissionAction
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +32,7 @@ class AuthContext:
         return bool(self.roles.intersection(roles))
 
     def has_permission(self, resource: str, action: str) -> bool:
-        return "superadmin" in self.roles or any(
+        return UserRole.SUPERADMIN in self.roles or any(
             p.get("resource") == resource and p.get("action") == action
             for p in self.permissions
         )
@@ -138,7 +139,7 @@ class _PermissionGuard:
 
         ctx = await _resolve_auth_context(token, db)
 
-        if ctx.has_role("superadmin"):
+        if ctx.has_role(UserRole.SUPERADMIN):
             return ctx.user
 
         granted = ctx.has_permission(self.resource, self.action)
@@ -165,7 +166,7 @@ def require_roles(*allowed_roles: str) -> Callable:
     ) -> User:
         ctx = await _resolve_auth_context(token, db)
 
-        if ctx.has_role("superadmin") or ctx.has_role(*allowed_roles):
+        if ctx.has_role(UserRole.SUPERADMIN) or ctx.has_role(*allowed_roles):
             return ctx.user
 
         raise HTTPException(
@@ -174,15 +175,15 @@ def require_roles(*allowed_roles: str) -> Callable:
         )
     return _dependency
 
-AdminUser = Depends(require_roles("admin", "superadmin"))
-SuperAdminUser = Depends(require_roles("superadmin"))
+AdminUser = Depends(require_roles(UserRole.ADMIN, UserRole.SUPERADMIN))
+SuperAdminUser = Depends(require_roles(UserRole.SUPERADMIN))
 AnyAuthUser = Depends(get_current_user)
 
-AdminAccess = Depends(require_permission("system", "manage"))
-BilibiliRequired = Depends(require_permission("bilibili", "access"))
-BilibiliAccess = Depends(soft_permission("bilibili", "access"))
-WebSubManage = Depends(require_permission("websub", "manage"))
-ChannelManage = Depends(require_permission("channel", "manage"))
+AdminManage = Depends(require_permission(PermissionResource.SYSTEM, PermissionAction.MANAGE))
+BilibiliRequired = Depends(require_permission(PermissionResource.BILIBILI, PermissionAction.ACCESS))
+BilibiliAccess = Depends(soft_permission(PermissionResource.BILIBILI, PermissionAction.ACCESS))
+WebSubManage = Depends(require_permission(PermissionResource.WEBSUB, PermissionAction.MANAGE))
+ChannelManage = Depends(require_permission(PermissionResource.CHANNEL, PermissionAction.MANAGE))
 
 
 def validate_websub_callback(callback_url: str, allowed_callback_url: str) -> str:

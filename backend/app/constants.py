@@ -20,3 +20,34 @@ DANMAKU_MAX_SEEN_IDS     = 10_000
 
 # WebSocket
 WS_HEARTBEAT_INTERVAL_SECS = 25
+
+from enum import StrEnum
+
+class UserRole(StrEnum):
+    SUPERADMIN = "superadmin"
+    ADMIN      = "admin"
+    OPERATOR   = "operator"
+    USER       = "user"
+
+class ChannelStatus(StrEnum):
+    ACTIVE    = "active"
+    GRADUATED = "graduated"
+
+class UserChannelStatus(StrEnum):
+    LIKED   = "liked"
+    BLOCKED = "blocked"
+
+class Permission(StrEnum):
+    BILIBILI_ACCESS = "bilibili.access"
+    CHANNEL_MANAGE  = "channel.manage"
+    SYSTEM_MANAGE   = "system.manage"
+
+class PermissionResource(StrEnum):
+    BILIBILI = "bilibili"
+    CHANNEL  = "channel"
+    SYSTEM   = "system"
+    WEBSUB   = "websub"
+
+class PermissionAction(StrEnum):
+    ACCESS = "access"
+    MANAGE = "manage"

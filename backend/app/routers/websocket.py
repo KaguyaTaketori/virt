@@ -2,12 +2,12 @@ import asyncio
 import json
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Path, WebSocket, WebSocketDisconnect
 
 from app.loguru_config import logger
 from app.services.connection_manager import manager
 from app.services.danmaku_poller import poller
-from app.services.constants import WS_HEARTBEAT_INTERVAL_SECS
+from app.constants import WS_HEARTBEAT_INTERVAL_SECS
 
 try:
     from app.services.danmaku_youtube import get_chat_from_file
@@ -105,18 +105,7 @@ async def _handle_client_message(
 # ── 主端点 ────────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws/danmaku/{video_id}")
-async def danmaku_websocket(websocket: WebSocket, video_id: str) -> None:
-    """
-    实时弹幕推送 WebSocket。
-
-    架构：
-      ┌─ _heartbeat_task ─────────────────┐  ← 独立协程，每 25s 发 ping
-      └─ message loop ────────────────────┘  ← 主协程，处理客户端消息
-
-    客户端可发送：
-      {"type": "ping"}                        → 服务端回 pong
-      {"type": "time", "currentTime": 12.5}  → 服务端推送对应时间弹幕
-    """
+async def danmaku_websocket(websocket: WebSocket, video_id: str = Path(..., pattern=r'^[a-zA-Z0-9_\-]{1,64}$'),) -> None:
     accepted = await manager.connect(video_id, websocket)
     if not accepted:
         return

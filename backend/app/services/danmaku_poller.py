@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Set
 
 from app.loguru_config import logger
 from app.services.connection_manager import manager
-from app.services.constants import DANMAKU_MAX_SEEN_IDS, DANMAKU_TRUNCATE_BATCH
+from app.constants import DANMAKU_MAX_SEEN_IDS, DANMAKU_TRUNCATE_BATCH
 
 try:
     from yt_chat_downloader import YouTubeChatDownloader
@@ -15,26 +15,24 @@ except ImportError:
     _YT_DOWNLOADER_AVAILABLE = False
     YouTubeChatDownloader = None
 
-seen_ids_queue: deque[str] = deque()
-seen_ids_set: set[str] = set()
-
-def add_seen(mid: str) -> bool:
-    if mid in seen_ids_set:
-        return False
-    
-    seen_ids_set.add(mid)
-    seen_ids_queue.append(mid)
-    
-    if len(seen_ids_queue) > DANMAKU_MAX_SEEN_IDS:
-        oldest = seen_ids_queue.popleft()
-        seen_ids_set.discard(oldest)
-    return True
-
 
 class DanmakuPoller:
-
     def __init__(self) -> None:
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._seen_ids_queue: deque[str] = deque()
+        self._seen_ids_set: set[str] = set()
+        self._seen_lock = asyncio.Lock()
+
+    async def _add_seen(self, mid: str) -> bool:
+        async with self._seen_lock:
+            if mid in self._seen_ids_set:
+                return False
+            self._seen_ids_set.add(mid)
+            self._seen_ids_queue.append(mid)
+            if len(self._seen_ids_queue) > DANMAKU_MAX_SEEN_IDS:
+                oldest = self._seen_ids_queue.popleft()
+                self._seen_ids_set.discard(oldest)
+            return True
 
     def start_polling(self, video_id: str) -> None:
         if video_id in self._tasks and not self._tasks[video_id].done():
@@ -65,60 +63,71 @@ class DanmakuPoller:
             logger.error("danmaku poll error for {}: {}", video_id, exc)
 
     async def _poll_video(self, video_id: str) -> None:
-        if not _YT_DOWNLOADER_AVAILABLE:
-            logger.warning("yt_chat_downloader not available, skipping poll for {}", video_id)
+        ctx = await self._init_poll_context(video_id)
+        if ctx is None:
             return
+        if ctx["is_live"]:
+            await self._run_live_loop(video_id, ctx)
+        else:
+            await self._fetch_and_send(video_id, **ctx)
 
+    async def _init_poll_context(self, video_id: str) -> Optional[dict]:
+        """
+        阶段1：建立连接，获取初始参数。
+        返回 None 表示初始化失败，应停止轮询。
+        """
         downloader = YouTubeChatDownloader()
-        continuation: Optional[str] = None
-        api_key: Optional[str] = None
-        version: Optional[str] = None
-        is_live = False
-
         try:
-            info = await asyncio.to_thread(downloader.get_video_info, video_id)
-            is_live = info.get("is_live", False)
-
-            html = await asyncio.to_thread(
+            info   = await asyncio.to_thread(downloader.get_video_info, video_id)
+            html   = await asyncio.to_thread(
                 downloader.fetch_html,
-                f"https://www.youtube.com/watch?v={video_id}",
+                f"https://www.youtube.com/watch?v={video_id}"
             )
             api_key, version, yid = await asyncio.to_thread(
                 downloader.extract_innertube_params, html
             )
-            if yid:
-                continuation = await asyncio.to_thread(downloader.find_continuation, yid)
-            logger.info("poll init ok: {} live={} cont={}", video_id, is_live, bool(continuation))
+            continuation = (
+                await asyncio.to_thread(downloader.find_continuation, yid)
+                if yid else None
+            )
+            if not continuation:
+                return None
+
+            return {
+                "downloader":   downloader,
+                "api_key":      api_key,
+                "version":      version,
+                "continuation": continuation,
+                "is_live":      info.get("is_live", False),
+            }
         except Exception as e:
             logger.error("poll init failed for {}: {}", video_id, e)
-            return
+            return None
 
-        if not continuation:
-            return
-
-        if not is_live:
-            await self._fetch_and_send(downloader, video_id, api_key, version,
-                                       continuation, is_live)
-            return
-
+    async def _run_live_loop(self, video_id: str, ctx: dict) -> None:
+        """
+        阶段2（仅直播）：持续轮询直到无订阅者或无 continuation。
+        关注点：循环控制、退出条件、异常恢复。
+        """
+        continuation = ctx["continuation"]
         while True:
             if not manager.active_connections.get(video_id):
-                logger.info("no subscribers for {}, stopping poll", video_id)
+                logger.info("no subscribers for {}, stopping", video_id)
                 return
-
             try:
                 continuation = await self._fetch_and_send(
-                    downloader, video_id, api_key, version,
-                    continuation, is_live
+                    video_id,
+                    downloader=ctx["downloader"],
+                    api_key=ctx["api_key"],
+                    version=ctx["version"],
+                    continuation=continuation,
+                    is_live=True,
                 )
                 if not continuation:
-                    logger.info("no more continuation for {}", video_id)
                     return
             except Exception as e:
                 logger.error("poll loop error for {}: {}", video_id, e)
                 await asyncio.sleep(5)
-                continue
-
             await asyncio.sleep(1.0)
 
     async def _fetch_and_send(
@@ -148,7 +157,7 @@ class DanmakuPoller:
         new_msgs: List[dict] = []
         for m in messages:
             mid = m.get("message_id", "")
-            if mid and add_seen(mid):
+            if mid and await self._add_seen(mid):
                 new_msgs.append(m)
 
         if len(new_msgs) > DANMAKU_TRUNCATE_BATCH:

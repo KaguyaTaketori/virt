@@ -11,6 +11,7 @@ from app.services.youtube_channel import get_channel_details
 from app.services.youtube_sync import sync_channel_videos
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.api_key_manager import get_api_key, is_api_available
+from app.constants import ChannelStatus
 
 
 async def refresh_channel_details():
@@ -23,7 +24,7 @@ async def refresh_channel_details():
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active == True,
-                Channel.status != "graduated",
+                Channel.status != ChannelStatus.GRADUATED,
             )
         )
         channels = result.scalars().all()
@@ -90,7 +91,7 @@ async def daily_backfill_sync():
             select(Channel).where(
                 Channel.platform == Platform.YOUTUBE,
                 Channel.is_active == True,
-                Channel.status != "graduated",
+                Channel.status != ChannelStatus.GRADUATED,
             )
         )
         channels = result.scalars().all()

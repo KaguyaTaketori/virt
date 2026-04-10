@@ -25,6 +25,7 @@ from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
 from app.services.permission_cache import permission_cache
 from app.services.permissions import get_all_permissions_for_user, get_user_roles
+from app.constants import UserRole as UserRoleConstant
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
@@ -132,7 +133,7 @@ async def register(
     await db.commit()
     await db.refresh(db_user)
 
-    result = await db.execute(select(Role).where(Role.name == "user"))
+    result = await db.execute(select(Role).where(Role.name == UserRoleConstant.USER))
     user_role = result.scalar_one_or_none()
     if user_role:
         db.add(UserRole(user_id=db_user.id, role_id=user_role.id))

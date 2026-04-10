@@ -1,6 +1,6 @@
 <template>
   <AdminCrudTable
-    ref="permTableRef"
+    ref="tableRef"
     title="角色与权限"
     description="管理系统角色和权限分配"
     add-label="新建权限"
@@ -9,7 +9,7 @@
     :loading="loading"
     :row-key="(row: Permission) => row.id"
     :pagination="{ pageSize: 15 }"
-    @add="tableRef.showAddModal = true"
+    @add="tableRef.value.openAdd()"
     @submit="createPermission"
   >
     <!-- 1. 角色管理部分放在 filters 插槽内 -->
@@ -165,7 +165,7 @@ async function createPermission() {
   try {
     await adminPermissionsApi.createPermission(permForm.value)
     message.success('权限创建成功')
-    tableRef.value.showAddModal = false
+    tableRef.value.closeAdd()
     permForm.value = { name: '', description: '', resource: '', action: '' }
     fetchPermissions()
   } finally {

@@ -22,6 +22,7 @@ from app.auth import get_current_user
 from app.services.permissions import get_user_roles, has_permission
 from app.deps.guards import AdminUser, SuperAdminUser
 from app.services.permission_cache import permission_cache
+from app.constants import UserRole as UserRoleConstant
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
 
@@ -34,7 +35,7 @@ async def get_current_user_info(
     resp = UserResponse.model_validate(current_user)
     resp.roles = await get_user_roles(current_user.id, db)
 
-    if "superadmin" in resp.roles:
+    if UserRoleConstant.SUPERADMIN in resp.roles:
         result = await db.execute(select(Permission.name))
         resp.permissions = list(result.scalars().all())
         return resp
@@ -182,17 +183,7 @@ async def list_users(
     )
     users = result.scalars().unique().all()
 
-    return [
-        UserResponse(
-            id=u.id,
-            username=u.username,
-            email=u.email,
-            created_at=u.created_at,
-            roles={ur.role.name for ur in u.user_roles},
-            permissions=[],
-        )
-        for u in users
-    ]
+    return [UserResponse.from_orm_with_roles(u) for u in users]
 
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(

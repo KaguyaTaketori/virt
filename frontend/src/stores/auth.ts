@@ -1,29 +1,15 @@
-/**
- * frontend/src/stores/auth.ts（修复版）
- *
- * 问题 12 修复：logout 时可靠地清空 TanStack Query 缓存。
- *
- * 原问题：_getQueryClient() 使用懒加载 + try/catch 静默失败。
- * 若 logout 在组件 setup 生命周期之外被调用，useQueryClient() 会抛异常，
- * 导致 qc.clear() 从未执行，前一用户的数据对新用户短暂可见。
- *
- * 修复方案：
- *   在 main.ts 中创建 QueryClient 后，通过 setQueryClient() 注入到 store。
- *   store 不再直接调用 useQueryClient()（hooks 只能在 setup 中使用）。
- */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { QueryClient } from '@tanstack/vue-query'
 import type { User } from '@/types'
 import { authApi } from '@/api'
 import router from '@/router'
+import { ROLES, PERMISSIONS } from '@/constants/auth'
 
 export type { User }
 
-// module-level 持有 QueryClient 引用，在 main.ts 中注入
 let _sharedQueryClient: QueryClient | null = null
 
-/** 在 main.ts 中调用，将 QueryClient 传入 store 模块 */
 export function setSharedQueryClient(qc: QueryClient) {
   _sharedQueryClient = qc
 }
@@ -41,11 +27,11 @@ export const useAuthStore = defineStore('auth', () => {
   const hasPermission = (perm: string): boolean =>
     user.value?.permissions?.includes(perm) ?? false
 
-  const isSuperAdmin = computed(() => hasRole('superadmin'))
-  const isAdmin = computed(() => hasRole('admin') || isSuperAdmin.value)
-  const isOperator = computed(() => hasRole('operator') || isAdmin.value)
+  const isSuperAdmin = computed(() => hasRole(ROLES.SUPERADMIN))
+  const isAdmin = computed(() => hasRole(ROLES.ADMIN) || isSuperAdmin.value)
+  const isOperator = computed(() => hasRole(ROLES.OPERATOR) || isAdmin.value)
   const canAccessBilibili = computed(
-    () => hasPermission('bilibili.access') || isSuperAdmin.value,
+    () => hasPermission(PERMISSIONS.BILIBILI_ACCESS) || isSuperAdmin.value,
   )
 
   async function login(username: string, password: string): Promise<boolean> {

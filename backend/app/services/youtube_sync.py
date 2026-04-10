@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import FrozenSet, Optional
 
 import httpx
 from sqlalchemy import select, text
@@ -15,7 +15,7 @@ from app.services.youtube_utils import parse_video_item
 _YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 _BATCH_SIZE = 50
 _HTTP_TIMEOUT = 20.0
-
+_column_cache: dict[str, FrozenSet[str]] = {}
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -120,9 +120,11 @@ async def is_channel_full_sync_completed(
         return db_count >= total_videos
 
 
-async def _get_table_columns(session: AsyncSession, table_name: str) -> set[str]:
-    result = await session.execute(text(f"PRAGMA table_info({table_name})"))
-    return {row[1] for row in result.fetchall()}
+async def _get_table_columns(session: AsyncSession, table_name: str) -> FrozenSet[str]:
+    if table_name not in _column_cache:
+        result = await session.execute(text(f"PRAGMA table_info({table_name})"))
+        _column_cache[table_name] = frozenset(row[1] for row in result.fetchall())
+    return _column_cache[table_name]
 
 
 async def _load_existing_video_id_set(

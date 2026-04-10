@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
-from functools import wraps
+from typing import Optional
 
-from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 
-from app.deps import get_db_session
 from app.models.models import (
-    User,
     Role,
     Permission,
     UserRole,
     RolePermission,
     ResourceACL,
 )
-from app.auth import get_current_user_optional
+from app.constants import UserRole as UserRoleConstant
 
 
 async def get_user_roles(user_id: int, db: AsyncSession) -> set[str]:
@@ -30,11 +26,6 @@ async def get_user_roles(user_id: int, db: AsyncSession) -> set[str]:
     return set(result.scalars().all())
 
 
-async def has_role(user_id: int, role_name: str, db: AsyncSession) -> bool:
-    roles = await get_user_roles(user_id, db)
-    return role_name in roles
-
-
 async def has_permission(
     user_id: int,
     resource: str,
@@ -43,7 +34,7 @@ async def has_permission(
     resource_id: Optional[int] = None,
 ) -> bool:
     roles = await get_user_roles(user_id, db)
-    if "superadmin" in roles:
+    if UserRoleConstant.SUPERADMIN in roles:
         return True
 
     stmt = (
@@ -100,7 +91,7 @@ async def verify_ownership(
     user_id: int, resource: str, resource_id: int, db: AsyncSession
 ) -> bool:
     roles = await get_user_roles(user_id, db)
-    if "superadmin" in roles or "admin" in roles:
+    if UserRoleConstant.SUPERADMIN in roles or UserRoleConstant.ADMIN in roles:
         return True
 
     stmt = (
@@ -120,7 +111,7 @@ async def verify_ownership(
 async def get_all_permissions_for_user(user_id: int, db: AsyncSession) -> list[dict]:
     """获取用户所有权限列表，返回 [{resource, action}, ...]。"""
     roles = await get_user_roles(user_id, db)
-    if "superadmin" in roles:
+    if UserRoleConstant.SUPERADMIN in roles:
         result = await db.execute(select(Permission))
         return [
             {"resource": p.resource, "action": p.action} for p in result.scalars().all()

@@ -83,6 +83,8 @@ const showEditModal = ref(false)
 defineExpose({
   openAdd: () => { showAddModal.value = true },
   openEdit: () => { showEditModal.value = true },
+  closeAdd: () => { showAddModal.value = false },
+  closeEdit: () => { showEditModal.value = false },
   closeAll: () => {
     showAddModal.value = false
     showEditModal.value = false

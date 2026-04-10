@@ -11,6 +11,7 @@ from app.services.api_key_manager import get_api_key, is_api_available
 from .base import VtuberChannel
 from .vspo_wiki import VSPO_ORG_NAME
 from .nijisanji_wiki import NIJISANJI_ORG_NAME
+from app.constants import ChannelStatus
 
 
 async def sync_wiki_channels(
@@ -89,7 +90,7 @@ async def _sync_single_channel(
             updated = True
         if vtuber_ch.status and existing.status != vtuber_ch.status:
             existing.status = vtuber_ch.status
-            if vtuber_ch.status == "graduated":
+            if vtuber_ch.status == ChannelStatus.GRADUATED:
                 existing.is_active = False
             updated = True
 
@@ -113,7 +114,7 @@ async def _sync_single_channel(
         youtube_url=f"https://www.youtube.com/channel/{channel_id}",
         twitch_url=vtuber_ch.twitch_url,
         group=vtuber_ch.group,
-        status=vtuber_ch.status or "active",
+        status=vtuber_ch.status or ChannelStatus.ACTIVE,
     )
     db.add(new_channel)
     await db.flush()

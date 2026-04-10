@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import Optional
 from bs4 import BeautifulSoup
 
-from app.config import settings
 from app.loguru_config import logger
+from app.constants import ChannelStatus
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 
@@ -35,7 +35,7 @@ class VtuberChannel:
     twitter_url: Optional[str] = None
     twitch_url: Optional[str] = None
     group: Optional[str] = None
-    status: Optional[str] = "active"
+    status: Optional[str] = ChannelStatus.ACTIVE
 
 
 class BaseWikiScraper:

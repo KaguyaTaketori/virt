@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup, Tag
 
 from .base import BaseWikiScraper, VtuberChannel
 from app.loguru_config import logger
+from app.constants import ChannelStatus
 
 VSPO_WIKI_URL = "https://wikiwiki.jp/vspo/%E9%85%8D%E4%BF%A1%E3%83%81%E3%83%A3%E3%83%B3%E3%83%8D%E3%83%AB%E4%B8%80%E8%A6%A7"
 VSPO_ORG_NAME = "VSPO!"
@@ -94,7 +95,7 @@ class VSPOWikiScraper(BaseWikiScraper):
         if not name:
             return None
 
-        channel = VtuberChannel(name=name, group=group, status="active")
+        channel = VtuberChannel(name=name, group=group, status=ChannelStatus.ACTIVE)
 
         for cell in cells:
             links = cell.find_all("a", href=True)
