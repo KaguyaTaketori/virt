@@ -37,6 +37,18 @@ export interface Channel {
   bilibili_archive_count: number | null
 }
 
+export interface ChannelCreate {
+  platform: 'youtube' | 'bilibili'
+  channel_id: string
+  name: string
+  avatar_url?: string | null
+  is_active?: boolean
+  org_id?: number | null
+  avatar_shape?: 'circle' | 'square'
+  twitter_url?: string | null
+  youtube_url?: string | null
+}
+
 export interface Organization {
   id: number
   name: string

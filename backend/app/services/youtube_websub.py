@@ -7,12 +7,13 @@ from app.loguru_config import logger
 from app.deps.guards import AdminUser, validate_websub_callback
 from app.models.models import User
 
+from app.integrations.websub.subscription_service import websub_service
 from app.services.websub.atom_parser import parse_atom_feed
 from app.services.websub.security import verify_hmac_signature
-from app.services.websub.subscription_service import websub_service
 
 router = APIRouter(prefix="/api/websub", tags=["websub"])
 _TOPIC_BASE = ".xml?channel_id="
+
 
 @router.get("/youtube", response_class=PlainTextResponse)
 async def websub_verify(
@@ -21,13 +22,16 @@ async def websub_verify(
     hub_challenge: str = Query(..., alias="hub.challenge"),
     hub_lease_seconds: Optional[int] = Query(None, alias="hub.lease_seconds"),
 ) -> PlainTextResponse:
-    if hub_mode not in ("subscribe", "unsubscribe") or not hub_topic.startswith(_TOPIC_BASE):
+    if hub_mode not in ("subscribe", "unsubscribe") or not hub_topic.startswith(
+        _TOPIC_BASE
+    ):
         raise HTTPException(status_code=404)
 
     yt_channel_id = hub_topic.removeprefix(_TOPIC_BASE)
     await websub_service.confirm_verification(yt_channel_id, hub_mode)
-    
+
     return PlainTextResponse(hub_challenge)
+
 
 @router.post("/youtube")
 async def websub_receive(
@@ -46,12 +50,13 @@ async def websub_receive(
 
     for entry in entries:
         background_tasks.add_task(
-            websub_service.process_video_notification, 
-            entry["channel_id"], 
-            entry["video_id"]
+            websub_service.process_video_notification,
+            entry["channel_id"],
+            entry["video_id"],
         )
 
     return {"ok": True, "processed": len(entries)}
+
 
 @router.post("/youtube/subscribe/{channel_db_id}")
 async def manual_subscribe(
@@ -59,8 +64,10 @@ async def manual_subscribe(
     callback_url: str = Query(..., description="公网回调 URL"),
     _: User = AdminUser,
 ) -> dict:
-    validated_callback = validate_websub_callback(callback_url, settings.websub_callback_url)
-    
+    validated_callback = validate_websub_callback(
+        callback_url, settings.websub_callback_url
+    )
+
     ok = await websub_service.subscribe_channel(
         channel_db_id, validated_callback, secret=settings.websub_secret
     )
@@ -68,11 +75,14 @@ async def manual_subscribe(
         raise HTTPException(status_code=502, detail="Hub request failed")
     return {"ok": True}
 
+
 @router.post("/youtube/subscribe-all")
 async def bulk_subscribe(
     callback_url: str = Query(..., description="公网回调 URL"),
     _: User = AdminUser,
 ) -> dict:
     safe_callback = settings.websub_callback_url
-    await websub_service.subscribe_all_active(safe_callback, secret=settings.websub_secret)
+    await websub_service.subscribe_all_active(
+        safe_callback, secret=settings.websub_secret
+    )
     return {"ok": True}

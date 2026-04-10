@@ -1,16 +1,5 @@
 from __future__ import annotations
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.database_async import AsyncSessionFactory
 
+from app.crud.session import get_db_session, session_scope
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+__all__ = ["get_db_session", "session_scope"]

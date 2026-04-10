@@ -6,7 +6,8 @@
  * 视图层只负责 UI 事件转发，不再包含业务逻辑。
  */
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import {
   type LayoutNode,
   type LayoutChannel,
@@ -43,47 +44,40 @@ export const DEFAULT_DANMAKU_SETTINGS: DanmakuSettings = {
 }
 
 export const useMultiviewStore = defineStore('multiview', () => {
-  const tree = ref<LayoutNode>(createEmptyLeaf())
+  // ✅ 使用 VueUse useLocalStorage 自动持久化
+  const tree = useLocalStorage<LayoutNode>(STORAGE_KEY, createEmptyLeaf())
   const activeChannels = computed(() => getActiveChannels(tree.value))
 
-  // ── 弹幕设置 ─────────────────────────────────────────────────────────────────
-  const danmakuSettings = ref<DanmakuSettings>({ ...DEFAULT_DANMAKU_SETTINGS })
-
-  function loadDanmakuSettings() {
-    try {
-      const saved = localStorage.getItem(DANMAKU_SETTINGS_KEY)
-      if (saved) danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS, ...JSON.parse(saved) }
-    } catch {
-      danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
-    }
-  }
-
-  function saveDanmakuSettings() {
-    localStorage.setItem(DANMAKU_SETTINGS_KEY, JSON.stringify(danmakuSettings.value))
-  }
+  // ✅ 使用 VueUse useLocalStorage 自动持久化
+  const danmakuSettings = useLocalStorage<DanmakuSettings>(
+    DANMAKU_SETTINGS_KEY,
+    DEFAULT_DANMAKU_SETTINGS,
+  )
 
   function updateDanmakuSettings(partial: Partial<DanmakuSettings>) {
     danmakuSettings.value = { ...danmakuSettings.value, ...partial }
-    saveDanmakuSettings()
   }
 
   function resetDanmakuSettings() {
     danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
-    saveDanmakuSettings()
   }
 
-  // ── 持久化 ─────────────────────────────────────────────────────────────────
+  // ✅ 移除手动 init/persist，useLocalStorage 自动处理
   function init() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) tree.value = JSON.parse(saved)
-    } catch {
-      tree.value = createEmptyLeaf()
-    }
+    // useLocalStorage 自动加载，无需手动处理
   }
 
   function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tree.value))
+    // useLocalStorage 自动保存，无需手动处理
+  }
+
+  // ── 向后兼容的存根函数 ─────────────────────────────────────────────────
+  function loadDanmakuSettings() {
+    // useLocalStorage 自动加载
+  }
+
+  function saveDanmakuSettings() {
+    // useLocalStorage 自动保存
   }
 
   // ── 频道操作 ───────────────────────────────────────────────────────────────
