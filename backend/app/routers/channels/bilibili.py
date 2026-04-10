@@ -1,14 +1,10 @@
-"""
-backend/app/routers/channels/bilibili.py
-B 站频道详情接口 - 支持实时获取 + 数据库 fallback
-"""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.deps import get_db_session
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, User
@@ -43,16 +39,15 @@ async def get_channel_bilibili_info(
         channel_id=channel_id,
         current_user=current_user,
         bilibili_user_service=bilibili_user_service,
+        settings=settings
     )
 
     uid = channel.channel_id
 
-    # 实时获取所有视频，失败则从数据库读取
     videos = await bilibili_channel_service.get_all_videos(uid, ctx)
     if not videos:
         videos = await bilibili_channel_service.get_videos_from_db(channel_id, db)
 
-    # 实时获取动态，失败则从数据库读取
     dynamics, next_offset = await bilibili_channel_service.get_dynamics(
         uid, ctx, offset=dynamics_offset
     )

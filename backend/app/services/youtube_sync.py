@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import FrozenSet, Optional
 
 import httpx
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
@@ -15,6 +16,7 @@ from app.services.youtube_utils import parse_video_item
 _YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 _BATCH_SIZE = 50
 _HTTP_TIMEOUT = 20.0
+_column_cache_lock = asyncio.Lock()
 _column_cache: dict[str, FrozenSet[str]] = {}
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -120,10 +122,28 @@ async def is_channel_full_sync_completed(
         return db_count >= total_videos
 
 
-async def _get_table_columns(session: AsyncSession, table_name: str) -> FrozenSet[str]:
+async def get_table_columns(session: AsyncSession, model_class) -> FrozenSet[str]:
+    """
+    通用、数据库无关、并发安全的列名获取函数
+    """
+    table_name = model_class.__tablename__
+    
+    # 双重检查锁 (Double-checked locking) 模式
     if table_name not in _column_cache:
-        result = await session.execute(text(f"PRAGMA table_info({table_name})"))
-        _column_cache[table_name] = frozenset(row[1] for row in result.fetchall())
+        async with _column_cache_lock:
+            # 再次检查，防止在等待锁期间已被其他协程填充
+            if table_name not in _column_cache:
+                # 方案 A: 直接从 SQLAlchemy 模型读取（推荐：性能最高，不依赖数据库连接）
+                cols = frozenset(c.key for c in inspect(model_class).mapper.column_attrs)
+                
+                # 方案 B: 如果非要从数据库实时读取（应对手动修改了表结构的情况）
+                # def fetch_cols(conn):
+                #     return frozenset(inspect(conn).get_columns(table_name))
+                # cols = await session.run_sync(lambda conn: frozenset(c['name'] for c in inspect(conn).get_columns(table_name)))
+                
+                _column_cache[table_name] = cols
+                logger.debug("已加载表 {} 的字段缓存: {}", table_name, cols)
+                
     return _column_cache[table_name]
 
 
@@ -143,9 +163,10 @@ async def _upsert_video(
     session: AsyncSession,
     *,
     existing_video_ids: set[str],
-    db_video_columns: set[str],
     video_data: dict,
 ) -> None:
+    db_video_columns = await get_table_columns(session, Video)
+
     safe_data = {k: v for k, v in video_data.items() if k in db_video_columns}
     safe_data["fetched_at"] = datetime.now(timezone.utc)
 
@@ -243,7 +264,6 @@ async def sync_channel_videos(
     *,
     full_refresh: bool = False,
 ) -> int:
-    db_video_columns = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
 
     total_processed = 0
@@ -286,7 +306,6 @@ async def sync_channel_videos(
                     await _upsert_video(
                         session,
                         existing_video_ids=existing_video_ids,
-                        db_video_columns=db_video_columns,
                         video_data=video_data,
                     )
                     total_processed += 1
@@ -323,14 +342,12 @@ async def fetch_and_upsert_single_video(
     if not items:
         return None
 
-    db_video_columns = await _get_table_columns(session, "videos")
     existing_video_ids = await _load_existing_video_id_set(session, channel.id)
     video_data = parse_video_item(channel.id, channel.platform, items[0])
 
     await _upsert_video(
         session,
         existing_video_ids=existing_video_ids,
-        db_video_columns=db_video_columns,
         video_data=video_data,
     )
     await session.commit()

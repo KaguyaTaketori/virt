@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from bilibili_api import Credential
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ class ChannelRequestContext:
         channel_id: int,
         current_user,
         bilibili_user_service,
+        settings: Any = None,
     ) -> "ChannelRequestContext":
         credential = None
 
@@ -39,12 +40,11 @@ class ChannelRequestContext:
                     from app.loguru_config import logger
                     logger.warning("Failed to build user credential: {}", e)
 
-        if credential is None and hasattr(__import__("app.config", fromlist=["settings"]), "settings"):
-            from app.config import settings
-            if settings.bilibili_sessdata:
+        if credential is None and settings is not None:
+            if getattr(settings, "bilibili_sessdata", None):
                 try:
                     credential = Credential(sessdata=settings.bilibili_sessdata)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to use default settings credential: {e}")
 
         return cls(db=db, channel_id=channel_id, credential=credential)

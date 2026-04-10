@@ -84,29 +84,32 @@ async def _fetch_single_room(
 async def get_rooms_by_uids(
     uids: List[str],
     credential: Optional[Credential] = None,
+    max_concurrent: int = 5,
 ) -> Dict[str, Dict]:
     if not credential:
         credential = _create_credential()
 
+    semaphore = asyncio.Semaphore(max_concurrent)
     results: Dict[str, Dict] = {}
 
-    batches = [uids[i : i + BATCH_SIZE] for i in range(0, len(uids), BATCH_SIZE)]
-    logger.info("共 {} 个 uid，分 {} 批处理", len(uids), len(batches))
-
-    for batch_idx, batch in enumerate(batches):
-        for uid in batch:
+    async def fetch_with_limit(uid: str) -> tuple[str, Optional[Dict]]:
+        async with semaphore:
             await asyncio.sleep(random.uniform(REQ_SLEEP_MIN, REQ_SLEEP_MAX))
             room = await _fetch_single_room(uid, credential)
-            if room:
-                results[str(uid)] = room
+            return uid, room
 
-        if batch_idx < len(batches) - 1:
-            sleep_time = random.uniform(BATCH_SLEEP_MIN, BATCH_SLEEP_MAX)
-            logger.info(
-                f"批次 {batch_idx + 1}/{len(batches)} 完成，冷却 {sleep_time:.1f}s"
-            )
-            await asyncio.sleep(sleep_time)
+    tasks = [fetch_with_limit(uid) for uid in uids]
+    completed = await asyncio.gather(*tasks, return_exceptions=True)
 
+    for item in completed:
+        if isinstance(item, Exception):
+            logger.error("Batch fetch error: {}", item)
+            continue
+        uid, room = item
+        if room:
+            results[uid] = room
+
+    logger.info("获取 {} 个房间（共 {} 个 UID）", len(results), len(uids))
     return results
 
 

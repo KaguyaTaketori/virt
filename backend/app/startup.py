@@ -75,21 +75,6 @@ async def init_redis() -> bool:
 async def init_token_blacklist() -> None:
     """预热 Token 黑名单（SQLite 持久化 + 内存缓存）。"""
     async with AsyncSessionFactory() as session:
-        # 确保表存在（idempotent DDL）
-        await session.execute(text("""
-            CREATE TABLE IF NOT EXISTS blacklisted_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti VARCHAR(64) UNIQUE NOT NULL,
-                user_id INTEGER NOT NULL,
-                expired_at DATETIME NOT NULL,
-                revoked_at DATETIME NOT NULL
-            )
-        """))
-        await session.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_blacklisted_tokens_jti "
-            "ON blacklisted_tokens (jti)"
-        ))
-        await session.commit()
         await token_blacklist.warm_up(session)
 
     logger.info("Token blacklist warmed up")

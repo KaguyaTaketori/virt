@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from app.loguru_config import logger
@@ -15,6 +16,13 @@ except ImportError:
     _YT_DOWNLOADER_AVAILABLE = False
     YouTubeChatDownloader = None
 
+@dataclass
+class PollContext:
+    downloader: any
+    api_key: str
+    version: str
+    continuation: str
+    is_live: bool
 
 class DanmakuPoller:
     def __init__(self) -> None:
@@ -71,15 +79,11 @@ class DanmakuPoller:
         else:
             await self._fetch_and_send(video_id, **ctx)
 
-    async def _init_poll_context(self, video_id: str) -> Optional[dict]:
-        """
-        阶段1：建立连接，获取初始参数。
-        返回 None 表示初始化失败，应停止轮询。
-        """
+    async def _init_poll_context(self, video_id: str) -> Optional[PollContext]:
         downloader = YouTubeChatDownloader()
         try:
-            info   = await asyncio.to_thread(downloader.get_video_info, video_id)
-            html   = await asyncio.to_thread(
+            info = await asyncio.to_thread(downloader.get_video_info, video_id)
+            html = await asyncio.to_thread(
                 downloader.fetch_html,
                 f"https://www.youtube.com/watch?v={video_id}"
             )
@@ -92,39 +96,33 @@ class DanmakuPoller:
             )
             if not continuation:
                 return None
-
-            return {
-                "downloader":   downloader,
-                "api_key":      api_key,
-                "version":      version,
-                "continuation": continuation,
-                "is_live":      info.get("is_live", False),
-            }
+            return PollContext(
+                downloader=downloader,
+                api_key=api_key,
+                version=version,
+                continuation=continuation,
+                is_live=info.get("is_live", False),
+            )
         except Exception as e:
             logger.error("poll init failed for {}: {}", video_id, e)
             return None
 
     async def _run_live_loop(self, video_id: str, ctx: dict) -> None:
-        """
-        阶段2（仅直播）：持续轮询直到无订阅者或无 continuation。
-        关注点：循环控制、退出条件、异常恢复。
-        """
-        continuation = ctx["continuation"]
         while True:
             if not manager.active_connections.get(video_id):
                 logger.info("no subscribers for {}, stopping", video_id)
                 return
             try:
-                continuation = await self._fetch_and_send(
-                    video_id,
-                    downloader=ctx["downloader"],
-                    api_key=ctx["api_key"],
-                    version=ctx["version"],
-                    continuation=continuation,
+                next_continuation = await self._fetch_and_send(video_id, ctx)
+                if not next_continuation:
+                    return
+                ctx = PollContext(
+                    downloader=ctx.downloader,
+                    api_key=ctx.api_key,
+                    version=ctx.version,
+                    continuation=next_continuation,
                     is_live=True,
                 )
-                if not continuation:
-                    return
             except Exception as e:
                 logger.error("poll loop error for {}: {}", video_id, e)
                 await asyncio.sleep(5)
@@ -132,40 +130,32 @@ class DanmakuPoller:
 
     async def _fetch_and_send(
         self,
-        downloader,
         video_id: str,
-        api_key: str,
-        version: str,
-        continuation: str,
-        is_live: bool,
+        ctx: PollContext,
     ) -> Optional[str]:
         try:
             chat_data = await asyncio.to_thread(
-                downloader.get_live_chat_data,
-                api_key, version, continuation, is_live=is_live,
+                ctx.downloader.get_live_chat_data,
+                ctx.api_key, ctx.version, ctx.continuation, is_live=ctx.is_live,
             )
             messages, _ = await asyncio.to_thread(
-                downloader.parse_live_chat_messages, chat_data
+                ctx.downloader.parse_live_chat_messages, chat_data
             )
             next_cont = await asyncio.to_thread(
-                downloader.extract_next_continuation, chat_data
+                ctx.downloader.extract_next_continuation, chat_data
             )
         except Exception as e:
             logger.error("fetch error for {}: {}", video_id, e)
-            return continuation
+            return ctx.continuation
 
-        new_msgs: List[dict] = []
-        for m in messages:
-            mid = m.get("message_id", "")
-            if mid and await self._add_seen(mid):
-                new_msgs.append(m)
-
+        new_msgs = [
+            m for m in messages
+            if (mid := m.get("message_id", "")) and await self._add_seen(mid)
+        ]
         if len(new_msgs) > DANMAKU_TRUNCATE_BATCH:
             new_msgs = new_msgs[-DANMAKU_TRUNCATE_BATCH:]
-
         if new_msgs:
             await manager.send_message(video_id, {"type": "danmaku", "data": new_msgs})
-
         return next_cont
 
 
