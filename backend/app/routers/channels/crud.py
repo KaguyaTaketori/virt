@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.loguru_config import logger
-from app.crud.session import session_scope
+from app.database import session_scope
 from app.deps import get_db_session
 from app.deps.guards import AdminUser
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep

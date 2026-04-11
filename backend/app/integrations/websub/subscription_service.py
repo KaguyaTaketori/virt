@@ -8,8 +8,8 @@ from app.loguru_config import logger
 from app.models.models import Channel, WebSubSubscription
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.integrations.youtube_client import get_youtube_client
-from app.crud.session import session_scope
-from app.crud import ChannelRepository
+from app.database import session_scope
+from app.repositories import ChannelRepository
 from app.integrations.websub.hub_client import hub_client
 
 

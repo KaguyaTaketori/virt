@@ -10,16 +10,22 @@ from app.loguru_config import logger
 ModelType = TypeVar("ModelType")
 
 
-class CRUDBase(Generic[ModelType]):
+class BaseRepository(Generic[ModelType]):
     """
-    泛型异步 CRUD 基类。
+    泛型异步 Repository 基类。
     使用 SQLAlchemy 2.0 风格的 select API。
+
+    Usage:
+        class ChannelRepository(BaseRepository[Channel]):
+            model = Channel
+
+            async def get_by_channel_id(self, ...):
+                ...
     """
 
     model: type[ModelType]
 
-    def __init__(self, model: type[ModelType], session: AsyncSession):
-        self.model = model
+    def __init__(self, session: AsyncSession):
         self.session = session
 
     async def get(self, pk: int) -> Optional[ModelType]:
@@ -160,8 +166,8 @@ class CRUDBase(Generic[ModelType]):
         return result.scalar() or 0
 
 
-class CRUDPaged(CRUDBase[ModelType]):
-    """支持分页的 CRUD。"""
+class PagedRepository(BaseRepository[ModelType]):
+    """支持分页的 Repository。"""
 
     async def get_page(
         self,

@@ -3,20 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.crud.base import CRUDBase, CRUDPaged
+from app.database.base import BaseRepository, PagedRepository
 from app.models.models import Channel, Organization, Platform, UserChannel, Stream
 from app.loguru_config import logger
 
 
-class ChannelRepository(CRUDBase[Channel]):
+class ChannelRepository(BaseRepository[Channel]):
     """Channel 实体的 Repository。"""
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(Channel, session)
+    model = Channel
 
     async def get_by_channel_id(
         self, platform_channel_id: str, platform: Platform
@@ -55,42 +54,6 @@ class ChannelRepository(CRUDBase[Channel]):
         query = select(Channel).where(Channel.name.ilike(f"%{name}%")).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-
-    async def get_paginated(
-        self,
-        page: int = 1,
-        page_size: int = 24,
-        platform: Optional[Platform] = None,
-        org_id: Optional[int] = None,
-        is_active: Optional[bool] = None,
-        group: Optional[str] = None,
-    ) -> tuple[list[Channel], int]:
-        """分页查询频道。"""
-        conditions = []
-        if platform is not None:
-            conditions.append(Channel.platform == platform)
-        if org_id is not None:
-            conditions.append(Channel.org_id == org_id)
-        if is_active is not None:
-            conditions.append(Channel.is_active == is_active)
-        if group is not None:
-            conditions.append(Channel.group == group)
-
-        skip = (page - 1) * page_size
-
-        count_query = select(func.count()).select_from(Channel)
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
-        count_result = await self.session.execute(count_query)
-        total = count_result.scalar() or 0
-
-        data_query = select(Channel)
-        if conditions:
-            data_query = data_query.where(and_(*conditions))
-        data_query = data_query.order_by(Channel.name).offset(skip).limit(page_size)
-
-        result = await self.session.execute(data_query)
-        return list(result.scalars().all()), total
 
     async def update_last_fetched(self, channel_id: int) -> None:
         """更新 videos_last_fetched 时间戳。"""
@@ -141,11 +104,10 @@ class ChannelRepository(CRUDBase[Channel]):
         return [(ch, status_map.get(ch.id)) for ch in channels]
 
 
-class UserChannelRepository(CRUDBase[UserChannel]):
+class UserChannelRepository(BaseRepository[UserChannel]):
     """用户-频道关联的 Repository。"""
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(UserChannel, session)
+    model = UserChannel
 
     async def get_by_user_and_channel(
         self, user_id: int, channel_id: int
@@ -204,11 +166,10 @@ class UserChannelRepository(CRUDBase[UserChannel]):
         return False
 
 
-class OrganizationRepository(CRUDBase[Organization]):
+class OrganizationRepository(PagedRepository[Organization]):
     """组织实体的 Repository。"""
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(Organization, session)
+    model = Organization
 
     async def get_by_name(self, name: str) -> Optional[Organization]:
         """通过名称查询。"""
@@ -225,9 +186,7 @@ class OrganizationRepository(CRUDBase[Organization]):
         return result.scalar_one_or_none()
 
     async def get_all_with_channel_count(self) -> list[tuple[Organization, int]]:
-        channel_count = (
-            func.count(Channel.id).label("channel_count")
-        )
+        channel_count = func.count(Channel.id).label("channel_count")
         query = (
             select(Organization, channel_count)
             .outerjoin(Channel, Channel.org_id == Organization.id)

@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud.channels import ChannelRepository, UserChannelRepository
+from app.repositories import ChannelRepository, UserChannelRepository
 from app.integrations.youtube_client import get_youtube_client
 from app.integrations.bili_client import get_bili_client
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku

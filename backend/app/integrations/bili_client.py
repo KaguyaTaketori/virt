@@ -425,7 +425,7 @@ class BiliClient:
         if not parsed_dynamics:
             return
 
-        from app.db_utils import upsert_batch, _insert_fn
+        from app.database import upsert_batch, _insert_fn
 
         batch_values = []
         for parsed, raw in zip(parsed_dynamics, raw_dynamics):
@@ -482,7 +482,7 @@ class BiliClient:
         if not videos:
             return
 
-        from app.db_utils import upsert_batch, _insert_fn
+        from app.database import upsert_batch, _insert_fn
 
         batch_values = []
         for v in videos:

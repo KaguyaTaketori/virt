@@ -9,15 +9,14 @@ from typing import Optional
 import httpx
 
 from app.loguru_config import logger
-from app.crud.session import session_scope
-from app.crud import ChannelRepository, StreamRepository, VideoRepository
+from app.database import session_scope, upsert_stream
+from app.repositories import ChannelRepository, StreamRepository, VideoRepository
 from app.models.models import Platform
 from app.integrations.bili_client import get_bili_client
 from app.integrations.youtube_client import get_youtube_client
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import QuotaDep, get_quota_dep
-from app.db_utils import upsert_stream
 from app.config import settings
 
 

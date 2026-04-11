@@ -6,16 +6,15 @@ from typing import Any, Optional
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud.base import CRUDBase
+from app.database.base import BaseRepository
 from app.models.models import Video, Platform
 from app.loguru_config import logger
 
 
-class VideoRepository(CRUDBase[Video]):
+class VideoRepository(BaseRepository[Video]):
     """Video 实体的 Repository。"""
 
-    def __init__(self, session: AsyncSession):
-        super().__init__(Video, session)
+    model = Video
 
     async def get_by_video_id(self, channel_id: int, video_id: str) -> Optional[Video]:
         """通过 channel_id + video_id 组合查询。"""

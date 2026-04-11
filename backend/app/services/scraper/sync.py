@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.models.models import Channel, Organization, Platform
 from app.integrations.youtube_client import get_youtube_client
-from app.crud.session import session_scope
+from app.database import session_scope
 from app.loguru_config import logger
 from app.services.api_key_manager import get_api_key, is_api_available
 from .base import VtuberChannel

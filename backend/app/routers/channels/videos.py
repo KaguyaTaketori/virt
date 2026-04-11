@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db_session
 from app.models.models import Channel, Platform, Video
 from app.schemas.schemas import PaginatedVideosResponse, VideoResponse
-from app.crud.videos import VideoRepository
+from app.repositories import VideoRepository
 
 
 router = APIRouter()

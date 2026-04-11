@@ -32,6 +32,7 @@ async def upsert(
     )
     await session.execute(upsert_stmt)
 
+
 async def upsert_batch(
     session: AsyncSession,
     model,
@@ -43,7 +44,7 @@ async def upsert_batch(
         return
 
     stmt = _insert_fn(model).values(values)
-    
+
     if update_cols:
         upsert_stmt = stmt.on_conflict_do_update(
             index_elements=index_elements,
@@ -51,7 +52,7 @@ async def upsert_batch(
         )
     else:
         upsert_stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
-        
+
     await session.execute(upsert_stmt)
 
 
@@ -62,7 +63,7 @@ async def upsert_stream(
     platform: Platform,
 ) -> None:
     now = datetime.now(timezone.utc)
-    
+
     insert_data = {
         "channel_id": channel_id,
         "platform": platform,
@@ -72,9 +73,9 @@ async def upsert_stream(
         "viewer_count": parsed.get("viewer_count", 0),
         "updated_at": now,
     }
-    
+
     stmt = _insert_fn(Stream).values(**insert_data)
-    
+
     upsert_stmt = stmt.on_conflict_do_update(
         index_elements=["channel_id", "video_id"],
         set_={
@@ -82,13 +83,14 @@ async def upsert_stream(
             "status": stmt.excluded.status,
             "viewer_count": stmt.excluded.viewer_count,
             "updated_at": now,
-            # 仅在新值更大时更新peak_viewers
             "peak_viewers": case(
-                (stmt.excluded.viewer_count > Stream.peak_viewers,
-                 stmt.excluded.viewer_count),
+                (
+                    stmt.excluded.viewer_count > Stream.peak_viewers,
+                    stmt.excluded.viewer_count,
+                ),
                 else_=Stream.peak_viewers,
             ),
         },
     )
-    
+
     await db.execute(upsert_stmt)

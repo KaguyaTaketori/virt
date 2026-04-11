@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.db_utils import upsert
+from app.database import upsert
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, Video
 from app.services.api_key_manager import get_api_key, is_api_available
