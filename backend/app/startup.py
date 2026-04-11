@@ -1,4 +1,4 @@
-# backend/app/startup.py  ← 新建文件
+# backend/app/startup.py
 """
 应用启动/关闭生命周期的各项初始化职责。
 每个函数单一职责，可独立测试，可独立禁用。
@@ -6,22 +6,19 @@
 
 from __future__ import annotations
 
-from sqlalchemy import text, select, func
+from sqlalchemy import select, func
 
 from app.loguru_config import logger
 from app.config import settings
-from app.schedulers import start_scheduler, scheduler
+from app.worker.scheduler import scheduler_service
 from app.models.models import WebSubSubscription
-from app.database_async import AsyncSessionFactory, create_all_tables
-from app.database import engine, Base
+from app.database import AsyncSessionFactory, create_all_tables, engine, Base
 from app.services.redis_client import RedisClient
-from app.services.permission_cache import init_permission_cache
-from app.services.room_counter import init_room_counter
-from app.services.danmaku_queue import init_danmaku_queue
 from app.services.token_blacklist import token_blacklist
 from app.services.bilibili_auth import bilibili_auth_service
 from app.services.youtube_websub import subscribe_all_active_channels
-from app.services.quota_guard import init_quota_guard
+from app.deps import init_deps
+from app.integrations.api_client import BaseAPIClient
 
 
 async def check_production_secrets() -> None:
@@ -48,9 +45,9 @@ async def check_production_secrets() -> None:
 
 
 async def init_databases() -> None:
-    """建表（幂等），同步引擎 + 异步引擎均初始化。"""
-
-    Base.metadata.create_all(bind=engine)
+    """建表（幂等），使用异步引擎。"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     await create_all_tables()
     logger.info("Database tables verified/created")
 
@@ -63,10 +60,7 @@ async def init_redis() -> bool:
     try:
         redis = await RedisClient.get_client()
         await redis.ping()
-        await init_permission_cache(redis)
-        await init_room_counter(redis)
-        await init_danmaku_queue(redis)
-        await init_quota_guard(redis)
+        await init_deps(redis)
         logger.info("Redis connected and subsystems initialized")
         return True
     except Exception as e:
@@ -100,24 +94,32 @@ async def init_websub() -> None:
             logger.error("首次 WebSub 订阅失败（不影响启动）: {}", e)
 
 
+async def _cleanup_blacklist() -> None:
+    try:
+        async with AsyncSessionFactory() as session:
+            count = await token_blacklist.cleanup_expired(session)
+            if count:
+                logger.info("Cleaned {} expired blacklist entries", count)
+    except Exception as e:
+        logger.error("Blacklist cleanup error: {}", e)
+
+
 async def register_scheduled_jobs() -> None:
-    """注册所有定时任务，与调度器启动解耦。"""
+    """注册所有定时任务，启动调度器（使用 RedisJobStore）。"""
     bilibili_auth_service.start_cleanup_task()
 
-    async def _cleanup_blacklist():
-        try:
-            async with AsyncSessionFactory() as session:
-                count = await token_blacklist.cleanup_expired(session)
-                if count:
-                    logger.info("Cleaned {} expired blacklist entries", count)
-        except Exception as e:
-            logger.error("Blacklist cleanup error: {}", e)
-
-    start_scheduler()
-    scheduler.add_cron_job(
+    await scheduler_service.start()
+    scheduler_service.add_cron_job(
         _cleanup_blacklist,
         job_id="blacklist_cleanup",
         hour=3,
         minute=30,
     )
     logger.info("Scheduler started with all jobs registered")
+
+
+async def cleanup_resources() -> None:
+    """应用关闭时清理资源"""
+    await scheduler_service.shutdown()
+    await BaseAPIClient.close_client()
+    logger.info("Resources cleaned up")

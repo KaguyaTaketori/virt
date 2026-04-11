@@ -1,4 +1,5 @@
-import { watch, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, watch, toValue, type MaybeRefOrGetter } from 'vue'
+import { useWebSocket } from '@vueuse/core'
 import { DanmakuMessage } from '@/types/danmaku'
 
 const WS_BASE =
@@ -6,30 +7,23 @@ const WS_BASE =
   ((import.meta.env.VITE_API_BASE as string | undefined)?.replace(/^http/, 'ws') ?? 'ws://localhost:8000')
 
 export function useDanmakuWS(
-  videoId: Ref<string>,
-  platform: Ref<string>,
-  enabled: Ref<boolean>,
+  videoId: MaybeRefOrGetter<string>,
+  platform: MaybeRefOrGetter<string>,
+  enabled: MaybeRefOrGetter<boolean>,
 ) {
-  const queue: DanmakuMessage[] = []
+  const queue = ref<DanmakuMessage[]>([])
+  const url = ref<string>('')
 
-  let ws: WebSocket | null = null
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  let reconnectAttempts = 0
-  const MAX_BACKOFF = 30_000
-
-  function connect() {
-    if (videoId.value === '' || platform.value !== 'youtube') return
-
-    try {
-      ws = new WebSocket(`${WS_BASE}/ws/danmaku/${videoId.value}`)
-    } catch {
-      scheduleReconnect()
-      return
-    }
-
-    ws.onopen = () => { reconnectAttempts = 0 }
-
-    ws.onmessage = (event) => {
+  const { data, send, close, open, isConnected } = useWebSocket(url, {
+    autoReconnect: {
+      retries: () => -1,
+      delay: 1000,
+      maxDelay: 30000,
+      onFailed() {
+        console.warn('[WS] Reconnection failed')
+      },
+    },
+    onMessage(_ws, event) {
       try {
         const data = JSON.parse(event.data as string)
         if (data.type === 'danmaku' && Array.isArray(data.data)) {
@@ -41,67 +35,55 @@ export function useDanmakuWS(
               userId: raw.user_id ?? raw.userId,
               comment: raw.comment ?? raw.message ?? '',
             }
-            if (!queue.find((m) => m.messageId === msg.messageId)) {
-              queue.push(msg)
+            if (!queue.value.find((m) => m.messageId === msg.messageId)) {
+              queue.value.push(msg)
             }
           }
         }
       } catch { /* ignore parse errors */ }
-    }
+    },
+    immediate: false,
+  })
 
-    ws.onerror = (err) => console.error('[WS Error]', err)
-    ws.onclose = () => {
-      ws = null
-      if (enabled.value && platform.value === 'youtube') scheduleReconnect()
-    }
+  function connect() {
+    const vid = toValue(videoId)
+    const plat = toValue(platform)
+    if (!vid || plat !== 'youtube') return
+
+    url.value = `${WS_BASE}/ws/danmaku/${vid}`
+    open()
   }
 
   function disconnect() {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-    if (ws) { ws.onclose = null; ws.close(); ws = null }
-    reconnectAttempts = 0
-  }
-
-  function scheduleReconnect() {
-    const delay = Math.min(1_000 * 2 ** reconnectAttempts, MAX_BACKOFF)
-    reconnectAttempts++
-    reconnectTimer = setTimeout(connect, delay)
+    close()
+    queue.value = []
   }
 
   function drainQueue(): DanmakuMessage[] {
-    if (queue.length === 0) return []
-    return queue.splice(0, queue.length)
+    if (queue.value.length === 0) return []
+    return queue.value.splice(0, queue.value.length)
   }
 
- watch(enabled, (val) => {
-    if (val && platform.value === 'youtube') {
-      connect()
+  watch([enabled, platform, videoId], ([en, plat, vid]) => {
+    if (en && plat === 'youtube' && vid) {
+      url.value = `${WS_BASE}/ws/danmaku/${vid}`
+      open()
     } else {
       disconnect()
-      queue.length = 0
     }
-  })
+  }, { immediate: true })
 
-  watch(videoId, () => {
-    disconnect()
-    queue.length = 0
-    if (enabled.value && platform.value === 'youtube') connect()
-  })
-
-  onMounted(() => {
-    if (enabled.value && platform.value === 'youtube') connect()
-  })
-
-  onUnmounted(() => {
-    disconnect()
-    queue.length = 0
-  })
-
-  return { queue, drainQueue, connect, disconnect }
+  return { 
+    queue, 
+    drainQueue, 
+    connect, 
+    disconnect,
+    isConnected
+  }
 }
 
 export function useDanmakuHitLayer(
-  hitLayerRef: Ref<HTMLDivElement | null>,
+  hitLayerRef: { value: HTMLDivElement | null },
 ) {
   const hitLayerDivs = new Map<string, HTMLDivElement>()
 

@@ -1,32 +1,39 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Callable, FrozenSet, Optional
 
+import httpx
+from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from app.loguru_config import logger
-from app.worker.locks import RedisLock
+
+DEFAULT_REDIS_HOST = "localhost"
+DEFAULT_REDIS_PORT = 6379
+DEFAULT_REDIS_DB = 0
 
 
-def _create_trigger(trigger_type: str, **kwargs) -> Any:
-    """创建 APScheduler 触发器。"""
-    if trigger_type == "interval":
-        return IntervalTrigger(**kwargs)
-    elif trigger_type == "cron":
-        return CronTrigger(**kwargs)
-    else:
-        raise ValueError(f"Unknown trigger type: {trigger_type}")
+class SchedulerService:
+    """
+    统一调度服务。
+    - 使用 RedisJobStore 实现分布式任务持久化
+    - 支持 Interval、Cron、Date 触发器
+    - 与应用生命周期解耦
+    """
 
-
-class WorkerScheduler:
-    """Worker 调度器。封装 APScheduler，提供任务管理和分布式锁支持。"""
-
-    def __init__(self, timezone_: str = "UTC"):
-        self.scheduler = AsyncIOScheduler(timezone=timezone_)
-        self._started = False
+    def __init__(
+        self,
+        redis_host: str = DEFAULT_REDIS_HOST,
+        redis_port: int = DEFAULT_REDIS_PORT,
+        redis_db: int = DEFAULT_REDIS_DB,
+    ):
+        self._redis_host = redis_host
+        self._redis_port = redis_port
+        self._redis_db = redis_db
+        self._scheduler: Optional[AsyncIOScheduler] = None
         self._job_defaults = {
             "coalesce": True,
             "max_instances": 1,
@@ -35,39 +42,79 @@ class WorkerScheduler:
 
     @property
     def is_started(self) -> bool:
-        return self._started
+        return self._scheduler is not None and self._scheduler.state != STATE_STOPPED
+
+    @property
+    def scheduler(self) -> AsyncIOScheduler:
+        return self._scheduler
+
+    def _get_jobstore(self) -> RedisJobStore:
+        return RedisJobStore(
+            host=self._redis_host,
+            port=self._redis_port,
+            db=self._redis_db,
+        )
+
+    async def start(self) -> None:
+        """启动调度器（需要 Redis）"""
+        if self.is_started:
+            logger.warning("Scheduler already running")
+            return
+
+        try:
+            self._scheduler = AsyncIOScheduler(
+                jobstores={"default": self._get_jobstore()},
+                job_defaults=self._job_defaults,
+                timezone="UTC",
+            )
+            self._scheduler.start()
+            logger.info("Scheduler started with RedisJobStore")
+        except Exception as e:
+            logger.error("Failed to start scheduler: {}", e)
+            self._scheduler = AsyncIOScheduler(
+                job_defaults=self._job_defaults,
+                timezone="UTC",
+            )
+            self._scheduler.start()
+            logger.warning("Scheduler started without RedisJobStore (fallback)")
+
+    async def shutdown(self, wait: bool = True) -> None:
+        """优雅关闭调度器"""
+        if self._scheduler and self._scheduler.state != STATE_STOPPED:
+            self._scheduler.shutdown(wait=wait)
+            logger.info("Scheduler stopped")
 
     def add_interval_job(
         self,
         func: Callable,
         job_id: str,
-        minutes: Optional[int] = None,
         seconds: Optional[int] = None,
+        minutes: Optional[int] = None,
         hours: Optional[int] = None,
         **kwargs,
     ) -> None:
-        """添加 Interval 任务。"""
+        """添加 Interval 任务"""
+        if not self._scheduler:
+            raise RuntimeError("Scheduler not started")
+
         trigger_kwargs = {}
-        if minutes is not None:
-            trigger_kwargs["minutes"] = minutes
         if seconds is not None:
             trigger_kwargs["seconds"] = seconds
+        if minutes is not None:
+            trigger_kwargs["minutes"] = minutes
         if hours is not None:
             trigger_kwargs["hours"] = hours
 
-        trigger = _create_trigger("interval", **trigger_kwargs)
-
-        self.scheduler.add_job(
+        self._scheduler.add_job(
             func,
-            trigger=trigger,
+            "interval",
             id=job_id,
             replace_existing=True,
+            **trigger_kwargs,
             **self._job_defaults,
             **kwargs,
         )
-        logger.debug(
-            "Registered interval job: %s (interval=%s)", job_id, trigger_kwargs
-        )
+        logger.debug("Registered interval job: %s", job_id)
 
     def add_cron_job(
         self,
@@ -78,7 +125,10 @@ class WorkerScheduler:
         day_of_week: Optional[str] = None,
         **kwargs,
     ) -> None:
-        """添加 Cron 任务。"""
+        """添加 Cron 任务"""
+        if not self._scheduler:
+            raise RuntimeError("Scheduler not started")
+
         trigger_kwargs = {}
         if hour is not None:
             trigger_kwargs["hour"] = hour
@@ -87,53 +137,39 @@ class WorkerScheduler:
         if day_of_week is not None:
             trigger_kwargs["day_of_week"] = day_of_week
 
-        trigger = _create_trigger("cron", **trigger_kwargs)
-
-        self.scheduler.add_job(
+        self._scheduler.add_job(
             func,
-            trigger=trigger,
+            "cron",
             id=job_id,
             replace_existing=True,
+            **trigger_kwargs,
             **self._job_defaults,
             **kwargs,
         )
-        logger.debug("Registered cron job: %s (cron=%s)", job_id, trigger_kwargs)
-
-    def add_job(
-        self,
-        func: Callable,
-        trigger_type: str,
-        job_id: str,
-        **trigger_kwargs,
-    ) -> None:
-        """通用添加任务方法。"""
-        trigger = _create_trigger(trigger_type, **trigger_kwargs)
-
-        self.scheduler.add_job(
-            func,
-            trigger=trigger,
-            id=job_id,
-            replace_existing=True,
-            **self._job_defaults,
-        )
-        logger.debug("Registered job: %s (%s)", job_id, trigger_type)
+        logger.debug("Registered cron job: %s", job_id)
 
     def remove_job(self, job_id: str) -> bool:
-        """移除任务。"""
+        """移除任务"""
+        if not self._scheduler:
+            return False
         try:
-            self.scheduler.remove_job(job_id)
+            self._scheduler.remove_job(job_id)
             logger.info("Removed job: %s", job_id)
             return True
         except Exception:
             return False
 
     def get_job(self, job_id: str) -> Optional[Any]:
-        """获取任务。"""
-        return self.scheduler.get_job(job_id)
+        """获取任务"""
+        if not self._scheduler:
+            return None
+        return self._scheduler.get_job(job_id)
 
     def list_jobs(self) -> list[dict[str, Any]]:
-        """列出所有任务。"""
-        jobs = self.scheduler.get_jobs()
+        """列出所有任务"""
+        if not self._scheduler:
+            return []
+        jobs = self._scheduler.get_jobs()
         return [
             {
                 "id": job.id,
@@ -143,41 +179,24 @@ class WorkerScheduler:
             for job in jobs
         ]
 
-    def start(self) -> None:
-        """启动调度器。"""
-        if self.scheduler.state != STATE_STOPPED:
-            logger.warning("Scheduler already running")
-            return
 
-        self.scheduler.start()
-        self._started = True
-        logger.info("Worker scheduler started")
+scheduler_service = SchedulerService()
 
-    def shutdown(self, wait: bool = True) -> None:
-        """停止调度器。"""
-        if self.scheduler.state == STATE_STOPPED:
-            return
-
-        self.scheduler.shutdown(wait=wait)
-        self._started = False
-        logger.info("Worker scheduler stopped")
-
-
-worker_scheduler = WorkerScheduler()
+scheduler = scheduler_service.scheduler
 
 
 class PeriodicTaskRunner:
-    """带幂等性检查的任务运行器。"""
+    """带幂等性检查的任务运行器（已集成到调度器中）"""
 
     def __init__(self, task_id: str, lock_timeout: int = 300):
         self.task_id = task_id
         self.lock_timeout = lock_timeout
 
     async def run(self, func: Callable, *args, **kwargs) -> bool:
-        """运行任务，使用分布式锁确保幂等性。"""
+        from app.worker.locks import RedisLock
+
         async with RedisLock.acquire_lock(
-            f"task:{self.task_id}",
-            timeout=self.lock_timeout,
+            f"task:{self.task_id}", timeout=self.lock_timeout
         ) as acquired:
             if not acquired:
                 logger.info("Task %s skipped (already running)", self.task_id)
@@ -193,6 +212,6 @@ class PeriodicTaskRunner:
 
 
 def run_with_lock(task_id: str, func: Callable, *args, **kwargs) -> bool:
-    """简化的带锁任务运行。"""
+    """简化的带锁任务运行"""
     runner = PeriodicTaskRunner(task_id)
     return runner.run(func, *args, **kwargs)

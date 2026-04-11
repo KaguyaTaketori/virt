@@ -7,8 +7,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.channels import ChannelRepository, UserChannelRepository
-from app.integrations.youtube import youtube_platform
-from app.integrations.bilibili import bilibili_platform
+from app.integrations.youtube import youtube_service
+from app.integrations.bilibili import bilibili_service
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.schemas.schemas import ChannelCreate
 from app.loguru_config import logger
@@ -43,7 +43,7 @@ class ChannelService:
 
         if channel_in.platform == Platform.YOUTUBE:
             resolved_id = channel_in.channel_id
-            info = await youtube_platform.get_channel_info(channel_in.channel_id)
+            info = await youtube_service.get_channel_info(channel_in.channel_id)
             if info and info.channel_id:
                 resolved_id = info.channel_id
                 data["channel_id"] = resolved_id
@@ -51,7 +51,7 @@ class ChannelService:
                 data["name"] = data.get("name") or info.name
 
             details = (
-                await youtube_platform._get_channel_details_fallback(resolved_id)
+                await youtube_service._get_channel_details_fallback(resolved_id)
                 if resolved_id
                 else None
             )
@@ -69,7 +69,7 @@ class ChannelService:
         data = channel_in.model_dump()
 
         if channel_in.platform == Platform.BILIBILI:
-            info = await bilibili_platform.get_channel_info(channel_in.channel_id)
+            info = await bilibili_service.get_channel_info(channel_in.channel_id)
             if info:
                 data["avatar_url"] = data.get("avatar_url") or info.avatar_url
                 data["name"] = data.get("name") or info.name

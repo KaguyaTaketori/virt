@@ -9,18 +9,17 @@ import {
 import { useInfiniteScroll } from '@vueuse/core'
 import { useQuery } from '@tanstack/vue-query'
 
-import { useOrgStore } from '@/stores/org'
 import { useAuthStore } from '@/stores/auth'
 import { channelApi } from '@/api'
 import { useChannelActions } from '@/composables/useChannelActions'
 import { useBilibiliData } from '@/composables/useBilibiliData'
-import { useChannelVideos } from '@/hooks/useQueryVideos'
+import { useChannelVideos, useOrganizations } from '@/queries'
 
 // --- 基础状态 ---
 const route = useRoute()
 const router = useRouter()
-const orgStore = useOrgStore()
 const authStore = useAuthStore()
+const orgsQuery = useOrganizations()
 const channelId = computed(() => Number(route.params.id))
 
 // --- 1. 频道基础信息 Query ---
@@ -35,7 +34,8 @@ const { data: channel, isLoading: channelLoading, error: channelQueryError } = u
 })
 
 const activeTab = ref('videos')
-const isBilibili = computed(() => channel.value?.platform === 'bilibili')
+const platform = computed(() => channel.value?.platform ?? 'empty')
+const isBilibili = computed(() => platform.value === 'bilibili')
 
 // --- 2. 交互与 Action (保持原样) ---
 const { toggleLike, toggleBlock, addToMultiview } = useChannelActions(channel)
@@ -47,12 +47,12 @@ const livePage = ref(1)
 
 // --- 4. 使用 useQueryVideos 获取不同类型的视频 ---
 
-// 投稿视频
+// B站使用自己的 /bilibili API，不调用这个
 const uploadQuery = useChannelVideos(channelId, {
   page: uploadPage,
   pageSize: 24,
   status: 'upload',
-  enabled: computed(() => activeTab.value === 'videos' && !isBilibili.value) 
+  enabled: computed(() => !!channel.value && platform.value !== 'bilibili' && activeTab.value === 'videos')
 })
 
 // YouTube Shorts
@@ -169,7 +169,7 @@ function getDynamicTypeLabel(type: number) {
   return map[type] || '动态'
 }
 function getOrgName(orgId: number | null) {
-  return orgStore.organizations.find(o => o.id === orgId)?.name || ''
+  return orgsQuery.data.value?.find(o => o.id === orgId)?.name || ''
 }
 </script>
 

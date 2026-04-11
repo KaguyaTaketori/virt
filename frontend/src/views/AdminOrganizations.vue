@@ -42,12 +42,17 @@
 import { ref, onMounted, h } from 'vue'
 import { NButton, NForm, NFormItem, NSpace, NRadio, NRadioGroup, NInput, type DataTableColumns } from 'naive-ui'
 import AdminCrudTable from '@/components/AdminCrudTable.vue'
-import { orgApi, type Organization } from '../api'
-import { useOrgStore } from '../stores/org'
+import { orgApi, type Organization } from '@/api'
+import { useCreateOrganization, useUpdateOrganization, useDeleteOrganization } from '@/queries'
 import { useApiError } from '@/composables/useApiError'
+import { useQueryClient } from '@tanstack/vue-query'
 
 const { handleError } = useApiError()
-const orgStore = useOrgStore()
+const queryClient = useQueryClient()
+
+const createOrg = useCreateOrganization()
+const updateOrg = useUpdateOrganization()
+const deleteOrg = useDeleteOrganization()
 
 const tableRef = ref()
 const organizations = ref<Organization[]>([])
@@ -132,7 +137,7 @@ function openEditModal(org: Organization) {
 async function handleDelete(id: number) {
   if (!confirm('确定要删除这个机构吗？')) return
   try {
-    await orgApi.delete(id)
+    await deleteOrg.mutateAsync(id)
     await fetchOrganizations()
   } catch (err) {
     handleError(err, '删除失败')
@@ -142,12 +147,12 @@ async function handleDelete(id: number) {
 async function handleConfirm(mode: 'add' | 'edit') {
   try {
     if (mode === 'edit' && editingId.value) {
-      await orgApi.update(editingId.value, formData.value)
+      await updateOrg.mutateAsync({ id: editingId.value, data: formData.value })
     } else {
-      await orgApi.create(formData.value as any)
+      await createOrg.mutateAsync(formData.value as any)
     }
     
-    await orgStore.invalidate()
+    await queryClient.invalidateQueries({ queryKey: ['organizations'] })
     tableRef.value.closeAll()
     fetchOrganizations()
   } catch (err) {

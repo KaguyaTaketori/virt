@@ -1,6 +1,6 @@
 from app.worker.scheduler import (
-    WorkerScheduler,
-    worker_scheduler,
+    SchedulerService,
+    scheduler_service,
     PeriodicTaskRunner,
     run_with_lock,
 )
@@ -14,8 +14,8 @@ from app.worker.tasks import (
 from app.worker.locks import RedisLock, distributed_lock
 
 __all__ = [
-    "WorkerScheduler",
-    "worker_scheduler",
+    "SchedulerService",
+    "scheduler_service",
     "PeriodicTaskRunner",
     "run_with_lock",
     "BaseTask",

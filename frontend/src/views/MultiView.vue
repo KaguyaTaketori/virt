@@ -5,7 +5,7 @@ import { X, LayoutGrid } from 'lucide-vue-next'
 
 import { useMultiviewStore } from '@/stores/multiview'
 import { useThemeStore } from '@/stores/theme'
-import { useOrgStore } from '@/stores/org'
+import { useOrganizations } from '@/queries'
 
 import { streamApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
 import { type LayoutChannel } from '@/utils/layoutEngine'
@@ -22,7 +22,7 @@ const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
 const store = useMultiviewStore()
-const orgStore = useOrgStore()
+const orgsQuery = useOrganizations()
 
 // === UI 状态管理 ===
 const isLibraryOpen = ref(false)
@@ -89,7 +89,7 @@ const groupMembers = computed<Stream[]>(() => {
 const organizationName = computed(() => {
   if (selectedGroup.value === null || selectedGroup.value === 'favorites') return null
   const orgId = selectedGroup.value
-  const org = orgStore.organizations.find(o => o.id === orgId)
+  const org = orgsQuery.data.value?.find(o => o.id === orgId)
   return org?.name || null
 })
 
@@ -159,9 +159,6 @@ function handleApplyPreset(id: PresetId) {
 // === 生命周期 ===
 onMounted(async () => {
   store.loadDanmakuSettings()
-  
-  // 加载机构数据
-  await orgStore.fetchOrganizations()
   
   // 加载直播数据
   await fetchData()
@@ -238,7 +235,7 @@ onMounted(async () => {
     <!-- 分组选择器模态框 -->
     <GroupSelectorModal
       v-model="isGroupSelectorOpen"
-      :organizations="orgStore.organizations"
+      :organizations="orgsQuery.data.value ?? []"
       :liked-org-ids="likedOrgIds"
       @select="handleGroupSelected"
     />

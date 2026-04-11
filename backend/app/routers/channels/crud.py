@@ -19,8 +19,7 @@ from app.models.models import (
     UserChannel,
 )
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
-from app.services.youtube_channel import get_channel_details
-from app.services.youtube_sync import sync_channel_videos
+from app.integrations import youtube_service
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.constants import UserChannelStatus
 from app.services.channel_service import ChannelService
@@ -46,7 +45,7 @@ async def _bg_sync_channel(channel_id: int) -> None:
         if not ch:
             logger.warning("Channel {} not found during bg sync", channel_id)
             return
-        await sync_channel_videos(session, ch, api_key, full_refresh=True)
+        await youtube_service.sync_channel_videos(session, ch, api_key)
         logger.info("Video sync completed for channel_id={}", channel_id)
 
     callback_url = settings.websub_callback_url
@@ -180,9 +179,9 @@ async def refresh_channel(
 ):
     channel = await _get_or_404(db, channel_id)
     if channel.platform == Platform.YOUTUBE:
-        details = await get_channel_details(channel.channel_id)
+        details = await youtube_service.get_channel_info(channel.channel_id)
         if details:
-            for field in ("banner_url", "description", "twitter_url", "youtube_url"):
+            for field in ("banner_url", "description", "youtube_url"):
                 if details.get(field):
                     setattr(channel, field, details[field])
             await db.commit()

@@ -14,6 +14,11 @@ export {
 } from './useQueryVideos'
 
 export {
+  useOrganizations,
+  useOrganization,
+} from './useQueryOrganizations'
+
+export {
   useCreateChannel,
   useUpdateChannel,
   useDeleteChannel,
@@ -24,4 +29,4 @@ export {
   useCreateOrganization,
   useUpdateOrganization,
   useDeleteOrganization,
-} from './useMutationChannels'
+} from './useMutations'

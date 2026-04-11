@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.integrations.base import (
     BaseLivePlatform,
     ChannelInfo,
@@ -12,22 +14,13 @@ from app.integrations.urls import (
     build_youtube_url,
     validate_safe_url,
 )
-from app.integrations.youtube import YouTubePlatform
-
-try:
-    from app.integrations.bilibili import BilibiliPlatform
-except ImportError:
-    BilibiliPlatform = None
-
-try:
-    from app.integrations.youtube import youtube_platform
-except ImportError:
-    youtube_platform = None
-
-try:
-    from app.integrations.bilibili import bilibili_platform
-except ImportError:
-    bilibili_platform = None
+from app.integrations.bilibili import BilibiliService, bilibili_service
+from app.integrations.youtube import YouTubeService, youtube_service
+from app.integrations.api_client import (
+    BaseAPIClient,
+    BilibiliAPIClient,
+    YouTubeAPIClient,
+)
 
 __all__ = [
     "BaseLivePlatform",
@@ -36,10 +29,13 @@ __all__ = [
     "LiveStatusEnum",
     "PaginatedVideos",
     "VideoItem",
-    "YouTubePlatform",
-    "BilibiliPlatform",
-    "youtube_platform",
-    "bilibili_platform",
+    "BilibiliService",
+    "YouTubeService",
+    "bilibili_service",
+    "youtube_service",
+    "BaseAPIClient",
+    "BilibiliAPIClient",
+    "YouTubeAPIClient",
     "IframeUrlGenerator",
     "build_youtube_url",
     "build_bilibili_url",

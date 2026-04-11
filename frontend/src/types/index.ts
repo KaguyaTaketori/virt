@@ -9,6 +9,8 @@ export interface Stream {
   status: 'live' | 'upcoming' | 'archive' | 'offline'
   started_at: string | null
   scheduled_at: string | null
+  ended_at: string | null
+  live_chat_id: string | null
   channel_name: string | null
   channel_avatar: string | null
   channel_avatar_shape?: 'circle' | 'square'
@@ -29,7 +31,10 @@ export interface Channel {
   banner_url: string | null
   twitter_url: string | null
   youtube_url: string | null
+  twitch_url: string | null
   description: string | null
+  group: string | null
+  status: string
   is_liked: boolean
   is_blocked: boolean
   bilibili_sign: string | null

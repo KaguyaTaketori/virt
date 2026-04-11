@@ -4,14 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.deps import get_db_session
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, User
 from app.auth import get_current_user_optional
-from app.services.bilibili_channel import bilibili_channel_service
-from app.services.bilibili_user import bilibili_user_service
-from app.services.bilibili_context import ChannelRequestContext
+from app.integrations import bilibili_service
 
 router = APIRouter()
 
@@ -34,33 +31,78 @@ async def get_channel_bilibili_info(
 
     ctx_platform.assert_bilibili_access()
 
-    ctx = await ChannelRequestContext.build(
-        db=db,
-        channel_id=channel_id,
-        current_user=current_user,
-        bilibili_user_service=bilibili_user_service,
-        settings=settings
-    )
-
     uid = channel.channel_id
 
-    videos = await bilibili_channel_service.get_all_videos(uid, ctx)
-    if not videos:
-        videos = await bilibili_channel_service.get_videos_from_db(channel_id, db)
+    credential = None
+    if current_user and current_user.bilibili_sessdata:
+        try:
+            from bilibili_api import Credential
 
-    dynamics, next_offset = await bilibili_channel_service.get_dynamics(
-        uid, ctx, offset=dynamics_offset
-    )
-    if not dynamics:
-        dynamics = await bilibili_channel_service.get_dynamics_from_db(
-            channel_id, db, offset=0, limit=dynamics_limit
+            credential = Credential(
+                sessdata=current_user.bilibili_sessdata,
+                bili_jct=current_user.bilibili_bili_jct,
+                buvid3=current_user.bilibili_buvid3,
+            )
+        except Exception:
+            pass
+
+    if not credential and bilibili_service._create_credential():
+        credential = bilibili_service._create_credential()
+
+    videos = []
+    try:
+        videos_raw = await bilibili_service.get_videos(
+            uid, credential, page=1, page_size=30
         )
-        next_offset = ""
+        vlist = videos_raw.get("list", {}).get("vlist", [])
+        videos = [bilibili_service._parse_video(v) for v in vlist]
+    except Exception:
+        pass
 
-    # 实时获取并更新频道信息
-    info_data = await bilibili_channel_service.get_info(uid, ctx)
+    dynamics, next_offset = [], ""
+    if credential:
+        dynamics, next_offset = await bilibili_service.get_dynamics(
+            uid, credential, offset=dynamics_offset
+        )
+        if dynamics:
+            await bilibili_service.upsert_dynamics(db, channel_id, dynamics, [])
+
+    if not dynamics:
+        from app.models.models import BilibiliDynamic
+
+        result = await db.execute(
+            select(BilibiliDynamic)
+            .where(BilibiliDynamic.channel_id == channel_id)
+            .order_by(BilibiliDynamic.timestamp.desc())
+            .limit(dynamics_limit)
+        )
+        dynamics = []
+        for row in result.scalars().all():
+            dynamics.append(
+                {
+                    "dynamic_id": row.dynamic_id,
+                    "uid": row.uid,
+                    "uname": row.uname,
+                    "content_nodes": row.content_nodes,
+                    "images": row.images,
+                    "timestamp": row.timestamp,
+                    "url": row.url,
+                }
+            )
+
+    info_data = await bilibili_service.get_channel_info(uid, credential)
     if info_data:
-        await bilibili_channel_service.update_channel(channel, info_data, db)
+        if info_data.get("name"):
+            channel.name = info_data["name"]
+        if info_data.get("face"):
+            channel.bilibili_face = info_data["face"]
+        if info_data.get("sign"):
+            channel.bilibili_sign = info_data["sign"]
+        if info_data.get("fans"):
+            channel.bilibili_fans = info_data["fans"]
+        if info_data.get("archive_count"):
+            channel.bilibili_archive_count = info_data["archive_count"]
+        await db.commit()
 
     info = {
         "mid": uid,

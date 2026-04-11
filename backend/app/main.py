@@ -22,9 +22,7 @@ from app.routers import (
     permissions,
     bilibili_auth,
 )
-from app.services.youtube_websub import (
-    router as youtube_websub_router,
-)
+from app.services.youtube_websub import router as youtube_websub_router
 from app.startup import (
     check_production_secrets,
     init_databases,
@@ -32,6 +30,7 @@ from app.startup import (
     init_token_blacklist,
     init_websub,
     register_scheduled_jobs,
+    cleanup_resources,
 )
 
 
@@ -42,12 +41,12 @@ async def lifespan(app):
     职责：按顺序调用各初始化模块，处理整体启动失败。
     """
     try:
-        await check_production_secrets()   # 1. 安全断言
-        await init_databases()             # 2. 建表
-        await init_redis()                 # 3. Redis（失败可降级）
-        await init_token_blacklist()       # 4. 黑名单预热
-        await init_websub()               # 5. WebSub 订阅
-        await register_scheduled_jobs()   # 6. 定时任务
+        await check_production_secrets()
+        await init_databases()
+        await init_redis()
+        await init_token_blacklist()
+        await init_websub()
+        await register_scheduled_jobs()
         logger.info("Application startup complete")
     except Exception as e:
         logger.critical("Application startup failed: {}", e)
@@ -56,6 +55,8 @@ async def lifespan(app):
     yield
 
     logger.info("Application shutting down...")
+    await cleanup_resources()
+
 
 limiter = Limiter(key_func=get_remote_address)
 

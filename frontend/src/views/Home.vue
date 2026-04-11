@@ -5,22 +5,22 @@
       <p class="text-gray-400 text-sm">VTuber 频道直播状态</p>
     </div>
 
-    <div v-if="orgStore.organizations.length > 0" class="mb-4 flex flex-wrap gap-2 items-center">
+    <div v-if="orgsQuery.data.value?.length" class="mb-4 flex flex-wrap gap-2 items-center">
       <button
-        @click="store.setOrg(null)"
+        @click="selectedOrgId = null"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition"
-        :class="store.currentOrgId === null
+        :class="selectedOrgId === null
           ? 'bg-pink-600 text-white'
           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'"
       >
         全部
       </button>
       <button
-        v-for="org in orgStore.organizations"
+        v-for="org in orgsQuery.data.value"
         :key="org.id"
-        @click="store.setOrg(org.id)"
+        @click="selectedOrgId = org.id"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition"
-        :class="store.currentOrgId === org.id
+        :class="selectedOrgId === org.id
           ? 'bg-pink-600 text-white'
           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'"
       >
@@ -40,9 +40,9 @@
       <button
         v-for="s in statuses"
         :key="s.value"
-        @click="store.setStatus(s.value)"
+        @click="selectedStatus = s.value"
         class="px-4 py-2 rounded-full transition text-sm"
-        :class="store.currentStatus === s.value
+        :class="selectedStatus === s.value
           ? 'bg-pink-600 text-white'
           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'"
       >
@@ -51,18 +51,18 @@
       </button>
     </div>
 
-    <div v-if="store.loading" class="flex justify-center py-16">
+    <div v-if="streamsQuery.isLoading.value" class="flex justify-center py-16">
       <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-pink-500"></div>
     </div>
 
-    <div v-else-if="store.error" class="text-center py-12 text-red-400">
-      <p>加载失败：{{ store.error }}</p>
-      <button @click="store.fetchStreams()" class="mt-4 px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 text-sm">
+    <div v-else-if="streamsQuery.isError.value" class="text-center py-12 text-red-400">
+      <p>加载失败：{{ streamsQuery.error.value?.message }}</p>
+      <button @click="streamsQuery.refetch()" class="mt-4 px-4 py-2 bg-pink-600 rounded hover:bg-pink-700 text-sm">
         重试
       </button>
     </div>
 
-    <div v-else-if="store.currentStreams.length === 0" class="text-center py-16 text-gray-500">
+    <div v-else-if="filteredStreams.length === 0" class="text-center py-16 text-gray-500">
       <p class="text-lg">暂无数据</p>
       <p class="mt-1 text-sm">{{ emptyDesc }}</p>
     </div>
@@ -79,23 +79,26 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useStreamStore, type StreamStatus, type Stream } from '@/stores/stream'
-import { useOrgStore } from '@/stores/org'
+import { useAllStreams, useOrganizations } from '@/queries'
 import { useAuthStore } from '@/stores/auth'
 import { useMultiviewStore } from '@/stores/multiview'
 import StreamCard from '@/components/StreamCard.vue'
+import type { Stream, StreamStatus } from '@/types'
 
-
-const store    = useStreamStore()
+const router = useRouter()
 const multiviewStore = useMultiviewStore()
-const orgStore = useOrgStore()
 const authStore = useAuthStore()
-const router   = useRouter()
+
+const selectedStatus = ref<StreamStatus>('live')
+const selectedOrgId = ref<number | null>(null)
+
+const streamsQuery = useAllStreams()
+const orgsQuery = useOrganizations()
 
 const filteredStreams = computed(() => {
-  const streams = store.currentStreams
+  const streams = currentStreams.value
   if (authStore.canAccessBilibili) return streams
   return streams.filter(s => s.platform !== 'bilibili')
 })
@@ -107,30 +110,40 @@ const statuses: { value: StreamStatus; label: string }[] = [
   { value: 'offline',  label: '离线'   },
 ]
 
+const currentStreams = computed(() => {
+  const all = streamsQuery.data.value ?? []
+  const byStatus = all.filter(s => s.status === selectedStatus.value)
+  if (selectedOrgId.value === null) return byStatus
+  return byStatus.filter(s => (s as any).org_id === selectedOrgId.value)
+})
+
 const statusCountMap = computed<Record<StreamStatus, number>>(() => {
-  const orgId = store.currentOrgId
-  const byOrg = (s: Stream) => orgId === null || (s as any).org_id === orgId
- 
+  const all = streamsQuery.data.value ?? []
   return {
-    live:     store.liveStreams.filter(byOrg).length,
-    upcoming: store.upcomingStreams.filter(byOrg).length,
-    archive:  store.archiveStreams.filter(byOrg).length,
-    offline:  store.offlineStreams.filter(byOrg).length,
+    live:     all.filter(s => s.status === 'live' && orgFilter(s)).length,
+    upcoming: all.filter(s => s.status === 'upcoming' && orgFilter(s)).length,
+    archive:  all.filter(s => s.status === 'archive' && orgFilter(s)).length,
+    offline:  all.filter(s => s.status === 'offline' && orgFilter(s)).length,
   }
 })
- 
+
+function orgFilter(s: Stream) {
+  return selectedOrgId.value === null || (s as any).org_id === selectedOrgId.value
+}
+
 const orgCountMap = computed<Record<number, number>>(() => {
-  const base = store.streams.filter((s) => s.status === store.currentStatus)
+  const all = streamsQuery.data.value ?? []
+  const byStatus = all.filter(s => s.status === selectedStatus.value)
   const result: Record<number, number> = {}
-  for (const org of orgStore.organizations) {
-    result[org.id] = base.filter((s) => (s as any).org_id === org.id).length
+  for (const org of orgsQuery.data.value ?? []) {
+    result[org.id] = byStatus.filter((s) => (s as any).org_id === org.id).length
   }
   return result
 })
 
 const emptyDesc = computed(() => {
-  const orgName = store.currentOrgId
-    ? orgStore.organizations.find((o) => o.id === store.currentOrgId)?.name ?? ''
+  const orgName = selectedOrgId.value
+    ? (orgsQuery.data.value?.find((o) => o.id === selectedOrgId.value)?.name ?? '')
     : ''
   const suffix = orgName ? `（${orgName}）` : ''
   const map: Record<StreamStatus, string> = {
@@ -139,12 +152,7 @@ const emptyDesc = computed(() => {
     archive:  `暂无录播${suffix}`,
     offline:  `主播当前离线${suffix}`,
   }
-  return map[store.currentStatus] ?? ''
-})
-
-onMounted(async () => {
-  await store.fetchStreams()
-  await orgStore.fetchOrganizations()
+  return map[selectedStatus.value] ?? ''
 })
 
 function openMultiView(stream: Stream) {

@@ -1,9 +1,8 @@
 import { useQuery, useQueries } from '@tanstack/vue-query'
 import type { UseQueryOptions } from '@tanstack/vue-query'
-import type { ComputedRef, Ref } from 'vue'
-import type { Stream } from '@/types'
+import { toValue, type ComputedRef, type Ref } from 'vue'
+import type { Stream, Channel } from '@/types'
 import { streamApi, channelApi } from '@/api'
-import type { Channel } from '@/types'
 
 export type StreamQueryEnabled = ComputedRef<boolean> | Ref<boolean> | boolean
 
@@ -68,12 +67,12 @@ export function useChannelStreams(
   options?: Omit<UseQueryOptions<Stream[], Error>, 'queryKey' | 'queryFn'>,
 ) {
   return useQuery<Stream[], Error>({
-    queryKey: ['streams', channelId],
+    queryKey: ['streams', toValue(channelId)],
     queryFn: async () => {
-      const { data } = await streamApi.getAllStreams({ channel_id: channelId.value })
+      const { data } = await streamApi.getAllStreams({ channel_id: toValue(channelId) })
       return data
     },
-    enabled: !!channelId.value,
+    enabled: !!toValue(channelId),
     staleTime: 30_000,
     refetchInterval: 60_000,
     ...options,
@@ -85,12 +84,12 @@ export function useChannelInfo(
   options?: Omit<UseQueryOptions<Channel, Error>, 'queryKey' | 'queryFn'>,
 ) {
   return useQuery<Channel, Error>({
-    queryKey: ['channel', channelId],
+    queryKey: ['channel', toValue(channelId)],
     queryFn: async () => {
-      const { data } = await channelApi.get(channelId.value)
+      const { data } = await channelApi.get(toValue(channelId))
       return data
     },
-    enabled: !!channelId.value,
+    enabled: !!toValue(channelId),
     staleTime: 300_000,
     ...options,
   })

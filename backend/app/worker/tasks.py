@@ -12,15 +12,15 @@ from app.loguru_config import logger
 from app.crud.session import session_scope
 from app.crud import ChannelRepository, StreamRepository, VideoRepository
 from app.models.models import Platform
-from app.services.bilibili_live import get_rooms_by_uids, parse_bilibili_room
-from app.services.youtube_channel import get_channel_details
-from app.services.youtube_sync import sync_channel_videos
+from app.integrations import bilibili_service, youtube_service
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.api_key_manager import get_api_key, is_api_available
-from app.services.quota_guard import can_spend, spend, status as quota_status
-from app.services.youtube_fetcher import get_videos_details, parse_youtube_stream
+from app.deps.permissions import QuotaDep, get_quota_dep
 from app.db_utils import upsert_stream
 from app.config import settings
+
+
+quota_dep = get_quota_dep()
 
 
 class BaseTask(ABC):
@@ -107,9 +107,6 @@ def register_task(task: BaseTask) -> None:
     return task
 
 
-# ── Bilibili Tasks ────────────────────────────────────────────────────────────────
-
-
 async def update_bilibili_streams() -> None:
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
@@ -119,12 +116,19 @@ async def update_bilibili_streams() -> None:
         uid_to_ch_id = {ch.channel_id: ch.id for ch in channels}
         uids = list(uid_to_ch_id.keys())
 
-    rooms_data = await get_rooms_by_uids(uids)
+    rooms_data = await bilibili_service.batch_get_live_status(uids)
 
     async with session_scope() as session:
         for uid, room_data in rooms_data.items():
-            if uid in uid_to_ch_id:
-                parsed = parse_bilibili_room(room_data)
+            if uid in uid_to_ch_id and room_data:
+                parsed = {
+                    "video_id": room_data.get("video_id"),
+                    "title": room_data.get("title"),
+                    "thumbnail_url": room_data.get("thumbnail_url"),
+                    "status": room_data.get("status", "offline"),
+                    "viewer_count": room_data.get("viewer_count", 0),
+                    "started_at": room_data.get("started_at"),
+                }
                 await upsert_stream(
                     session, uid_to_ch_id[uid], parsed, Platform.BILIBILI
                 )
@@ -132,13 +136,10 @@ async def update_bilibili_streams() -> None:
         logger.info("更新 %d 个房间", len(rooms_data))
 
 
-# ── YouTube Tasks ────────────────────────────────────────────────────────────────
-
-
 async def update_youtube_streams() -> None:
     if not await is_api_available():
         return
-    if not await can_spend("videos.list", 1):
+    if not await quota_dep.can_spend("videos.list", 1):
         logger.info("配额耗尽，跳过 update_youtube_streams")
         return
 
@@ -156,13 +157,69 @@ async def update_youtube_streams() -> None:
         async with httpx.AsyncClient(timeout=30.0) as client:
             for i in range(0, len(video_ids), 50):
                 chunk = video_ids[i : i + 50]
-                if not await can_spend("videos.list", 1):
+                if not await quota_dep.can_spend("videos.list", 1):
                     break
-                items = await get_videos_details(client, chunk, api_key=api_key)
-                await spend("videos.list", 1)
+
+                params = {
+                    "key": api_key,
+                    "part": "snippet,liveStreamingDetails,statistics",
+                    "id": ",".join(chunk),
+                }
+                resp = await client.get(
+                    "https://www.googleapis.com/youtube/v3/videos", params=params
+                )
+                items = resp.json().get("items", [])
+
+                await quota_dep.spend("videos.list", 1)
+
                 for item in items:
-                    parsed = parse_youtube_stream(item)
-                    if parsed and parsed["video_id"] in vid_to_ch_id:
+                    snippet = item.get("snippet", {})
+                    live_details = item.get("liveStreamingDetails", {})
+                    life_cycle = snippet.get("liveBroadcastContent", "none")
+
+                    if life_cycle == "none" and not live_details.get("actualStartTime"):
+                        continue
+
+                    status_map = {
+                        "live": "live",
+                        "upcoming": "upcoming",
+                        "none": "archive",
+                    }
+                    concurrent = live_details.get("concurrentViewers")
+                    viewer_count = (
+                        int(concurrent) if concurrent and concurrent.isdigit() else 0
+                    )
+
+                    thumbnails = snippet.get("thumbnails", {})
+                    thumbnail_url = (
+                        thumbnails.get("maxres", {}).get("url")
+                        or thumbnails.get("high", {}).get("url")
+                        or thumbnails.get("medium", {}).get("url")
+                    )
+
+                    parsed = {
+                        "video_id": item["id"],
+                        "title": snippet.get("title"),
+                        "thumbnail_url": thumbnail_url,
+                        "status": status_map.get(life_cycle, "archive"),
+                        "viewer_count": viewer_count,
+                        "scheduled_at": datetime.fromisoformat(
+                            live_details.get("scheduledStartTime", "").replace(
+                                "Z", "+00:00"
+                            )
+                        )
+                        if live_details.get("scheduledStartTime")
+                        else None,
+                        "started_at": datetime.fromisoformat(
+                            live_details.get("actualStartTime", "").replace(
+                                "Z", "+00:00"
+                            )
+                        )
+                        if live_details.get("actualStartTime")
+                        else None,
+                    }
+
+                    if parsed["video_id"] in vid_to_ch_id:
                         await upsert_stream(
                             session,
                             vid_to_ch_id[parsed["video_id"]],
@@ -171,8 +228,8 @@ async def update_youtube_streams() -> None:
                         )
 
         await session.commit()
-        remaining = (await quota_status())["remaining"]
-        logger.info("刷新 %d 条 | 配额剩余 %d", len(active), remaining)
+        status = await quota_dep.status()
+        logger.info("刷新 %d 条 | 配额剩余 %d", len(active), status["remaining"])
 
 
 async def sync_youtube_videos_incremental() -> None:
@@ -199,9 +256,9 @@ async def sync_youtube_videos_incremental() -> None:
                 ch_obj = await channel_repo.get(ch.id)
                 if not ch_obj:
                     continue
-                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
+                await youtube_service.sync_channel_videos(session, ch_obj, api_key)
                 await session.commit()
-                logger.info("增量同步完��: %s", ch_obj.name)
+                logger.info("增量同步完成: %s", ch_obj.name)
                 await asyncio.sleep(0.3)
         except Exception as e:
             logger.warning("增量同步错误 channel_id=%d: %s", ch.id, e)
@@ -247,175 +304,162 @@ async def sync_youtube_videos_full() -> None:
 
     total_incomplete = len(incomplete_channels)
     total_batches = (total_incomplete + BATCH_SIZE - 1) // BATCH_SIZE
-    current_batch = int(time.time()) // 3600 % total_batches
-
-    batch_start = current_batch * BATCH_SIZE
-    batch_end = min(batch_start + BATCH_SIZE, total_incomplete)
-    batch_channels = incomplete_channels[batch_start:batch_end]
 
     logger.info(
-        "全量同步批次 %d/%d，频道 %d-%d",
-        current_batch + 1,
+        "开始全量同步: %d 个频道需要同步，分 %d 批处理",
+        total_incomplete,
         total_batches,
-        batch_start + 1,
-        batch_end,
     )
 
-    completed_count = 0
-    for ch in batch_channels:
-        try:
-            async with session_scope() as session:
-                channel_repo = ChannelRepository(session)
-                ch_obj = await channel_repo.get(ch.id)
-                if not ch_obj:
-                    continue
-                full_state = await get_full_state(ch_obj.id)
-                if full_state and full_state.get("completed"):
-                    completed_count += 1
-                    continue
-                await sync_channel_videos(session, ch_obj, api_key, full_refresh=True)
-                await session.commit()
-                video_repo = VideoRepository(session)
-                videos = await video_repo.get_by_channel(ch_obj.id, limit=10000)
-                await set_full_completed(ch_obj.id, len(videos))
-                completed_count += 1
-                logger.info("全量同步频道: %s", ch_obj.name)
+    for batch_idx in range(total_batches):
+        batch_start = batch_idx * BATCH_SIZE
+        batch_end = min(batch_start + BATCH_SIZE, total_incomplete)
+        batch_channels = incomplete_channels[batch_start:batch_end]
+
+        logger.info(
+            "处理批次 %d/%d: %d 个频道",
+            batch_idx + 1,
+            total_batches,
+            len(batch_channels),
+        )
+
+        for ch in batch_channels:
+            try:
+                async with session_scope() as session:
+                    channel_repo = ChannelRepository(session)
+                    ch_obj = await channel_repo.get(ch.id)
+                    if not ch_obj:
+                        continue
+
+                    await youtube_service.sync_channel_videos(session, ch_obj, api_key)
+                    await set_full_completed(ch.id)
+                    await session.commit()
+
                 await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.warning("全量同步错误 channel_id=%d: %s", ch.id, e)
+            except Exception as e:
+                logger.warning("全量同步错误 channel=%s: %s", ch.channel_id, e)
+                await asyncio.sleep(2)
 
-    all_completed = all(
-        (await get_full_state(ch.id) or {}).get("completed") for ch in channels
-    )
-    if all_completed:
-        await set_all_completed(True)
-        logger.info("所有频道全量同步已完成！")
+        await asyncio.sleep(2)
 
-    logger.info("批次同步完成! 批次 %d/%d", current_batch + 1, total_batches)
+    if len(incomplete_channels) > 0:
+        await set_all_completed()
+
+    logger.info("全量同步全部完成")
 
 
 async def discover_live_streams_from_videos() -> None:
     if not await is_api_available():
+        logger.info("API 不可用，跳过直播发现")
         return
+    if not await quota_dep.can_spend("search.list", 1):
+        logger.info("配额不足，跳过直播发现")
+        return
+
+    api_key = await get_api_key()
 
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
-        if not channels:
-            return
-        stream_repo = StreamRepository(session)
+
+    if not channels:
+        return
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
         for ch in channels:
-            videos = await stream_repo.get_live_and_upcoming(ch.id, limit=10)
-            for video in videos:
-                await stream_repo.upsert_stream(
-                    ch.id,
-                    video.video_id,
-                    {
-                        "video_id": video.video_id,
-                        "title": video.title,
-                        "thumbnail_url": video.thumbnail_url,
-                        "status": video.status,
-                        "viewer_count": 0,
-                        "platform": Platform.YOUTUBE,
-                    },
+            params = {
+                "key": api_key,
+                "part": "id,snippet",
+                "channelId": ch.channel_id,
+                "eventType": "live",
+                "type": "video",
+                "maxResults": 5,
+            }
+            try:
+                resp = await client.get(
+                    "https://www.googleapis.com/youtube/v3/search", params=params
                 )
-        await session.commit()
+                if resp.status_code == 403:
+                    logger.info("配额耗尽，停止直播发现")
+                    break
+                items = resp.json().get("items", [])
+                if items:
+                    for item in items:
+                        snippet = item.get("snippet", {})
+                        vid = item.get("id", {}).get("videoId")
+                        if vid:
+                            parsed = {
+                                "video_id": vid,
+                                "title": snippet.get("title"),
+                                "thumbnail_url": snippet.get("thumbnails", {})
+                                .get("high", {})
+                                .get("url"),
+                                "status": "live",
+                                "viewer_count": 0,
+                            }
+                            async with session_scope() as session:
+                                await upsert_stream(
+                                    session, ch.id, parsed, Platform.YOUTUBE
+                                )
+                                await session.commit()
 
+                await quota_dep.spend("search.list", 1)
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning("直播发现错误 channel=%s: %s", ch.channel_id, e)
 
-# ── Maintenance Tasks ────────────────────────────────────────────────────────────────
+    logger.info("直播发现完成")
 
 
 async def refresh_channel_details() -> None:
-    if not await is_api_available():
-        return
-
-    async with session_scope() as session:
-        channel_repo = ChannelRepository(session)
-        channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
-        if not channels:
-            return
-        logger.info("开始刷新 %d 个 YouTube 频道", len(channels))
-        for ch in channels:
-            try:
-                details = await get_channel_details(ch.channel_id)
-                if details:
-                    changed = False
-                    if (
-                        details.get("banner_url")
-                        and ch.banner_url != details["banner_url"]
-                    ):
-                        ch.banner_url = details["banner_url"]
-                        changed = True
-                    if (
-                        details.get("description")
-                        and ch.description != details["description"]
-                    ):
-                        ch.description = details["description"]
-                        changed = True
-                    if (
-                        details.get("twitter_url")
-                        and ch.twitter_url != details["twitter_url"]
-                    ):
-                        ch.twitter_url = details["twitter_url"]
-                        changed = True
-                    if (
-                        details.get("youtube_url")
-                        and ch.youtube_url != details["youtube_url"]
-                    ):
-                        ch.youtube_url = details["youtube_url"]
-                        changed = True
-                    if changed:
-                        ch.updated_at = datetime.now(timezone.utc)
-            except Exception as e:
-                logger.warning("%s: %s", ch.name, e)
-        await session.commit()
-        logger.info("完成")
-
-
-async def daily_backfill_sync() -> None:
-    if not await is_api_available():
-        return
-    api_key = await get_api_key()
-    if not api_key:
-        return
-
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
 
     for ch in channels:
-        async with session_scope() as session:
-            channel_repo = ChannelRepository(session)
-            ch_obj = await channel_repo.get(ch.id)
-            if ch_obj:
-                await sync_channel_videos(session, ch_obj, api_key, full_refresh=False)
+        try:
+            info = await youtube_service.get_channel_info(ch.channel_id)
+            if info:
+                async with session_scope() as session:
+                    channel_repo = ChannelRepository(session)
+                    db_ch = await channel_repo.get(ch.id)
+                    if db_ch:
+                        db_ch.name = info.get("name", db_ch.name)
+                        db_ch.avatar_url = info.get("avatar_url", db_ch.avatar_url)
+                        db_ch.banner_url = info.get("banner_url", db_ch.banner_url)
+                        db_ch.description = info.get("description", db_ch.description)
+                        await session.commit()
+        except Exception as e:
+            logger.warning("刷新频道详情错误 channel_id=%s: %s", ch.channel_id, e)
+
+    logger.info("频道详情刷新完成")
+
+
+async def daily_backfill_sync() -> None:
+    await sync_youtube_videos_full()
 
 
 async def renew_websub() -> None:
-    callback_url = settings.websub_callback_url
-    await subscribe_all_active_channels(callback_url)
+    from app.config import settings
+
+    if (
+        not settings.websub_callback_url
+        or settings.websub_callback_url == "https://your-domain.com/api/websub/youtube"
+    ):
+        return
+
+    try:
+        await subscribe_all_active_channels(settings.websub_callback_url)
+        logger.info("WebSub 订阅刷新完成")
+    except Exception as e:
+        logger.error("WebSub 订阅刷新失败: %s", e)
 
 
 async def scheduled_scrape_all() -> None:
-    from app.services.scraper.sync import scrape_and_sync_all
+    from app.services.scraper import scrape_all_organizations
 
-    async with session_scope() as session:
-        return await scrape_and_sync_all(session)
-
-
-__all__ = [
-    "BaseTask",
-    "IntervalTask",
-    "CronTask",
-    "TaskRegistry",
-    "register_task",
-    "update_bilibili_streams",
-    "update_youtube_streams",
-    "sync_youtube_videos_incremental",
-    "sync_youtube_videos_full",
-    "discover_live_streams_from_videos",
-    "refresh_channel_details",
-    "daily_backfill_sync",
-    "renew_websub",
-    "scheduled_scrape_all",
-]
+    try:
+        await scrape_all_organizations()
+        logger.info("定时爬取完成")
+    except Exception as e:
+        logger.error("定时爬取失败: %s", e)

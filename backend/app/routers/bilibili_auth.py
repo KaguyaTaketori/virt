@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.permissions import has_permission
-from app.services.bilibili_user import bilibili_user_service
 from app.services.bilibili_auth import bilibili_auth_service
+from app.integrations import bilibili_service
 from app.models.models import User
 from app.auth import get_current_user_optional
 from app.deps.base import get_db_session
@@ -28,7 +28,9 @@ async def check_bilibili_permission(
     db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_active_user),
 ):
-    has_perm = await has_permission(current_user.id, PermissionResource.BILIBILI, PermissionAction.ACCESS, db)
+    has_perm = await has_permission(
+        current_user.id, PermissionResource.BILIBILI, PermissionAction.ACCESS, db
+    )
     if not has_perm:
         raise HTTPException(status_code=403, detail="没有 B 站访问权限")
     return current_user
@@ -58,7 +60,7 @@ async def check_qrcode_status(
 
     if result.get("status") == "confirmed":
         credential = result.get("credential", {})
-        await bilibili_user_service.save_credential(
+        await bilibili_service.save_user_credential(
             user_id=current_user.id,
             sessdata=credential.get("sessdata"),
             bili_jct=credential.get("bili_jct"),
@@ -69,5 +71,3 @@ async def check_qrcode_status(
         logger.info("B站凭证已保存到用户账户, user_id={}", current_user.id)
 
     return result
-
-

@@ -6,7 +6,7 @@
     </div>
 
     <!-- 机构筛选 -->
-    <div v-if="orgStore.organizations.length > 0" class="mb-6 flex flex-wrap gap-2 items-center">
+    <div v-if="orgsQuery.data.value?.length" class="mb-6 flex flex-wrap gap-2 items-center">
       <button
         @click="selectedOrgId = null"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition"
@@ -17,7 +17,7 @@
         全部
       </button>
       <button
-        v-for="org in orgStore.organizations"
+        v-for="org in orgsQuery.data.value"
         :key="org.id"
         @click="selectedOrgId = org.id"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition"
@@ -51,8 +51,7 @@
       </button>
     </div>
 
-    <!-- 加载状态 -->
-    <div v-if="loading" class="flex justify-center py-16">
+    <div v-if="channelsQuery.isLoading.value" class="flex justify-center py-16">
       <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-pink-500"></div>
     </div>
 
@@ -101,20 +100,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useOrgStore } from '../stores/org'
-import { useAuthStore } from '../stores/auth'
-import { channelApi, type Channel } from '../api'
+import { useChannels, useOrganizations } from '@/queries'
+import { useAuthStore } from '@/stores/auth'
+import type { Channel } from '@/types'
 
 const router = useRouter()
-const orgStore = useOrgStore()
 const authStore = useAuthStore()
 
-const channels = ref<Channel[]>([])
-const loading = ref(false)
 const selectedOrgId = ref<number | null>(null)
 const selectedPlatform = ref<string>('all')
+
+const channelsQuery = useChannels()
+const orgsQuery = useOrganizations()
+
+const filteredChannels = computed(() => {
+  return (channelsQuery.data.value ?? []).filter(ch => {
+    if (selectedOrgId.value !== null && ch.org_id !== selectedOrgId.value) return false
+    if (selectedPlatform.value !== 'all' && ch.platform !== selectedPlatform.value) return false
+    return true
+  })
+})
 
 const platforms = computed(() => {
   const opts = [{ value: 'all', label: '全部' }]
@@ -125,40 +132,13 @@ const platforms = computed(() => {
   return opts
 })
 
-const filteredChannels = computed(() => {
-  return channels.value.filter(ch => {
-    if (selectedOrgId.value !== null && ch.org_id !== selectedOrgId.value) return false
-    if (selectedPlatform.value !== 'all' && ch.platform !== selectedPlatform.value) return false
-    return true
-  })
-})
-
 function getOrgName(orgId: number | null): string {
   if (!orgId) return '未归属'
-  const org = orgStore.organizations.find(o => o.id === orgId)
+  const org = orgsQuery.data.value?.find(o => o.id === orgId)
   return org?.name || '未知机构'
 }
 
 function goToChannel(id: number) {
   router.push(`/channel/${id}`)
 }
-
-async function fetchChannels() {
-  loading.value = true
-  try {
-    const { data } = await channelApi.getAll()
-    channels.value = data
-  } catch (err) {
-    console.error('Failed to fetch channels:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(async () => {
-  await Promise.all([
-    fetchChannels(),
-    orgStore.fetchOrganizations()
-  ])
-})
 </script>
