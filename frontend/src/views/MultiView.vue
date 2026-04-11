@@ -158,8 +158,6 @@ function handleApplyPreset(id: PresetId) {
 
 // === 生命周期 ===
 onMounted(async () => {
-  store.loadDanmakuSettings()
-  
   // 加载直播数据
   await fetchData()
   
@@ -174,7 +172,6 @@ onMounted(async () => {
   }
 
   // 2. 否则初始化本地缓存
-  store.init()
 })
 </script>
 
@@ -309,7 +306,7 @@ onMounted(async () => {
                 min="12"
                 max="48"
                 class="w-full accent-rose-500"
-                @change="store.saveDanmakuSettings()"
+                
               />
             </div>
 
@@ -322,7 +319,7 @@ onMounted(async () => {
                 max="6"
                 step="0.5"
                 class="w-full accent-rose-500"
-                @change="store.saveDanmakuSettings()"
+                
               />
             </div>
 
@@ -335,7 +332,7 @@ onMounted(async () => {
                 max="1"
                 step="0.1"
                 class="w-full accent-rose-500"
-                @change="store.saveDanmakuSettings()"
+                
               />
             </div>
 
@@ -359,7 +356,7 @@ onMounted(async () => {
                   type="checkbox"
                   v-model="store.danmakuSettings.strokeEnabled"
                   class="w-4 h-4 accent-rose-500"
-                  @change="store.saveDanmakuSettings()"
+                  
                 />
                 <span class="text-sm text-zinc-300">描边</span>
               </label>
@@ -368,7 +365,7 @@ onMounted(async () => {
                   v-model="store.danmakuSettings.strokeColor"
                   type="color"
                   class="w-8 h-8 rounded cursor-pointer"
-                  @change="store.saveDanmakuSettings()"
+                  
                 />
                 <span class="text-xs text-zinc-500">宽度</span>
                 <input
@@ -377,7 +374,7 @@ onMounted(async () => {
                   min="0"
                   max="4"
                   class="w-20 accent-rose-500"
-                  @change="store.saveDanmakuSettings()"
+                  
                 />
               </template>
             </div>

@@ -7,8 +7,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.channels import ChannelRepository, UserChannelRepository
-from app.integrations.youtube import youtube_service
-from app.integrations.bilibili import bilibili_service
+from app.integrations.youtube_client import get_youtube_client
+from app.integrations.bili_client import get_bili_client
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.schemas.schemas import ChannelCreate
 from app.loguru_config import logger
@@ -42,8 +42,9 @@ class ChannelService:
         data = channel_in.model_dump()
 
         if channel_in.platform == Platform.YOUTUBE:
+            yt_client = get_youtube_client()
             resolved_id = channel_in.channel_id
-            info = await youtube_service.get_channel_info(channel_in.channel_id)
+            info = await yt_client.get_channel_info(channel_in.channel_id)
             if info and info.channel_id:
                 resolved_id = info.channel_id
                 data["channel_id"] = resolved_id
@@ -51,7 +52,7 @@ class ChannelService:
                 data["name"] = data.get("name") or info.name
 
             details = (
-                await youtube_service._get_channel_details_fallback(resolved_id)
+                await yt_client._get_channel_info_fallback(resolved_id)
                 if resolved_id
                 else None
             )
@@ -69,12 +70,13 @@ class ChannelService:
         data = channel_in.model_dump()
 
         if channel_in.platform == Platform.BILIBILI:
-            info = await bilibili_service.get_channel_info(channel_in.channel_id)
+            client = get_bili_client()
+            info = await client.get_channel_info(channel_in.channel_id)
             if info:
-                data["avatar_url"] = data.get("avatar_url") or info.avatar_url
-                data["name"] = data.get("name") or info.name
-                if info.bilibili_sign:
-                    data["description"] = info.bilibili_sign
+                data["avatar_url"] = data.get("avatar_url") or info.get("face")
+                data["name"] = data.get("name") or info.get("name")
+                if info.get("sign"):
+                    data["description"] = info.get("sign")
 
         return data
 

@@ -79,7 +79,11 @@ class Settings(BaseSettings):
             return
 
         if self.env.lower() == "prod":
-            return
+            raise RuntimeError(
+                "JWT_SECRET_KEY 未配置或长度不足 32 字符。"
+                "生产环境必须提供高强度密钥：\n"
+                f"  建议值: {secrets.token_hex(32)}"
+            )
 
         object.__setattr__(self, "jwt_secret_key", _DEV_FALLBACK_JWT_SECRET)
 

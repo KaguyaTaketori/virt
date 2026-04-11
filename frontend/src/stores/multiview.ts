@@ -62,24 +62,6 @@ export const useMultiviewStore = defineStore('multiview', () => {
     danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
   }
 
-  // ✅ 移除手动 init/persist，useLocalStorage 自动处理
-  function init() {
-    // useLocalStorage 自动加载，无需手动处理
-  }
-
-  function persist() {
-    // useLocalStorage 自动保存，无需手动处理
-  }
-
-  // ── 向后兼容的存根函数 ─────────────────────────────────────────────────
-  function loadDanmakuSettings() {
-    // useLocalStorage 自动加载
-  }
-
-  function saveDanmakuSettings() {
-    // useLocalStorage 自动保存
-  }
-
   // ── 频道操作 ───────────────────────────────────────────────────────────────
   function addChannel(channel: LayoutChannel) {
     addChannelToTree(tree.value, channel)
@@ -176,9 +158,6 @@ export const useMultiviewStore = defineStore('multiview', () => {
     tree,
     activeChannels,
     danmakuSettings,
-    init,
-    loadDanmakuSettings,
-    saveDanmakuSettings,
     updateDanmakuSettings,
     resetDanmakuSettings,
     addChannel,
