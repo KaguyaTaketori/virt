@@ -151,9 +151,10 @@ class BaseWikiScraper:
             return None
 
         try:
-            from app.services.youtube_channel import resolve_youtube_channel
+            from app.integrations.youtube_client import get_youtube_client
 
-            channel_id = await resolve_youtube_channel(handle)
+            yt_client = get_youtube_client()
+            channel_id = await yt_client.resolve_channel_id(handle)
             return channel_id
         except Exception as e:
             logger.warning(f"Failed to resolve YouTube handle {handle}: {e}")

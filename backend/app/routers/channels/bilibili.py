@@ -8,7 +8,7 @@ from app.deps import get_db_session
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, User
 from app.auth import get_current_user_optional
-from app.integrations import bilibili_service
+from app.integrations.bili_client import BiliClient, bili_client_dep
 
 router = APIRouter()
 
@@ -21,6 +21,7 @@ async def get_channel_bilibili_info(
     db: AsyncSession = Depends(get_db_session),
     ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: User = Depends(get_current_user_optional),
+    client: BiliClient = Depends(bili_client_dep),
 ):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
@@ -46,26 +47,24 @@ async def get_channel_bilibili_info(
         except Exception:
             pass
 
-    if not credential and bilibili_service._create_credential():
-        credential = bilibili_service._create_credential()
+    if not credential and client._create_credential():
+        credential = client._create_credential()
 
     videos = []
     try:
-        videos_raw = await bilibili_service.get_videos(
-            uid, credential, page=1, page_size=30
-        )
+        videos_raw = await client.get_videos(uid, credential, page=1, page_size=30)
         vlist = videos_raw.get("list", {}).get("vlist", [])
-        videos = [bilibili_service._parse_video(v) for v in vlist]
+        videos = [client._parse_video(v) for v in vlist]
     except Exception:
         pass
 
     dynamics, next_offset = [], ""
     if credential:
-        dynamics, next_offset = await bilibili_service.get_dynamics(
+        dynamics, next_offset = await client.get_dynamics(
             uid, credential, offset=dynamics_offset
         )
         if dynamics:
-            await bilibili_service.upsert_dynamics(db, channel_id, dynamics, [])
+            await client.upsert_dynamics(db, channel_id, dynamics, [])
 
     if not dynamics:
         from app.models.models import BilibiliDynamic
@@ -90,7 +89,7 @@ async def get_channel_bilibili_info(
                 }
             )
 
-    info_data = await bilibili_service.get_channel_info(uid, credential)
+    info_data = await client.get_channel_info(uid, credential)
     if info_data:
         if info_data.get("name"):
             channel.name = info_data["name"]

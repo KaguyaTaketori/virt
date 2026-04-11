@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.permissions import has_permission
 from app.services.bilibili_auth import bilibili_auth_service
-from app.integrations import bilibili_service
+from app.integrations.bili_client import BiliClient, bili_client_dep
 from app.models.models import User
 from app.auth import get_current_user_optional
 from app.deps.base import get_db_session
@@ -52,6 +52,7 @@ async def check_qrcode_status(
     session_id: str,
     current_user: User = Depends(check_bilibili_permission),
     db: AsyncSession = Depends(get_db_session),
+    client: BiliClient = Depends(bili_client_dep),
 ):
     """
     检查二维码登录状态，登录成功后自动保存凭证到用户账户
@@ -60,7 +61,7 @@ async def check_qrcode_status(
 
     if result.get("status") == "confirmed":
         credential = result.get("credential", {})
-        await bilibili_service.save_user_credential(
+        await client.save_user_credential(
             user_id=current_user.id,
             sessdata=credential.get("sessdata"),
             bili_jct=credential.get("bili_jct"),

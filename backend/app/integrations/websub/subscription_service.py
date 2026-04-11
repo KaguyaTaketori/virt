@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.loguru_config import logger
 from app.models.models import Channel, WebSubSubscription
 from app.services.api_key_manager import get_api_key, is_api_available
-from app.services.youtube_sync import fetch_and_upsert_single_video
+from app.integrations.youtube_client import get_youtube_client
 from app.crud.session import session_scope
 from app.crud import ChannelRepository
 from app.integrations.websub.hub_client import hub_client
@@ -85,7 +85,8 @@ class WebSubSubscriptionService:
             if not channel:
                 return
 
-            video = await fetch_and_upsert_single_video(
+            yt_client = get_youtube_client()
+            video = await yt_client.fetch_and_upsert_single_video(
                 session, channel, video_id, api_key
             )
 

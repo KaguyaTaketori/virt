@@ -16,6 +16,12 @@ from app.integrations.urls import (
 )
 from app.integrations.bilibili import BilibiliService, bilibili_service
 from app.integrations.youtube import YouTubeService, youtube_service
+from app.integrations.bili_client import BiliClient, get_bili_client, bili_client_dep
+from app.integrations.youtube_client import (
+    YouTubeClient,
+    get_youtube_client,
+    youtube_client_dep,
+)
 from app.integrations.api_client import (
     BaseAPIClient,
     BilibiliAPIClient,
@@ -33,6 +39,12 @@ __all__ = [
     "YouTubeService",
     "bilibili_service",
     "youtube_service",
+    "BiliClient",
+    "get_bili_client",
+    "bili_client_dep",
+    "YouTubeClient",
+    "get_youtube_client",
+    "youtube_client_dep",
     "BaseAPIClient",
     "BilibiliAPIClient",
     "YouTubeAPIClient",

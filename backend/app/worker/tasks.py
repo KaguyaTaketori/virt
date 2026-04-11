@@ -12,7 +12,8 @@ from app.loguru_config import logger
 from app.crud.session import session_scope
 from app.crud import ChannelRepository, StreamRepository, VideoRepository
 from app.models.models import Platform
-from app.integrations import bilibili_service, youtube_service
+from app.integrations.bili_client import get_bili_client
+from app.integrations.youtube_client import get_youtube_client
 from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import QuotaDep, get_quota_dep
@@ -108,6 +109,7 @@ def register_task(task: BaseTask) -> None:
 
 
 async def update_bilibili_streams() -> None:
+    client = get_bili_client()
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.BILIBILI)
@@ -116,7 +118,7 @@ async def update_bilibili_streams() -> None:
         uid_to_ch_id = {ch.channel_id: ch.id for ch in channels}
         uids = list(uid_to_ch_id.keys())
 
-    rooms_data = await bilibili_service.batch_get_live_status(uids)
+    rooms_data = await client.batch_get_live_status(uids)
 
     async with session_scope() as session:
         for uid, room_data in rooms_data.items():
@@ -256,7 +258,8 @@ async def sync_youtube_videos_incremental() -> None:
                 ch_obj = await channel_repo.get(ch.id)
                 if not ch_obj:
                     continue
-                await youtube_service.sync_channel_videos(session, ch_obj, api_key)
+                yt_client = get_youtube_client()
+                await yt_client.sync_channel_videos(session, ch_obj, api_key)
                 await session.commit()
                 logger.info("增量同步完成: %s", ch_obj.name)
                 await asyncio.sleep(0.3)
@@ -331,7 +334,8 @@ async def sync_youtube_videos_full() -> None:
                     if not ch_obj:
                         continue
 
-                    await youtube_service.sync_channel_videos(session, ch_obj, api_key)
+                    yt_client = get_youtube_client()
+                    await yt_client.sync_channel_videos(session, ch_obj, api_key)
                     await set_full_completed(ch.id)
                     await session.commit()
 
@@ -416,9 +420,10 @@ async def refresh_channel_details() -> None:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
 
+    yt_client = get_youtube_client()
     for ch in channels:
         try:
-            info = await youtube_service.get_channel_info(ch.channel_id)
+            info = await yt_client.get_channel_info(ch.channel_id)
             if info:
                 async with session_scope() as session:
                     channel_repo = ChannelRepository(session)
