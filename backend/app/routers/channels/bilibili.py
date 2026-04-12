@@ -61,7 +61,7 @@ async def get_channel_bilibili_info(
     dynamics, next_offset = [], ""
     if credential:
         dynamics, next_offset = await client.get_dynamics(
-            uid, credential, offset=dynamics_offset
+            uid, offset=dynamics_offset, credential=credential
         )
         if dynamics:
             await client.upsert_dynamics(db, channel_id, dynamics, [])

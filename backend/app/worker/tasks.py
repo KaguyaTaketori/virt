@@ -18,6 +18,7 @@ from app.services.youtube_websub import subscribe_all_active_channels
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import QuotaDep, get_quota_dep
 from app.config import settings
+from app.services.scraper.sync import scrape_and_sync_all
 
 
 quota_dep = get_quota_dep()
@@ -460,10 +461,8 @@ async def renew_websub() -> None:
 
 
 async def scheduled_scrape_all() -> None:
-    from app.services.scraper import scrape_all_organizations
-
     try:
-        await scrape_all_organizations()
+        await scrape_and_sync_all()
         logger.info("定时爬取完成")
     except Exception as e:
         logger.error("定时爬取失败: %s", e)

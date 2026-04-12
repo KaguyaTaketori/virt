@@ -22,10 +22,18 @@ async def get_redis() -> Optional[Redis]:
         return None
 
 
+async def _get_channel_repo(session: AsyncSession) -> ChannelRepository:
+    return ChannelRepository(session)
+
+
+async def _get_stream_repo(session: AsyncSession) -> StreamRepository:
+    return StreamRepository(session)
+
+
 async def get_channel_service(
     session: AsyncSession = Depends(get_db_session),
-    channel_repo: ChannelRepository = Depends(lambda s: ChannelRepository(s)),
-    stream_repo: StreamRepository = Depends(lambda s: StreamRepository(s)),
+    channel_repo: ChannelRepository = Depends(_get_channel_repo),
+    stream_repo: StreamRepository = Depends(_get_stream_repo),
     bili_client: BiliClient = Depends(get_bili_client),
     youtube_client: YouTubeClient = Depends(get_youtube_client),
     redis: Optional[Redis] = Depends(get_redis),

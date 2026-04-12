@@ -26,6 +26,15 @@ from app.models.models import Channel, Platform, Video
 from app.schemas.schemas import YTLiveStatus
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.services.quota_guard import can_spend, spend
+from app.constants import (
+    YT_SHORT_MAX_SECS,
+    YT_PREMIERE_SHORT,
+    YT_PREMIERE_MEDIUM,
+    YT_PREMIERE_LONG,
+    YT_LIVE_THRESHOLD,
+    YT_LIVE_STRONG,
+    PREMIERE_POSITIVE_THRESHOLD,
+)
 
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 DEFAULT_USER_AGENT = (
@@ -38,14 +47,6 @@ HTTP_TIMEOUT = 20.0
 
 _column_cache_lock = asyncio.Lock()
 _column_cache: dict[str, FrozenSet[str]] = {}
-
-PREMIERE_POSITIVE_THRESHOLD = 60
-YT_LIVE_STRONG = 14400
-YT_LIVE_THRESHOLD = 7200
-YT_PREMIERE_LONG = 3600
-YT_PREMIERE_MEDIUM = 600
-YT_PREMIERE_SHORT = 120
-YT_SHORT_MAX_SECS = 60
 
 PREMIERE_TITLE_KWS = re.compile(
     r"\b(mv|official video|cover|premiere|trailer|teaser|lyric video)\b|翻唱|首播|原创|动画",
@@ -434,7 +435,7 @@ class YouTubeClient:
         except Exception as e:
             raise YouTubeAPIError(f"获取直播状态失败: {e}", original_error=e)
 
-return YTLiveStatus(status="offline")
+        return YTLiveStatus(status="offline")
 
     async def batch_get_live_status(
         self, channel_ids: list[str], max_concurrent: int = 5

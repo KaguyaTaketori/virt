@@ -265,10 +265,13 @@ class BiliClient:
         return results
 
     async def get_dynamics(
-        self, uid: str, offset: str = ""
+        self,
+        uid: str,
+        offset: str = "",
+        credential: Optional[Credential] = None,
     ) -> tuple[list[BiliDynamic], str]:
         """获取动态列表，带重试"""
-        cred = self._create_credential()
+        cred = credential or self._create_credential()
         if not cred:
             return [], ""
 

@@ -22,8 +22,9 @@ from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
 from app.integrations.youtube_client import get_youtube_client
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.constants import UserChannelStatus
-from app.services.channel_service import ChannelService
+from app.deps import get_channel_service
 from app.integrations.websub.subscription_service import websub_service
+from app.services.channel_service import ChannelService
 
 
 router = APIRouter()
@@ -69,10 +70,9 @@ async def _bg_sync_channel(channel_id: int) -> None:
 async def create_channel(
     channel_in: ChannelCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: ChannelService = Depends(get_channel_service),
     _: User = AdminUser,
 ):
-    service = ChannelService(db)
     db_channel = await service.create_channel(channel_in)
 
     if db_channel.platform == Platform.YOUTUBE:
@@ -164,10 +164,9 @@ async def update_channel(
 @router.delete("/{channel_id}")
 async def delete_channel(
     channel_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    service: ChannelService = Depends(get_channel_service),
     _: User = AdminUser,
 ):
-    service = ChannelService(db)
     await service.delete_channel_completely(channel_id)
     return {"message": "Channel deleted successfully"}
 

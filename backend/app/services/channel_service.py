@@ -26,6 +26,7 @@ class ChannelService:
         bili_client: BiliClient,
         youtube_client: YouTubeClient,
         redis: Optional[Redis] = None,
+        user_channel_repo: Optional[UserChannelRepository] = None,
     ):
         self.session = session
         self.channel_repo = channel_repo
@@ -33,6 +34,7 @@ class ChannelService:
         self.bili_client = bili_client
         self.yt_client = youtube_client
         self.redis = redis
+        self.user_channel_repo = user_channel_repo or UserChannelRepository(session)
 
     async def get_or_404(self, channel_id: int) -> Channel:
         """获取频道，不存在则抛出 404。"""
