@@ -108,8 +108,9 @@ class BiliClient:
             raise
         except Exception as e:
             if _should_retry(e):
-                logger.warning("get_user_info retry: uid={}, error={}", uid, e)
-                raise BilibiliAPIError(f"获取用户信息失败: {e}", original_error=e)
+                raise e
+            if _is_rate_limit_error(e):
+                raise BilibiliAPIError(f"获取用户信息失败(风控): {e}", original_error=e)
             raise BilibiliAPIError(f"获取用户信息失败: {e}", original_error=e)
 
     @retry(**NO_RETRY_CONFIG)
@@ -172,6 +173,10 @@ class BiliClient:
         except BilibiliAPIError:
             raise
         except Exception as e:
+            if _should_retry(e):
+                raise e
+            if _is_rate_limit_error(e):
+                raise BilibiliAPIError(f"获取直播状态失败(风控): {e}", original_error=e)
             raise BilibiliAPIError(f"获取直播状态失败: {e}", original_error=e)
 
     async def _fetch_live_status(self, uid: str, cred: Credential) -> BiliLiveStatus:
@@ -264,6 +269,7 @@ class BiliClient:
         logger.info("Bilibili batch status: %d/%d", len(results), len(uids))
         return results
 
+    @retry(**NO_RETRY_CONFIG)
     async def get_dynamics(
         self,
         uid: str,
@@ -284,7 +290,9 @@ class BiliClient:
             return [p for p in parsed if p is not None], raw_result.get("offset", "")
         except Exception as e:
             if _should_retry(e):
-                logger.warning("get_dynamics retry: uid={}, error={}", uid, e)
+                raise e
+            if _is_rate_limit_error(e):
+                raise BilibiliAPIError(f"获取动态列表失败(风控): {e}", original_error=e)
             raise BilibiliAPIError(f"获取动态列表失败: {e}", original_error=e)
 
     def _parse_dynamic(self, item: dict) -> Optional[BiliDynamic]:
@@ -417,19 +425,21 @@ class BiliClient:
 
     @retry(**NO_RETRY_CONFIG)
     async def get_videos(
-        self, uid: str, page: int = 1, page_size: int = 30
-    ) -> list[BiliVideo]:
-        """获取视频列表，带重试"""
-        cred = self._create_credential()
+        self,
+        uid: str,
+        credential: Optional[Credential] = None,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> dict:
+        cred = credential or self._create_credential()
         if not cred:
-            return []
-
+            return {"list": {"vlist": []}}
         try:
             u = user.User(uid=int(uid), credential=cred)
-            result = await u.get_videos(pn=page, ps=page_size)
-            vlist = result.get("list", {}).get("vlist", [])
-            return [self._parse_video(v) for v in vlist]
+            return await u.get_videos(pn=page, ps=page_size)
         except Exception as e:
+            if _should_retry(e):
+                raise e
             if _is_rate_limit_error(e):
                 raise BilibiliAPIError(f"获取视频列表失败(风控): {e}", original_error=e)
             raise BilibiliAPIError(f"获取视频列表失败: {e}", original_error=e)
