@@ -223,7 +223,6 @@ onMounted(async () => {
       @request-replace="openReplaceModal"
       @clear-channel="store.clearChannel"
       @close-channel="store.closeChannel"
-      @update-tree="store.saveTree"
     />
 
     <!-- 添加视频模态框 -->

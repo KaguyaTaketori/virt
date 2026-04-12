@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, provide, watch, computed } from 'vue'
+import { ref, provide, computed } from 'vue'
 import { LayoutNode, swapNodes } from '@/utils/layoutEngine'
 import SplitPaneNode from './SplitPaneNode.vue'
 import { LayoutGrid } from 'lucide-vue-next'
@@ -17,7 +17,6 @@ const emit = defineEmits<{
   (e: 'clearChannel', nodeId: string): void
   (e: 'closeChannel', nodeId: string): void
   (e: 'toggleDanmaku', channelId: string, enabled: boolean): void
-  (e: 'updateTree'): void
 }>()
 
 // --- 全局拖拽防吞噬机制 ---
@@ -36,9 +35,7 @@ function onDragStart(event: DragEvent, id: string) {
 function onDrop(targetId: string) {
   isDragging.value = false
   if (draggedNodeId.value && draggedNodeId.value !== targetId) {
-    // 交换数据并通知更新
     swapNodes(props.layoutTree, draggedNodeId.value, targetId)
-    emit('updateTree')
   }
   draggedNodeId.value = null
 }
@@ -53,11 +50,6 @@ provide('danmakuSettings', props.danmakuSettings)
 provide('onDragStart', onDragStart)
 provide('onDrop', onDrop)
 provide('toggleDanmaku', (id: string, enabled: boolean) => emit('toggleDanmaku', id, enabled))
-
-// 每次树数据变化（如拖拽调整 n-split 大小）触发外部保存
-watch(() => props.layoutTree, () => {
-  emit('updateTree')
-}, { deep: true })
 </script>
 
 <template>

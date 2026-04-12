@@ -65,24 +65,20 @@ export const useMultiviewStore = defineStore('multiview', () => {
   // ── 频道操作 ───────────────────────────────────────────────────────────────
   function addChannel(channel: LayoutChannel) {
     addChannelToTree(tree.value, channel)
-    persist()
   }
 
   function closeChannel(nodeId: string) {
     removeNodeAndMerge(tree.value, nodeId)
-    persist()
   }
 
   function clearChannel(nodeId: string) {
     _traverseLeaf(tree.value, nodeId, (node) => {
       node.channel = { platform: 'empty', id: `empty-${Date.now()}` }
     })
-    persist()
   }
 
   function replaceChannel(nodeId: string, channel: LayoutChannel) {
     _traverseLeaf(tree.value, nodeId, (node) => { node.channel = channel })
-    persist()
   }
 
   function removeByPlatformId(platform: string, id: string) {
@@ -102,7 +98,6 @@ export const useMultiviewStore = defineStore('multiview', () => {
     const generator = PRESET_GENERATORS[id]
     if (generator) {
       tree.value = generator(activeChannels.value)
-      persist()
     }
   }
 
@@ -131,15 +126,10 @@ export const useMultiviewStore = defineStore('multiview', () => {
 
       tree.value = createEmptyLeaf()
       list.forEach((ch) => addChannelToTree(tree.value, ch))
-      persist()
       return true
     } catch {
       return false
     }
-  }
-
-  function saveTree() {
-    persist()
   }
 
   function addFromVideoId(platform: 'youtube' | 'bilibili', videoId: string) {
@@ -150,7 +140,6 @@ export const useMultiviewStore = defineStore('multiview', () => {
     )
     if (!alreadyAdded) {
       addChannelToTree(tree.value, channel)
-      persist()
     }
   }
 
@@ -168,7 +157,6 @@ export const useMultiviewStore = defineStore('multiview', () => {
     applyPreset,
     copyShareUrl,
     loadFromShareParam,
-    saveTree, 
     addFromVideoId,
   }
 })
