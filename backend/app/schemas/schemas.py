@@ -8,18 +8,15 @@ from app.models.models import Platform, StreamStatus, User
 
 class UserCreate(BaseModel):
     username: str = Field(
-        ..., 
-        min_length=3, 
-        max_length=50, 
+        ...,
+        min_length=3,
+        max_length=50,
         pattern=r"^[a-zA-Z0-9_-]+$",
-        description="用户名只能包含字母、数字、下划线和减号，长度为3-50"
+        description="用户名只能包含字母、数字、下划线和减号，长度为3-50",
     )
     email: Optional[EmailStr] = Field(None, description="可选的合法邮箱地址")
     password: str = Field(
-        ..., 
-        min_length=8, 
-        max_length=128,
-        description="密码长度需在8-128位之间"
+        ..., min_length=8, max_length=128, description="密码长度需在8-128位之间"
     )
 
     @field_validator("password")
@@ -31,7 +28,7 @@ class UserCreate(BaseModel):
             raise ValueError("密码必须包含至少一个小写字母")
         if not re.search(r"[0-9]", value):
             raise ValueError("密码必须包含至少一个数字")
-            
+
         return value
 
 
@@ -96,7 +93,7 @@ class OrganizationBase(BaseModel):
     logo_url: Optional[str] = Field(None, max_length=500)
     website: Optional[str] = Field(None, max_length=200)
     logo_shape: Optional[str] = Field("circle", pattern="^(circle|square)$")
- 
+
     @field_validator("website", mode="before")
     @classmethod
     def validate_website(cls, v: Optional[str]) -> Optional[str]:
@@ -139,7 +136,7 @@ class ChannelBase(BaseModel):
     twitch_url: Optional[str] = Field(None, max_length=200)
     group: Optional[str] = Field(None, max_length=50)
     status: Optional[str] = Field("active", max_length=20)
- 
+
     @field_validator("channel_id", mode="before")
     @classmethod
     def sanitize_channel_id(cls, v: str) -> str:
@@ -151,7 +148,7 @@ class ChannelBase(BaseModel):
         if any(c in v for c in ("../", "..\\", "\x00", "\n", "\r")):
             raise ValueError("channel_id contains invalid characters")
         return v
- 
+
     @field_validator("twitter_url", "youtube_url", "twitch_url", mode="before")
     @classmethod
     def validate_social_urls(cls, v: Optional[str]) -> Optional[str]:
@@ -248,3 +245,75 @@ class PaginatedVideosResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class BiliLiveStatus(BaseModel):
+    video_id: Optional[str] = None
+    title: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    status: str = "offline"
+    viewer_count: int = 0
+    started_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None
+
+
+class BiliUserInfo(BaseModel):
+    mid: int
+    name: str
+    face: str
+    level: int = 0
+    sign: Optional[str] = None
+    sex: Optional[str] = None
+    fans: int = 0
+    attention: int = 0
+    archive_count: Optional[int] = None
+    article_count: int = 0
+    following: int = 0
+    like_num: int = 0
+
+
+class BiliDynamic(BaseModel):
+    dynamic_id: str
+    uid: str
+    uname: str
+    face: Optional[str] = None
+    type: int
+    content_nodes: list[dict] = []
+    images: list[str] = []
+    repost_content: Optional[str] = None
+    timestamp: int = 0
+    url: Optional[str] = None
+    topic: Optional[str] = None
+    is_top: bool = False
+    stat: dict = {}
+
+
+class BiliVideo(BaseModel):
+    bvid: str
+    title: str
+    pic: str
+    aid: int
+    duration: str
+    pubdate: int
+    play: int = 0
+    like: int = 0
+    reply: int = 0
+
+
+class YTLiveStatus(BaseModel):
+    video_id: Optional[str] = None
+    title: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    status: str = "offline"
+    viewer_count: int = 0
+    started_at: Optional[datetime] = None
+
+
+class StreamUpsert(BaseModel):
+    video_id: str
+    title: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    status: str
+    viewer_count: int = 0
+    started_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None

@@ -1,30 +1,36 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Optional
 
+import httpx
 from bilibili_api import user, live, Credential
 from fastapi import Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    retry_if_result,
+)
 
 from app.config import settings
+from app.core.exceptions import BilibiliAPIError
 from app.loguru_config import logger
-from app.models.models import BilibiliDynamic, Platform, Video, User
+from app.models.models import Platform
+from app.schemas.schemas import BiliLiveStatus, BiliUserInfo, BiliDynamic, BiliVideo
 
 REQ_SLEEP_MIN = 1.0
 REQ_SLEEP_MAX = 2.2
-BATCH_SIZE = 15
-BATCH_SLEEP_MIN = 3.0
-BATCH_SLEEP_MAX = 5.0
-BACKOFF_INIT = 2
-BACKOFF_MAX = 60
+MAX_CONCURRENT = 5
+RETRY_MULTIPLIER = 1
+RETRY_MIN = 2
+RETRY_MAX = 10
 MAX_RETRIES = 3
-
 
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_NONE": 0,
@@ -43,10 +49,40 @@ DYNAMIC_TYPE_MAP = {
 }
 
 
+def _is_rate_limit_error(exception: Exception) -> bool:
+    error_msg = str(exception)
+    return "412" in error_msg or "-509" in error_msg
+
+
+def _should_retry(exception: Exception) -> bool:
+    if isinstance(exception, (httpx.ConnectError, httpx.TimeoutException)):
+        return True
+    if _is_rate_limit_error(exception):
+        return True
+    return False
+
+
+RETRY_CONFIG = {
+    "stop": stop_after_attempt(MAX_RETRIES),
+    "wait": wait_exponential(multiplier=RETRY_MULTIPLIER, min=RETRY_MIN, max=RETRY_MAX),
+    "retry": retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException))
+    | retry_if_result(_is_rate_limit_error),
+    "reraise": True,
+}
+
+NO_RETRY_CONFIG = {
+    "stop": stop_after_attempt(MAX_RETRIES),
+    "wait": wait_exponential(multiplier=RETRY_MULTIPLIER, min=1, max=5),
+    "retry": retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+    "reraise": True,
+}
+
+
 class BiliClient:
     """
-    Bilibili API 客户端，使用 tenacity 处理重试。
-    可通过 Depends 注入到 FastAPI 路由。
+    Bilibili API 客户端（去状态化版本）。
+    仅负责网络请求、数据解析、异常处理。
+    不直接操作数据库。
     """
 
     def _create_credential(self) -> Optional[Credential]:
@@ -58,154 +94,161 @@ class BiliClient:
             logger.warning("Failed to create Bilibili credential: {}", e)
             return None
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=BACKOFF_INIT, max=BACKOFF_MAX),
-    )
-    async def get_user_info(
-        self, uid: str, credential: Optional[Credential] = None
-    ) -> Optional[dict]:
+    async def get_user_info(self, uid: str) -> BiliUserInfo:
         """获取用户信息，带重试"""
-        cred = credential or self._create_credential()
-        if not cred:
-            return None
-        u = user.User(uid=int(uid), credential=cred)
+        try:
+            cred = self._create_credential()
+            if not cred:
+                raise BilibiliAPIError("No credential configured", platform="bilibili")
+
+            u = user.User(uid=int(uid), credential=cred)
+            raw = await self._fetch_user_info(u)
+            return self._parse_user_info(raw)
+        except BilibiliAPIError:
+            raise
+        except Exception as e:
+            if _should_retry(e):
+                logger.warning("get_user_info retry: uid={}, error={}", uid, e)
+                raise BilibiliAPIError(f"获取用户信息失败: {e}", original_error=e)
+            raise BilibiliAPIError(f"获取用户信息失败: {e}", original_error=e)
+
+    @retry(**NO_RETRY_CONFIG)
+    async def _fetch_user_info(self, u: user.User) -> dict:
         return await u.get_user_info()
 
-    def parse_user_info(self, raw: dict) -> dict:
-        """解析用户信息"""
+    def _parse_user_info(self, raw: dict) -> BiliUserInfo:
         info = raw.get("info", {})
         detail = raw.get("detail", {})
         stats = raw.get("stat", {})
-        return {
-            "mid": raw.get("mid"),
-            "name": info.get("uname"),
-            "sex": info.get("sex"),
-            "face": info.get("face"),
-            "sign": detail.get("sign"),
-            "level": info.get("level"),
-            "fans": stats.get("follower"),
-            "attention": info.get("attention"),
-            "archive_count": info.get("archive", {}).get("count"),
-            "article_count": info.get("article_count", 0),
-            "following": info.get("following", 0),
-            "like_num": info.get("like_num", 0),
-            "official_verify": info.get("official_verify"),
-        }
+        return BiliUserInfo(
+            mid=raw.get("mid", 0),
+            name=info.get("uname", ""),
+            sex=info.get("sex"),
+            face=info.get("face", ""),
+            sign=detail.get("sign"),
+            level=info.get("level", 0),
+            fans=stats.get("follower", 0),
+            attention=info.get("attention", 0),
+            archive_count=info.get("archive", {}).get("count"),
+            article_count=info.get("article_count", 0),
+            following=info.get("following", 0),
+            like_num=info.get("like_num", 0),
+        )
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=BACKOFF_INIT, max=BACKOFF_MAX),
-    )
-    async def get_live_status(
-        self, uid: str, credential: Optional[Credential] = None
-    ) -> Optional[dict]:
+    async def get_live_status(self, uid: str) -> BiliLiveStatus:
         """获取单个频道的直播状态，带重试"""
-        import asyncio
+        try:
+            cred = self._create_credential()
+            if not cred:
+                return BiliLiveStatus(status="offline")
 
-        cred = credential or self._create_credential()
-        if not cred:
-            return None
+            backoff = RETRY_MIN
+            for attempt in range(MAX_RETRIES):
+                try:
+                    return await self._fetch_live_status(uid, cred)
+                except Exception as e:
+                    if _is_rate_limit_error(e):
+                        logger.warning(
+                            "触发风控 412 uid={}，退避 {}s (attempt {})",
+                            uid,
+                            backoff,
+                            attempt + 1,
+                        )
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff * 2, RETRY_MAX)
+                    else:
+                        logger.warning(
+                            "获取房间信息失败 uid={} attempt={}: {}",
+                            uid,
+                            attempt + 1,
+                            e,
+                        )
+                        await asyncio.sleep(1)
 
-        backoff = BACKOFF_INIT
-        for attempt in range(MAX_RETRIES):
-            try:
-                u = user.User(uid=int(uid), credential=cred)
-                user_info = await u.get_user_info()
+            raise BilibiliAPIError(
+                f"获取直播状态失败，已重试 {MAX_RETRIES} 次: uid={uid}",
+                platform="bilibili",
+            )
+        except BilibiliAPIError:
+            raise
+        except Exception as e:
+            raise BilibiliAPIError(f"获取直播状态失败: {e}", original_error=e)
 
-                live_room = user_info.get("live_room")
-                if not live_room:
-                    return {"status": "offline"}
+    async def _fetch_live_status(self, uid: str, cred: Credential) -> BiliLiveStatus:
+        u = user.User(uid=int(uid), credential=cred)
+        user_info = await u.get_user_info()
 
-                room_id = live_room.get("room_id", 0)
-                if not room_id:
-                    return {"status": "offline"}
+        live_room = user_info.get("live_room")
+        if not live_room:
+            return BiliLiveStatus(status="offline")
 
-                room = live.LiveRoom(room_id=int(room_id), credential=cred)
-                room_info = await room.get_room_info()
+        room_id = live_room.get("room_id", 0)
+        if not room_id:
+            return BiliLiveStatus(status="offline")
 
-                if not room_info:
-                    return {"status": "offline"}
+        room = live.LiveRoom(room_id=int(room_id), credential=cred)
+        room_info = await room.get_room_info()
 
-                live_status = room_info.get("live_status", 0)
-                if live_status == 1:
-                    started_at = None
-                    live_time = room_info.get("live_time")
-                    if live_time:
-                        try:
-                            started_at = datetime.fromtimestamp(
-                                int(live_time), tz=timezone.utc
-                            )
-                        except (ValueError, OSError, TypeError):
-                            pass
+        if not room_info:
+            return BiliLiveStatus(status="offline")
 
-                    return {
-                        "video_id": str(room_info.get("room_id", "")),
-                        "title": room_info.get("title"),
-                        "thumbnail_url": room_info.get("user_cover")
-                        or room_info.get("keyframe"),
-                        "status": "live",
-                        "viewer_count": room_info.get("online", 0),
-                        "started_at": started_at,
-                    }
-                elif live_status == 2:
-                    scheduled_at = None
-                    live_time = room_info.get("live_time")
-                    if live_time:
-                        try:
-                            scheduled_at = datetime.fromtimestamp(
-                                int(live_time), tz=timezone.utc
-                            )
-                        except (ValueError, OSError, TypeError):
-                            pass
+        live_status = room_info.get("live_status", 0)
+        if live_status == 1:
+            started_at = None
+            live_time = room_info.get("live_time")
+            if live_time:
+                try:
+                    started_at = datetime.fromtimestamp(int(live_time), tz=timezone.utc)
+                except (ValueError, OSError, TypeError):
+                    pass
 
-                    return {
-                        "video_id": str(room_info.get("room_id", "")),
-                        "title": room_info.get("title"),
-                        "thumbnail_url": room_info.get("user_cover"),
-                        "status": "upcoming",
-                        "viewer_count": 0,
-                        "scheduled_at": scheduled_at,
-                    }
-
-                return {"status": "offline"}
-
-            except Exception as e:
-                error_msg = str(e)
-                if "412" in error_msg:
-                    logger.warning(
-                        "触发风控 412 uid={}，退避 {}s (attempt {})",
-                        uid,
-                        backoff,
-                        attempt + 1,
+            return BiliLiveStatus(
+                video_id=str(room_info.get("room_id", "")),
+                title=room_info.get("title"),
+                thumbnail_url=room_info.get("user_cover") or room_info.get("keyframe"),
+                status="live",
+                viewer_count=room_info.get("online", 0),
+                started_at=started_at,
+            )
+        elif live_status == 2:
+            scheduled_at = None
+            live_time = room_info.get("live_time")
+            if live_time:
+                try:
+                    scheduled_at = datetime.fromtimestamp(
+                        int(live_time), tz=timezone.utc
                     )
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, BACKOFF_MAX)
-                else:
-                    logger.warning(
-                        "获取房间信息失败 uid={} attempt={}: {}", uid, attempt + 1, e
-                    )
-                    await asyncio.sleep(1)
+                except (ValueError, OSError, TypeError):
+                    pass
 
-        return None
+            return BiliLiveStatus(
+                video_id=str(room_info.get("room_id", "")),
+                title=room_info.get("title"),
+                thumbnail_url=room_info.get("user_cover"),
+                status="upcoming",
+                viewer_count=0,
+                scheduled_at=scheduled_at,
+            )
+
+        return BiliLiveStatus(status="offline")
 
     async def batch_get_live_status(
-        self, uids: list[str], max_concurrent: int = 5
-    ) -> dict[str, Optional[dict]]:
+        self, uids: list[str], max_concurrent: int = MAX_CONCURRENT
+    ) -> dict[str, BiliLiveStatus]:
         """批量获取多个频道的直播状态"""
-        import asyncio
-
         if not uids:
             return {}
 
-        credential = self._create_credential()
         semaphore = asyncio.Semaphore(max_concurrent)
-        results: dict[str, Optional[dict]] = {}
+        results: dict[str, BiliLiveStatus] = {}
 
-        async def fetch_with_limit(uid: str) -> tuple[str, Optional[dict]]:
+        async def fetch_with_limit(uid: str) -> tuple[str, BiliLiveStatus]:
             async with semaphore:
                 await asyncio.sleep(random.uniform(REQ_SLEEP_MIN, REQ_SLEEP_MAX))
-                status = await self.get_live_status(uid, credential)
+                try:
+                    status = await self.get_live_status(uid)
+                except BilibiliAPIError:
+                    status = BiliLiveStatus(status="offline")
                 return uid, status
 
         tasks = [fetch_with_limit(uid) for uid in uids]
@@ -221,26 +264,27 @@ class BiliClient:
         logger.info("Bilibili batch status: %d/%d", len(results), len(uids))
         return results
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=BACKOFF_INIT, max=BACKOFF_MAX),
-    )
     async def get_dynamics(
-        self, uid: str, credential: Optional[Credential], offset: str = ""
-    ) -> tuple[list[dict], str]:
+        self, uid: str, offset: str = ""
+    ) -> tuple[list[BiliDynamic], str]:
         """获取动态列表，带重试"""
-        if not credential:
+        cred = self._create_credential()
+        if not cred:
             return [], ""
 
-        u = user.User(uid=int(uid), credential=credential)
-        raw_result = await u.get_dynamics_new(offset=offset)
-        raw_items = raw_result.get("items", [])
+        try:
+            u = user.User(uid=int(uid), credential=cred)
+            raw_result = await u.get_dynamics_new(offset=offset)
+            raw_items = raw_result.get("items", [])
 
-        parsed = [p for item in raw_items if (p := self._parse_dynamic(item))]
+            parsed = [self._parse_dynamic(item) for item in raw_items if item]
+            return [p for p in parsed if p is not None], raw_result.get("offset", "")
+        except Exception as e:
+            if _should_retry(e):
+                logger.warning("get_dynamics retry: uid={}, error={}", uid, e)
+            raise BilibiliAPIError(f"获取动态列表失败: {e}", original_error=e)
 
-        return parsed, raw_result.get("offset", "")
-
-    def _parse_dynamic(self, item: dict) -> Optional[dict]:
+    def _parse_dynamic(self, item: dict) -> Optional[BiliDynamic]:
         """解析动态项"""
         try:
             modules = item.get("modules") or {}
@@ -344,21 +388,21 @@ class BiliClient:
 
                 repost_content = f"@{o_author}: {o_text}"
 
-            return {
-                "dynamic_id": dynamic_id,
-                "url": jump_url,
-                "uid": uid,
-                "uname": uname,
-                "face": face,
-                "type": dtype,
-                "timestamp": timestamp,
-                "content_nodes": content_nodes,
-                "images": images,
-                "repost_content": repost_content,
-                "stat": stat,
-                "topic": topic_name,
-                "is_top": is_top,
-            }
+            return BiliDynamic(
+                dynamic_id=dynamic_id,
+                uid=uid,
+                uname=uname,
+                face=face,
+                type=dtype,
+                content_nodes=content_nodes,
+                images=images,
+                repost_content=repost_content,
+                timestamp=timestamp,
+                url=jump_url,
+                topic=topic_name,
+                is_top=is_top,
+                stat=stat,
+            )
 
         except Exception as e:
             logger.exception(
@@ -368,224 +412,50 @@ class BiliClient:
             )
             return None
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=BACKOFF_INIT, max=BACKOFF_MAX),
-    )
+    @retry(**NO_RETRY_CONFIG)
     async def get_videos(
-        self,
-        uid: str,
-        credential: Optional[Credential],
-        page: int = 1,
-        page_size: int = 30,
-    ) -> dict:
+        self, uid: str, page: int = 1, page_size: int = 30
+    ) -> list[BiliVideo]:
         """获取视频列表，带重试"""
-        import asyncio
-
-        cred = credential or self._create_credential()
+        cred = self._create_credential()
         if not cred:
-            return {"list": {"vlist": [], "count": 0}}
+            return []
 
-        backoff = BACKOFF_INIT
-        for attempt in range(MAX_RETRIES):
-            try:
-                u = user.User(uid=int(uid), credential=cred)
-                return await u.get_videos(pn=page, ps=page_size)
-            except Exception as e:
-                if "412" in str(e):
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, BACKOFF_MAX)
-                else:
-                    logger.error("get_videos uid={} error: {}", uid, e)
-                    raise
-        raise RuntimeError(f"uid={uid} 视频获取重试耗尽")
+        try:
+            u = user.User(uid=int(uid), credential=cred)
+            result = await u.get_videos(pn=page, ps=page_size)
+            vlist = result.get("list", {}).get("vlist", [])
+            return [self._parse_video(v) for v in vlist]
+        except Exception as e:
+            if _is_rate_limit_error(e):
+                raise BilibiliAPIError(f"获取视频列表失败(风控): {e}", original_error=e)
+            raise BilibiliAPIError(f"获取视频列表失败: {e}", original_error=e)
 
-    def _parse_video(self, v: dict) -> dict:
-        """解析视频项"""
-        return {
-            "bvid": v.get("bvid"),
-            "title": v.get("title"),
-            "pic": v.get("pic"),
-            "aid": v.get("aid"),
-            "duration": v.get("length"),
-            "pubdate": v.get("created"),
-            "play": v.get("play"),
-            "like": (v.get("stat") or {}).get("like", 0),
-            "reply": v.get("comment", 0),
-        }
+    def _parse_video(self, v: dict) -> BiliVideo:
+        return BiliVideo(
+            bvid=v.get("bvid", ""),
+            title=v.get("title", ""),
+            pic=v.get("pic", ""),
+            aid=v.get("aid", 0),
+            duration=v.get("length", ""),
+            pubdate=v.get("created", 0),
+            play=v.get("play", 0),
+            like=(v.get("stat") or {}).get("like", 0),
+            reply=v.get("comment", 0),
+        )
 
-    async def upsert_dynamics(
-        self,
-        db: AsyncSession,
-        channel_id: int,
-        parsed_dynamics: list[dict],
-        raw_dynamics: list[dict],
-    ) -> None:
-        """将动态数据写入数据库"""
-        if not parsed_dynamics:
-            return
-
-        from app.database import upsert_batch, _insert_fn
-
-        batch_values = []
-        for parsed, raw in zip(parsed_dynamics, raw_dynamics):
-            dynamic_id = parsed.get("dynamic_id")
-            if not dynamic_id:
-                continue
-
-            ts = parsed.get("timestamp")
-            batch_values.append(
-                {
-                    "channel_id": channel_id,
-                    "dynamic_id": str(dynamic_id),
-                    "uid": parsed.get("uid"),
-                    "uname": parsed.get("uname"),
-                    "face": parsed.get("face"),
-                    "type": parsed.get("type"),
-                    "content_nodes": json.dumps(
-                        parsed.get("content_nodes", []), ensure_ascii=False
-                    ),
-                    "images": json.dumps(parsed.get("images", []), ensure_ascii=False),
-                    "repost_content": parsed.get("repost_content"),
-                    "timestamp": ts,
-                    "published_at": datetime.fromtimestamp(ts, tz=timezone.utc)
-                    if ts
-                    else None,
-                    "url": parsed.get("url"),
-                    "stat": json.dumps(parsed.get("stat", {}), ensure_ascii=False),
-                    "topic": parsed.get("topic"),
-                    "is_top": parsed.get("is_top", False),
-                    "raw_data": json.dumps(raw, ensure_ascii=False),
-                    "fetched_at": datetime.now(timezone.utc),
-                }
-            )
-
-        if batch_values:
-            stmt = _insert_fn(BilibiliDynamic)
-            update_cols = {
-                "uname": stmt.excluded.uname,
-                "face": stmt.excluded.face,
-                "stat": stmt.excluded.stat,
-                "is_top": stmt.excluded.is_top,
-                "content_nodes": stmt.excluded.content_nodes,
-                "fetched_at": stmt.excluded.fetched_at,
-            }
-            await upsert_batch(
-                db, BilibiliDynamic, ["dynamic_id"], batch_values, update_cols
-            )
-            await db.commit()
-
-    async def upsert_videos(
-        self, db: AsyncSession, channel_id: int, videos: list[dict]
-    ) -> None:
-        """将视频数据写入数据库"""
-        if not videos:
-            return
-
-        from app.database import upsert_batch, _insert_fn
-
-        batch_values = []
-        for v in videos:
-            bvid = v.get("bvid")
-            if not bvid:
-                continue
-
-            batch_values.append(
-                {
-                    "channel_id": channel_id,
-                    "platform": Platform.BILIBILI,
-                    "video_id": bvid,
-                    "title": v.get("title", ""),
-                    "thumbnail_url": v.get("pic", ""),
-                    "duration": v.get("length", ""),
-                    "view_count": v.get("play", 0),
-                    "published_at": datetime.fromtimestamp(v["created"])
-                    if v.get("created")
-                    else None,
-                    "status": "archive",
-                }
-            )
-
-        if batch_values:
-            stmt = _insert_fn(Video)
-            update_cols = {
-                "title": stmt.excluded.title,
-                "thumbnail_url": stmt.excluded.thumbnail_url,
-                "view_count": stmt.excluded.view_count,
-            }
-            await upsert_batch(
-                db, Video, ["channel_id", "video_id"], batch_values, update_cols
-            )
-            await db.commit()
-
-    async def get_user_credential(
-        self, user_id: int, db: AsyncSession
-    ) -> Optional[dict]:
-        """获取用户的 Bilibili 凭证"""
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user or not user.bilibili_sessdata:
-            return None
-
-        return {
-            "sessdata": user.bilibili_sessdata,
-            "bili_jct": user.bilibili_bili_jct,
-            "buvid3": user.bilibili_buvid3,
-            "dedeuserid": user.bilibili_dedeuserid,
-        }
-
-    async def save_user_credential(
-        self,
-        user_id: int,
-        sessdata: str,
-        bili_jct: str,
-        buvid3: str,
-        dedeuserid: Optional[str],
-        db: AsyncSession,
-    ) -> bool:
-        """保存用户的 Bilibili 凭证"""
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            return False
-
-        user.bilibili_sessdata = sessdata
-        user.bilibili_bili_jct = bili_jct
-        user.bilibili_buvid3 = buvid3
-        user.bilibili_dedeuserid = dedeuserid
-
-        await db.commit()
-        return True
-
-    async def delete_user_credential(self, user_id: int, db: AsyncSession) -> bool:
-        """删除用户的 Bilibili 凭证"""
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            return False
-
-        user.bilibili_sessdata = None
-        user.bilibili_bili_jct = None
-        user.bilibili_buvid3 = None
-        user.bilibili_dedeuserid = None
-
-        await db.commit()
-        return True
-
-    async def get_channel_info(
-        self, uid: str, credential: Optional[Credential] = None
-    ) -> Optional[dict]:
+    async def get_channel_info(self, uid: str) -> Optional[BiliUserInfo]:
         """获取频道基本信息"""
-        cred = credential or self._create_credential()
+        cred = self._create_credential()
         if not cred:
             return None
 
         try:
             u = user.User(uid=int(uid), credential=cred)
             info = await u.get_user_info()
-            return self.parse_user_info(info)
+            return self._parse_user_info(info)
         except Exception as e:
-            logger.error("Failed to get user info, uid={}: {}", uid, e)
+            logger.error("Failed to get channel info, uid={}: {}", uid, e)
             return None
 
 

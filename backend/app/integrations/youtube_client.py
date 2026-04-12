@@ -11,13 +11,21 @@ import httpx
 from fastapi import Depends
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from app.config import settings
+from app.core.exceptions import YouTubeAPIError
 from app.database import upsert
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, Video
+from app.schemas.schemas import YTLiveStatus
 from app.services.api_key_manager import get_api_key, is_api_available
+from app.services.quota_guard import can_spend, spend
 
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 DEFAULT_USER_AGENT = (
@@ -379,11 +387,19 @@ class YouTubeClient:
 
         return None
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=30))
-    async def get_live_status(self, channel_id: str) -> Optional[dict]:
-        """获取单个频道的直播状态，带重试"""
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+        reraise=True,
+    )
+    async def get_live_status(self, channel_id: str) -> YTLiveStatus:
+        """获取单个频道的直播状态，带重试和 Quota 管理"""
         if not await is_api_available():
-            return None
+            raise YouTubeAPIError("API quota not available", platform="youtube")
+
+        if not await can_spend("search.list", 1):
+            raise YouTubeAPIError("Quota exhausted", platform="youtube")
 
         api_key = await get_api_key()
         try:
@@ -402,34 +418,27 @@ class YouTubeClient:
                     data = resp.json()
                     items = data.get("items", [])
                     if items:
+                        await spend("search.list", 1)
                         item = items[0]
                         snippet = item.get("snippet", {})
-                        return {
-                            "video_id": item.get("id", {}).get("videoId"),
-                            "title": snippet.get("title"),
-                            "thumbnail_url": snippet.get("thumbnails", {})
+                        return YTLiveStatus(
+                            video_id=item.get("id", {}).get("videoId"),
+                            title=snippet.get("title"),
+                            thumbnail_url=snippet.get("thumbnails", {})
                             .get("high", {})
                             .get("url"),
-                            "status": "live",
-                            "viewer_count": 0,
-                            "started_at": self._parse_datetime(
-                                snippet.get("publishedAt")
-                            ),
-                        }
+                            status="live",
+                            viewer_count=0,
+                            started_at=self._parse_datetime(snippet.get("publishedAt")),
+                        )
         except Exception as e:
-            logger.warning("YouTube live status error: %s", e)
+            raise YouTubeAPIError(f"获取直播状态失败: {e}", original_error=e)
 
-        return {
-            "video_id": None,
-            "title": None,
-            "thumbnail_url": None,
-            "status": "offline",
-            "viewer_count": 0,
-        }
+return YTLiveStatus(status="offline")
 
     async def batch_get_live_status(
         self, channel_ids: list[str], max_concurrent: int = 5
-    ) -> dict[str, Optional[dict]]:
+    ) -> dict[str, YTLiveStatus]:
         """批量获取多个频道的直播状态"""
         import random
 
@@ -437,12 +446,15 @@ class YouTubeClient:
             return {}
 
         semaphore = asyncio.Semaphore(max_concurrent)
-        results: dict[str, Optional[dict]] = {}
+        results: dict[str, YTLiveStatus] = {}
 
-        async def fetch_with_limit(cid: str) -> tuple[str, Optional[dict]]:
+        async def fetch_with_limit(cid: str) -> tuple[str, YTLiveStatus]:
             async with semaphore:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
-                status = await self.get_live_status(cid)
+                try:
+                    status = await self.get_live_status(cid)
+                except YouTubeAPIError:
+                    status = YTLiveStatus(status="offline")
                 return cid, status
 
         tasks = [fetch_with_limit(cid) for cid in channel_ids]
@@ -450,7 +462,7 @@ class YouTubeClient:
 
         for item in completed:
             if isinstance(item, Exception):
-                logger.error("Batch fetch error: %s", item)
+                logger.error("Batch fetch error: {}", item)
                 continue
             cid, status = item
             results[cid] = status

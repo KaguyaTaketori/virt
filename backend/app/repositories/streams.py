@@ -119,3 +119,36 @@ class StreamRepository(BaseRepository[Stream]):
         )
         result = await self.session.execute(query)
         return result.rowcount
+
+    def _normalize_status(self, data: dict[str, Any]) -> dict[str, Any]:
+        """规范化 status 字段为枚举值"""
+        result = data.copy()
+        status_str = result.get("status")
+        if status_str and isinstance(status_str, str):
+            try:
+                result["status"] = StreamStatus(status_str)
+            except ValueError:
+                result["status"] = StreamStatus.OFFLINE
+        return result
+
+    async def upsert_atomic(
+        self,
+        channel_id: int,
+        video_id: str,
+        **data,
+    ) -> tuple[Stream, bool]:
+        """原子化 upsert：查找或创建 Stream"""
+        data = self._normalize_status(data)
+
+        existing = await self.get_by_video_id(channel_id, video_id)
+        if existing:
+            for k, v in data.items():
+                if v is not None and hasattr(existing, k):
+                    setattr(existing, k, v)
+            await self.session.flush()
+            return existing, False
+
+        stream = Stream(channel_id=channel_id, video_id=video_id, **data)
+        self.session.add(stream)
+        await self.session.flush()
+        return stream, True

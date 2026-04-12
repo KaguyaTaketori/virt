@@ -25,6 +25,7 @@ from app.deps.guards import (
     validate_websub_callback,
 )
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
+from app.deps.integrations import get_channel_service, ChannelService
 
 __all__ = [
     "get_db_session",
@@ -49,4 +50,6 @@ __all__ = [
     "validate_websub_callback",
     "PlatformContext",
     "PlatformGuardDep",
+    "get_channel_service",
+    "ChannelService",
 ]
