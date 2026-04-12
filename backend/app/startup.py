@@ -16,7 +16,7 @@ from app.database import AsyncSessionFactory, create_all_tables, engine, Base
 from app.services.redis_client import RedisClient
 from app.services.token_blacklist import token_blacklist
 from app.services.bilibili_auth import bilibili_auth_service
-from app.services.youtube_websub import subscribe_all_active_channels
+from app.integrations.websub.subscription_service import websub_service
 from app.deps import init_deps
 from app.integrations.api_client import BaseAPIClient
 
@@ -69,10 +69,10 @@ async def init_redis() -> bool:
 
 
 async def init_token_blacklist() -> None:
-    """预热 Token 黑名单（SQLite 持久化 + 内存缓存）。"""
-    async with AsyncSessionFactory() as session:
-        await token_blacklist.warm_up(session)
-
+    """预热 Token 黑名单（从 Redis 加载）。"""
+    redis = await RedisClient.get_client()
+    await token_blacklist.init(redis)
+    await token_blacklist.warm_up()
     logger.info("Token blacklist warmed up")
 
 
@@ -89,19 +89,9 @@ async def init_websub() -> None:
 
     if not has_subscriptions:
         try:
-            await subscribe_all_active_channels(callback_url)
+            await websub_service.subscribe_all_active(callback_url)
         except Exception as e:
             logger.error("首次 WebSub 订阅失败（不影响启动）: {}", e)
-
-
-async def _cleanup_blacklist() -> None:
-    try:
-        async with AsyncSessionFactory() as session:
-            count = await token_blacklist.cleanup_expired(session)
-            if count:
-                logger.info("Cleaned {} expired blacklist entries", count)
-    except Exception as e:
-        logger.error("Blacklist cleanup error: {}", e)
 
 
 async def register_scheduled_jobs() -> None:
@@ -109,12 +99,6 @@ async def register_scheduled_jobs() -> None:
     bilibili_auth_service.start_cleanup_task()
 
     await scheduler_service.start()
-    scheduler_service.add_cron_job(
-        _cleanup_blacklist,
-        job_id="blacklist_cleanup",
-        hour=3,
-        minute=30,
-    )
     logger.info("Scheduler started with all jobs registered")
 
 

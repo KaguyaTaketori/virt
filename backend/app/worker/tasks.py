@@ -14,7 +14,7 @@ from app.repositories import ChannelRepository, StreamRepository, VideoRepositor
 from app.models.models import Platform
 from app.integrations.bili_client import get_bili_client
 from app.integrations.youtube_client import get_youtube_client
-from app.services.youtube_websub import subscribe_all_active_channels
+from app.integrations.websub.subscription_service import websub_service
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import QuotaDep, get_quota_dep
 from app.config import settings
@@ -454,7 +454,7 @@ async def renew_websub() -> None:
         return
 
     try:
-        await subscribe_all_active_channels(settings.websub_callback_url)
+        await websub_service.subscribe_all_active(settings.websub_callback_url)
         logger.info("WebSub 订阅刷新完成")
     except Exception as e:
         logger.error("WebSub 订阅刷新失败: %s", e)

@@ -44,11 +44,9 @@ export const DEFAULT_DANMAKU_SETTINGS: DanmakuSettings = {
 }
 
 export const useMultiviewStore = defineStore('multiview', () => {
-  // ✅ 使用 VueUse useLocalStorage 自动持久化
   const tree = useLocalStorage<LayoutNode>(STORAGE_KEY, createEmptyLeaf())
   const activeChannels = computed(() => getActiveChannels(tree.value))
 
-  // ✅ 使用 VueUse useLocalStorage 自动持久化
   const danmakuSettings = useLocalStorage<DanmakuSettings>(
     DANMAKU_SETTINGS_KEY,
     DEFAULT_DANMAKU_SETTINGS,

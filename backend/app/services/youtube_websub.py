@@ -16,12 +16,6 @@ router = APIRouter(prefix="/api/websub", tags=["websub"])
 _TOPIC_BASE = ".xml?channel_id="
 
 
-# Backward compatibility alias
-async def subscribe_all_active_channels(callback_url: str, secret: str = "") -> None:
-    """Legacy alias for subscribe_all_active"""
-    await websub_service.subscribe_all_active(callback_url, secret=secret)
-
-
 @router.get("/youtube", response_class=PlainTextResponse)
 async def websub_verify(
     hub_mode: str = Query(..., alias="hub.mode"),

@@ -1,22 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { 
-  Menu, ChevronUp, ChevronDown, 
-  Share2, Captions, Settings, LayoutTemplate, Maximize2,
-  RefreshCw, Star, CirclePlus
+  Menu, ChevronUp, ChevronDown, Share2, 
+  Captions, Settings, RefreshCw 
 } from 'lucide-vue-next'
-import { NPopover, NTooltip } from 'naive-ui'
 import type { Stream } from '@/api'
 import type { LayoutChannel } from '@/utils/layoutEngine'
-import { type PresetId, PRESET_META as GLOBAL_PRESET_META } from '@/utils/presetLayouts'
+import type { PresetId } from '@/utils/presetLayouts'
 
+// 导入拆分的子组件
+import ToolbarGroupSelect from './header/ToolbarGroupSelect.vue'
+import ToolbarMemberList from './header/ToolbarMemberList.vue'
+import ToolbarPresetMenu from './header/ToolbarPresetMenu.vue'
+
+// 定义类型
 export type GroupType = 'favorites' | number
 
 interface Props {
   isCollapsed: boolean
   channels: LayoutChannel[]
   showDanmaku: boolean
-  selectedGroup: GroupType | null // 修改点：对齐类型
+  selectedGroup: GroupType | null
   organizationName: string | null
   groupMembers: Stream[]
   isRefreshing: boolean
@@ -40,253 +43,125 @@ const emit = defineEmits<{
   (e: 'addMember', member: Stream): void
   (e: 'openGroupSelector'): void
 }>()
-
-const LOCAL_ICONS: Record<PresetId, string> = {
-  '1-s': '1',
-  '2-h': '2h',
-  '2-v': '2v',
-  '3-1+2': '3-12',
-  '3-cols': '3c',
-  '4-grid': '4g',
-  '4-1+3': '4-13'
-}
-
-const currentRecommendations = computed(() => {
-  const count = props.channels.length
-  let ids: PresetId[] = []
-  
-  if (count <= 1) ids = ['1-s']
-  else if (count === 2) ids = ['2-h', '2-v']
-  else if (count === 3) ids = ['3-1+2', '3-cols']
-  else ids = ['4-grid', '4-1+3']
-
-  return ids.map(id => ({ 
-    id, 
-    label: GLOBAL_PRESET_META[id].label, 
-    icon: LOCAL_ICONS[id] 
-  }))
-})
-
-const groupLabel = computed(() => {
-  if (props.selectedGroup === 'favorites') return '收藏夹'
-  if (typeof props.selectedGroup === 'number') return props.organizationName || `机构 ${props.selectedGroup}`
-  return '请选择分组'
-})
-
-function formatLiveDuration(startedAt: string | null): string {
-  if (!startedAt) return ''
-  const start = new Date(startedAt)
-  const now = new Date()
-  const diffMs = now.getTime() - start.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  
-  if (diffMins < 60) {
-    return `${diffMins}m`
-  }
-  const hours = Math.floor(diffMins / 60)
-  return `${hours}h`
-}
-
-function handleSelectGroup(group: GroupType) {
-  emit('selectGroup', group)
-}
-
-function handleRefresh() {
-  emit('refresh')
-}
-
-function handleAddMember(member: Stream) {
-  emit('addMember', member)
-}
 </script>
 
 <template>
-  <div class="relative">
-    <!-- 展开手柄 -->
-    <div class="absolute top-0 left-0 right-0 h-3 z-40 cursor-pointer" @click="emit('toggleCollapse')" />
+  <div class="relative w-full select-none">
+    <!-- 顶部感应区：点击可快速切换折叠状态 -->
+    <div 
+      class="absolute top-0 left-0 right-0 h-1.5 z-50 cursor-pointer hover:bg-rose-500/20 transition-colors" 
+      @click="emit('toggleCollapse')" 
+    />
 
+    <!-- 1. 展开状态的工具栏 -->
     <Transition name="slide-down">
-      <header v-if="!isCollapsed" class="flex items-center gap-2 px-3 h-14 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 z-30">
-        <button @click="emit('toggleDrawer')" class="icon-btn"><Menu class="w-4 h-4" /></button>
-        <div class="w-px h-5 bg-zinc-700 mx-1" />
+      <header 
+        v-if="!isCollapsed" 
+        class="flex items-center gap-2 px-3 h-14 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 z-40 overflow-hidden"
+      >
+        <!-- 基础导航操作 -->
+        <div class="flex items-center shrink-0">
+          <button @click="emit('toggleDrawer')" class="icon-btn" title="打开侧边栏">
+            <Menu class="w-4 h-4" />
+          </button>
+          <div class="w-px h-5 bg-zinc-800 mx-1.5" />
+        </div>
 
-        <!-- 分组选择 Popover -->
-        <n-popover trigger="click" placement="bottom-start" :show-arrow="false">
-          <template #trigger>
-            <button class="group-select-btn">
-              <span v-if="selectedGroup">{{ groupLabel }}</span>
-              <span v-else>选择分组</span>
-              <span v-if="selectedGroup" class="text-zinc-500">({{ groupMembers.length }})</span>
-            </button>
-          </template>
-          
-          <div class="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
-            <button
-              @click="handleSelectGroup('favorites')"
-              class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors border-b border-zinc-800"
-            >
-              <Star class="w-4 h-4 text-amber-400" />
-              <span>收藏夹</span>
-            </button>
-            <button
-              @click="emit('openGroupSelector')"
-              class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
-            >
-              <div class="w-4 h-4 rounded-full border border-zinc-500" />
-              <span>全部</span>
-            </button>
-          </div>
-        </n-popover>
+        <!-- 子组件 A: 分组选择 -->
+        <ToolbarGroupSelect 
+          :selected-group="selectedGroup"
+          :organization-name="organizationName"
+          :members-count="groupMembers.length"
+          @select="g => emit('selectGroup', g)"
+          @open-selector="emit('openGroupSelector')"
+        />
 
         <!-- 刷新按钮 -->
         <button
           @click="emit('refresh')"
-          class="shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
-          :class="{ 'animate-spin': isRefreshing }"
+          class="shrink-0 p-2 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all active:scale-90"
+          :class="{ 'animate-spin text-rose-500': isRefreshing }"
           :disabled="isRefreshing"
+          title="刷新成员状态"
         >
           <RefreshCw class="w-4 h-4" />
         </button>
 
-        <!-- 头像栏 -->
-        <div class="flex items-center gap-2 flex-1 mx-2 min-w-0">
-          <!-- 头像滚动区域 -->
-          <div class="avatar-bar flex-1 min-w-0 flex items-center">
-            <div class="avatar-list flex items-center gap-2">
-              <n-tooltip
-                v-for="member in groupMembers.slice(0, 10)"
-                :key="member.id"
-                placement="bottom"
-                :delay="300"
-              >
-                <template #trigger>
-                  <button
-                    @click="handleAddMember(member)"
-                    class="avatar-wrapper relative shrink-0"
-                  >
-                    <img
-                      v-if="member.channel_avatar"
-                      :src="member.channel_avatar"
-                      class="avatar-img"
-                      referrerpolicy="no-referrer"
-                    />
-                    <div v-else class="avatar-placeholder">
-                      {{ member.channel_name?.charAt(0) || '?' }}
-                    </div>
-                    <span v-if="member.started_at" class="avatar-badge">
-                      {{ formatLiveDuration(member.started_at) }}
-                    </span>
-                  </button>
-                </template>
-                <span class="text-xs">{{ member.channel_name }}</span>
-              </n-tooltip>
+        <!-- 子组件 B: 正在直播的成员头像列表 (占据中间剩余空间) -->
+        <ToolbarMemberList 
+          :members="groupMembers"
+          :has-selected-group="!!selectedGroup"
+          @add="m => emit('addMember', m)"
+          @open-add-modal="emit('openAddModal')"
+        />
 
-              <!-- 添加按钮 (在头像旁边) -->
-              <button @click="emit('openAddModal')" class="add-icon-btn shrink-0 ml-1">
-                <CirclePlus class="w-5 h-5" />
-              </button>
+        <!-- 右侧工具组 -->
+        <div class="flex items-center gap-1 shrink-0 ml-auto">
+          <!-- 子组件 C: 布局预设菜单 -->
+          <ToolbarPresetMenu 
+            :channel-count="channels.length"
+            @apply="p => emit('applyPreset', p)"
+            @open-library="emit('openPresetLibrary')"
+          />
 
-              <div
-                v-if="!selectedGroup"
-                class="text-xs text-zinc-600 italic"
-              >
-                从上方选择分组查看直播成员
-              </div>
-              <div
-                v-else-if="groupMembers.length === 0"
-                class="text-xs text-zinc-600 italic"
-              >
-                该分组暂无直播
-              </div>
-            </div>
-          </div>
-        </div>
+          <div class="w-px h-5 bg-zinc-800 mx-1" />
 
-        <div class="flex items-center gap-0.5 shrink-0">
-          <!-- 智能布局预设 Popover -->
-          <n-popover trigger="click" placement="bottom" scrollable style="background-color: #18181b; border: 1px solid #3f3f46; color: white; width: 240px;">
-            <template #trigger>
-              <button class="icon-btn flex items-center gap-1 hover:text-rose-400">
-                <LayoutTemplate class="w-4 h-4" />
-                <span class="text-[10px]">布局预设</span>
-              </button>
-            </template>
-            
-            <div class="p-2">
-              <div class="text-[10px] text-zinc-500 font-bold mb-3 uppercase tracking-wider">适合当前 ({{ channels.length }}) 本视频</div>
-              
-              <div class="flex flex-col gap-1.5">
-                <button 
-                  v-for="opt in currentRecommendations" 
-                  :key="opt.id" 
-                  @click="emit('applyPreset', opt.id)"
-                  class="preset-item-btn group"
-                >
-                  <!-- 简易布局图标预览 -->
-                  <div class="w-10 h-6 bg-zinc-900 border border-zinc-700 rounded overflow-hidden flex p-0.5 gap-0.5">
-                    <template v-if="opt.icon === '2h'"><div class="flex-1 bg-zinc-600"></div><div class="flex-1 bg-zinc-600"></div></template>
-                    <template v-if="opt.icon === '3-12'"><div class="w-[60%] bg-rose-500/40"></div><div class="flex-1 flex flex-col gap-0.5"><div class="flex-1 bg-zinc-600"></div><div class="flex-1 bg-zinc-600"></div></div></template>
-                    <template v-if="opt.icon === '4g'"><div class="flex-1 flex flex-col gap-0.5"><div class="flex-1 bg-zinc-600"></div><div class="flex-1 bg-zinc-600"></div></div><div class="flex-1 flex flex-col gap-0.5"><div class="flex-1 bg-zinc-600"></div><div class="flex-1 bg-zinc-600"></div></div></template>
-                    <template v-else><div class="flex-1 bg-zinc-600"></div></template>
-                  </div>
-                  <span class="text-xs group-hover:text-white">{{ opt.label }}</span>
-                </button>
-              </div>
+          <!-- 功能开关 -->
+          <button 
+            @click="emit('update:showDanmaku', !showDanmaku)" 
+            class="icon-btn" 
+            :class="{ 'text-rose-500 bg-rose-500/10': showDanmaku }"
+            title="显示/隐藏弹幕"
+          >
+            <Captions class="w-4 h-4" />
+          </button>
 
-              <div class="h-px bg-zinc-800 my-3"></div>
+          <button @click="emit('share')" class="icon-btn" title="分享配置">
+            <Share2 class="w-4 h-4" />
+          </button>
 
-              <button @click="emit('openPresetLibrary')" class="library-trigger-btn">
-                <Maximize2 class="w-3 h-3" />
-                <span>查看全部预设库</span>
-              </button>
-            </div>
-          </n-popover>
+          <button @click="emit('openSettings')" class="icon-btn" title="播放器设置">
+            <Settings class="w-4 h-4" />
+          </button>
 
-          <div class="w-px h-5 bg-zinc-700 mx-1" />
-          <button @click="emit('update:showDanmaku', !showDanmaku)" class="icon-btn" :class="showDanmaku ? 'text-rose-400' : ''"><Captions class="w-4 h-4" /></button>
-          <button @click="emit('share')" class="icon-btn"><Share2 class="w-4 h-4" /></button>
-          <button @click="emit('openSettings')" class="icon-btn"><Settings class="w-4 h-4" /></button>
-          <div class="w-px h-5 bg-zinc-700 mx-1" />
-          <button @click="emit('toggleCollapse')" class="icon-btn"><ChevronUp class="w-4 h-4" /></button>
+          <div class="w-px h-5 bg-zinc-800 mx-1" />
+
+          <!-- 收起按钮 -->
+          <button @click="emit('toggleCollapse')" class="icon-btn hover:text-rose-500" title="收起工具栏">
+            <ChevronUp class="w-4 h-4" />
+          </button>
         </div>
       </header>
     </Transition>
 
-    <Transition
-      enter-active-class="transition-all duration-300 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition-all duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <!-- 2. 已收起状态的迷你工具栏 (悬浮感) -->
+    <Transition name="fade">
       <div
         v-if="isCollapsed"
-        class="absolute top-0 left-0 right-0 h-10 z-30 flex items-center justify-between px-2"
+        class="absolute top-0 left-0 right-0 h-10 z-30 flex items-center justify-between px-4 bg-gradient-to-b from-zinc-950/80 to-transparent pointer-events-none"
       >
-        <div class="flex items-center gap-1">
+        <div class="flex items-center gap-1 pointer-events-auto">
           <button
             @click="emit('toggleDrawer')"
-            class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            title="菜单"
+            class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900/80 backdrop-blur-sm transition-all"
           >
             <Menu class="w-4 h-4" />
           </button>
           <button
             @click="emit('update:showDanmaku', !showDanmaku)"
-            class="p-2 rounded-md transition-colors"
-            :class="showDanmaku ? 'text-rose-400' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'"
-            title="弹幕"
+            class="p-2 rounded-lg transition-all backdrop-blur-sm"
+            :class="showDanmaku ? 'text-rose-500 bg-rose-500/10' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/80'"
           >
             <Captions class="w-4 h-4" />
           </button>
         </div>
+
         <button
           @click="emit('toggleCollapse')"
-          class="flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs transition-colors"
+          class="pointer-events-auto flex items-center gap-1.5 px-4 py-1 rounded-full bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 text-[11px] font-bold border border-zinc-800 transition-all shadow-xl backdrop-blur-md"
         >
-          <span>工具栏</span>
-          <ChevronDown class="w-3 h-3" />
+          <span>展开工具栏</span>
+          <ChevronDown class="w-3.5 h-3.5" />
         </button>
       </div>
     </Transition>
@@ -294,75 +169,34 @@ function handleAddMember(member: Stream) {
 </template>
 
 <style scoped>
-.icon-btn { @apply p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors; }
-.add-btn { @apply flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-xs transition-colors shrink-0; }
-.group-select-btn { @apply flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors shrink-0; }
-.add-icon-btn { @apply p-1.5 rounded-md text-rose-400 hover:text-rose-300 hover:bg-zinc-800 transition-colors; }
-.channel-pill { @apply inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md border text-xs font-mono shrink-0; }
-.yt-pill { @apply bg-red-500/20 text-red-400 border-red-500/30; }
-.bili-pill { @apply bg-blue-500/20 text-blue-400 border-blue-500/30; }
-.close-pill-btn { @apply ml-0.5 opacity-50 hover:opacity-100 rounded-sm hover:bg-white/10 p-0.5; }
-.preset-item-btn { @apply flex items-center gap-3 px-2 py-1.5 rounded hover:bg-zinc-800 text-zinc-400 transition-colors text-left; }
-.library-trigger-btn { @apply w-full flex items-center justify-center gap-2 py-2 text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-800 rounded border border-dashed border-zinc-700 transition-all; }
-
-.scrollbar-none::-webkit-scrollbar { display: none; }
-.slide-down-enter-active, .slide-down-leave-active { transition: all 0.3s ease; }
-.slide-down-enter-from, .slide-down-leave-to { transform: translateY(-100%); opacity: 0; }
-
-.avatar-bar {
-  overflow-x: auto;
-  scrollbar-width: none;
+/* 统一样式类 */
+.icon-btn {
+  @apply p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all duration-200 active:scale-90;
 }
-.avatar-bar::-webkit-scrollbar {
+
+/* 动画：工具栏下拉 */
+.slide-down-enter-active, 
+.slide-down-leave-active { 
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+}
+.slide-down-enter-from, 
+.slide-down-leave-to { 
+  transform: translateY(-100%); 
+  opacity: 0; 
+}
+
+/* 动画：渐显 */
+.fade-enter-active, 
+.fade-leave-active { 
+  transition: opacity 0.3s ease; 
+}
+.fade-enter-from, 
+.fade-leave-to { 
+  opacity: 0; 
+}
+
+/* 隐藏滚动条 */
+.scrollbar-none::-webkit-scrollbar {
   display: none;
-}
-
-.avatar-wrapper {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-}
-
-.avatar-img {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid transparent;
-  transition: border-color 0.2s;
-}
-
-.avatar-wrapper:hover .avatar-img {
-  border-color: #f43f5e;
-}
-
-.avatar-placeholder {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #3f3f46;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #a1a1aa;
-  font-weight: 600;
-}
-
-.avatar-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  background: #f43f5e;
-  color: white;
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 4px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.avatar-list {
-  padding: 2px 0;
 }
 </style>

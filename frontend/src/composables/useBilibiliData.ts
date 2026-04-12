@@ -1,15 +1,16 @@
 import { ref } from 'vue'
 import { channelApi } from '@/api'
+import type { BilibiliInfoData, BilibiliVideosData, BilibiliDynamicsData } from '@/types'
 
 
-interface ContentNode {
+export interface ContentNode {
   type: 'text' | 'emoji' | 'at'
   text: string
-  url?: string  // 表情包 URL
-  rid?: string  // AT 用户的 UID
+  url?: string
+  rid?: string
 }
 
-interface Dynamic {
+export interface BilibiliDynamic {
   dynamic_id: string
   url: string
   uid: string
@@ -29,59 +30,91 @@ interface Dynamic {
   is_top: boolean
 }
 
-interface BilibiliVideo {
-  aid: number;           // 稿件id
-  bvid: string;          // 视频bvid
-  title: string;         // 标题
-  pic: string;           // 封面图
-  duration: string;      // 时长 (如 "03:56")
-  play: number;          // 播放量
-  pubdate: number;       // 发布时间戳
-  reply: number;         // 评论数
-  like: number;          // 点赞数
-  coin?: number;
-  favorite?: number;
-  share?: number;
+export interface BilibiliVideo {
+  bvid: string
+  title: string
+  pic: string
+  aid: number
+  duration: string
+  play: number
+  pubdate: number
 }
-export function useBilibiliData() {
-  const dynamics        = ref<Dynamic[]>([])
-  const videos          = ref<BilibiliVideo[]>([])
-  const info            = ref<any>(null)
-  const nextOffset      = ref('')
-  const loading         = ref(false)
-  const hasMore         = ref(true)
 
-  async function fetch(channelId: number, offset = '', append = false) {
-    if (loading.value) return
+export function useBilibiliData() {
+  const dynamics = ref<BilibiliDynamic[]>([])
+  const videos = ref<BilibiliVideo[]>([])
+  const info = ref<BilibiliInfoData | null>(null)
+  const nextOffset = ref('')
+  const loading = ref(false)
+  const hasMore = ref(true)
+
+  async function fetchInfo(channelId: number) {
     loading.value = true
     try {
-      const { data } = await channelApi.getBilibili(channelId, offset, 12)
-      if (!append) {
-        info.value    = data.info
-        dynamics.value = data.dynamics
-        videos.value  = data.videos
-      } else {
-        dynamics.value = [...dynamics.value, ...data.dynamics]
-      }
-      nextOffset.value = data.next_offset || ''
-      hasMore.value    = !!data.next_offset
+      const { data } = await channelApi.getBilibiliInfo(channelId)
+      info.value = data
     } catch (e) {
-      console.error('Failed to fetch Bilibili data:', e)
+      console.error('Failed to fetch Bilibili info:', e)
     } finally {
       loading.value = false
     }
   }
 
-  function loadMore(channelId: number) {
+  async function fetchVideos(channelId: number, page = 1, pageSize = 30) {
+    loading.value = true
+    try {
+      const { data } = await channelApi.getBilibiliVideos(channelId, page, pageSize)
+      videos.value = data.videos
+    } catch (e) {
+      console.error('Failed to fetch Bilibili videos:', e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchDynamics(channelId: number, offset = '', append = false) {
+    if (loading.value) return
+    loading.value = true
+    try {
+      const { data } = await channelApi.getBilibiliDynamics(channelId, offset, 12)
+      if (!append) {
+        dynamics.value = data.dynamics
+      } else {
+        dynamics.value = [...dynamics.value, ...data.dynamics]
+      }
+      nextOffset.value = data.next_offset || ''
+      hasMore.value = !!data.next_offset
+    } catch (e) {
+      console.error('Failed to fetch Bilibili dynamics:', e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function loadMoreDynamics(channelId: number) {
     if (!hasMore.value || !nextOffset.value) return
-    fetch(channelId, nextOffset.value, true)
+    fetchDynamics(channelId, nextOffset.value, true)
   }
 
   function reset() {
-    dynamics.value = []; videos.value = []
-    info.value = null; nextOffset.value = ''
+    dynamics.value = []
+    videos.value = []
+    info.value = null
+    nextOffset.value = ''
     hasMore.value = true
   }
 
-  return { dynamics, videos, info, nextOffset, loading, hasMore, fetch, loadMore, reset }
+  return {
+    dynamics,
+    videos,
+    info,
+    nextOffset,
+    loading,
+    hasMore,
+    fetchInfo,
+    fetchVideos,
+    fetchDynamics,
+    loadMoreDynamics,
+    reset,
+  }
 }

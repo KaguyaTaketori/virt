@@ -1,78 +1,88 @@
 <template>
   <div
-    class="bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-pink-500 transition transform hover:-translate-y-1"
+    class="group relative bg-zinc-900/50 rounded-2xl overflow-hidden border border-zinc-800/50 hover:border-pink-500/50 hover:bg-zinc-800/80 transition-all duration-300 shadow-lg hover:shadow-pink-500/10"
     @click="$emit('click', stream)"
   >
-    <div class="relative aspect-video bg-gray-900">
+    <!-- 1. 封面图区域 -->
+    <div class="relative aspect-video bg-zinc-800 overflow-hidden">
       <img
         v-if="stream.thumbnail_url"
         :src="stream.thumbnail_url"
         :alt="stream.title ?? ''"
-        class="w-full h-full object-cover"
+        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
         referrerpolicy="no-referrer"
+        loading="lazy"
       />
-      <div v-else class="w-full h-full flex items-center justify-center text-gray-600">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
+      <!-- 缺省图 -->
+      <div v-else class="w-full h-full flex items-center justify-center text-zinc-700">
+        <PlayCircle class="w-12 h-12 opacity-20" />
       </div>
 
+      <!-- 顶部状态标签 (毛玻璃效果) -->
       <div 
-        class="absolute top-2 left-2 text-xs px-2 py-1 rounded font-bold"
-        :class="{
-          'bg-red-600 text-white animate-pulse': stream.status === 'live',
-          'bg-yellow-600 text-white': stream.status === 'upcoming',
-          'bg-blue-600 text-white': stream.status === 'archive',
-          'bg-gray-600 text-gray-300': stream.status === 'offline'
-        }"
+        class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-md font-bold flex items-center gap-1.5 backdrop-blur-md shadow-sm border border-white/10"
+        :class="statusStyles"
       >
+        <span v-if="stream.status === 'live'" class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+        </span>
         {{ statusText }}
       </div>
 
-      <div v-if="stream.status === 'live'" class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-          <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
-        </svg>
-        {{ formatViewerCount(stream.viewer_count) }}
+      <!-- 底部右侧观看人数/时间 (毛玻璃) -->
+      <div 
+        v-if="stream.status === 'live'" 
+        class="absolute bottom-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] px-2 py-1 rounded-md flex items-center gap-1 border border-white/5"
+      >
+        <Users class="w-3 h-3" />
+        {{ formatCount(stream.viewer_count) }}
       </div>
     </div>
 
+    <!-- 2. 信息区域 -->
     <div class="p-4">
       <div class="flex items-start gap-3">
-        <img
-          v-if="stream.channel_avatar"
-          :src="stream.channel_avatar"
-          :alt="stream.channel_name ?? ''"
-          class="w-10 h-10 object-cover bg-gray-700 flex-shrink-0"
-          :style="stream.channel_avatar_shape === 'square'
-            ? 'border-radius: 6px'
-            : 'border-radius: 50%'"
-          referrerpolicy="no-referrer"
-        />
-        <div v-else class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-sm font-bold flex-shrink-0">
-          {{ stream.channel_name?.charAt(0).toUpperCase() ?? '?' }}
+        <!-- 频道头像 -->
+        <div class="relative shrink-0">
+          <img
+            v-if="stream.channel_avatar"
+            :src="stream.channel_avatar"
+            class="w-10 h-10 object-cover shadow-md border border-zinc-700/50"
+            :class="stream.channel_avatar_shape === 'square' ? 'rounded-lg' : 'rounded-full'"
+            referrerpolicy="no-referrer"
+          />
+          <div v-else class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 text-xs font-bold border border-zinc-700/50">
+            {{ stream.channel_name?.charAt(0).toUpperCase() ?? '?' }}
+          </div>
+          <!-- 平台小图标 -->
+          <div class="absolute -bottom-1 -right-1 rounded-full p-0.5 bg-zinc-900 border border-zinc-800">
+             <component :is="platformIcon" class="w-3 h-3" :class="platformColor" />
+          </div>
         </div>
 
+        <!-- 文字信息 -->
         <div class="flex-1 min-w-0">
-          <!-- 标题 -->
-          <h3 class="font-semibold text-gray-100 truncate hover:text-pink-400 transition text-sm">
+          <h3 class="font-bold text-zinc-100 truncate group-hover:text-pink-400 transition-colors text-sm leading-snug" :title="stream.title">
             {{ stream.title ?? '无标题' }}
           </h3>
-          <!-- 频道名 -->
-          <p class="text-xs text-gray-400 truncate mt-1">
-            {{ stream.channel_name ?? '未知主播' }}
-          </p>
-          <!-- 平台标签 -->
+          
+          <div class="flex items-center gap-1 mt-1">
+            <p class="text-[12px] text-zinc-400 truncate font-medium">
+              {{ stream.channel_name ?? '未知主播' }}
+            </p>
+          </div>
+
+          <!-- 额外信息标签 -->
           <div class="flex items-center gap-2 mt-2">
-            <span
-              class="text-xs px-2 py-0.5 rounded font-medium"
-              :class="stream.platform === 'youtube'
-                ? 'bg-red-600/20 text-red-400'
-                : 'bg-blue-600/20 text-blue-400'"
+            <span 
+              class="text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider"
+              :class="platformTagStyles"
             >
-              {{ stream.platform === 'youtube' ? 'YouTube' : 'Bilibili' }}
+              {{ stream.platform }}
+            </span>
+            <span v-if="stream.status === 'upcoming'" class="text-[10px] text-zinc-500 italic">
+              {{ formatStartTime(stream.scheduled_at) }}
             </span>
           </div>
         </div>
@@ -83,25 +93,50 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Stream } from '../stores/stream'
+import { PlayCircle, Users, Youtube, Tv } from 'lucide-vue-next'
+import type { Stream } from '@/types'
+import { formatCount } from '@/utils/format'
 
 const props = defineProps<{ stream: Stream }>()
 defineEmits<{ (e: 'click', stream: Stream): void }>()
 
+// 1. 状态文案
 const statusText = computed(() => {
+  const map = { live: 'LIVE', upcoming: 'UPCOMING', archive: 'RECORD', offline: 'OFFLINE' }
+  return map[props.stream.status] || ''
+})
+
+// 2. 状态样式定义
+const statusStyles = computed(() => {
   switch (props.stream.status) {
-    case 'live': return 'LIVE'
-    case 'upcoming': return '预约'
-    case 'archive': return '录播'
-    case 'offline': return '离线'
-    default: return ''
+    case 'live': return 'bg-rose-600/80 text-white'
+    case 'upcoming': return 'bg-amber-500/80 text-white'
+    case 'archive': return 'bg-violet-600/80 text-white'
+    default: return 'bg-zinc-700/80 text-zinc-300'
   }
 })
 
-function formatViewerCount(count: number | null | undefined): string {
-  if (!count) return '0'
-  if (count >= 10000) return (count / 10000).toFixed(1) + '万'
-  if (count >= 1000) return (count / 1000).toFixed(1) + 'k'
-  return count.toString()
+// 3. 平台图标与颜色
+const platformIcon = computed(() => props.stream.platform === 'youtube' ? Youtube : Tv)
+const platformColor = computed(() => props.stream.platform === 'youtube' ? 'text-red-500' : 'text-blue-400')
+
+const platformTagStyles = computed(() => {
+  return props.stream.platform === 'youtube' 
+    ? 'bg-red-500/10 text-red-500 border border-red-500/20' 
+    : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'
+})
+
+// 4. 辅助：格式化开始时间 (针对预约)
+function formatStartTime(timeStr?: string) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) + ' 开播'
 }
 </script>
+
+<style scoped>
+/* 可以在这里添加一些只有该组件需要的细微动画 */
+.group:hover img {
+  filter: brightness(1.1);
+}
+</style>

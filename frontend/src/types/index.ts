@@ -3,12 +3,12 @@ export interface Stream {
   channel_id: number
   platform: 'youtube' | 'bilibili'
   video_id: string | null
-  title: string | null
+  title: string | undefined
   thumbnail_url: string | null
   viewer_count: number
   status: 'live' | 'upcoming' | 'archive' | 'offline'
   started_at: string | null
-  scheduled_at: string | null
+  scheduled_at: string | undefined
   ended_at: string | null
   live_chat_id: string | null
   channel_name: string | null
@@ -40,6 +40,7 @@ export interface Channel {
   bilibili_sign: string | null
   bilibili_fans: number | null
   bilibili_archive_count: number | null
+  subscriber_count: number | null
 }
 
 export interface ChannelCreate {
@@ -66,7 +67,7 @@ export interface Organization {
 export interface Video {
   id: string
   title: string
-  thumbnail_url: string | null
+  thumbnail_url: string | undefined
   duration: string | null
   view_count: number
   published_at: string | null
@@ -181,6 +182,7 @@ export interface User {
   id: number
   username: string
   email: string | null
+  avatar: string
   created_at: string
   roles: string[]
   permissions?: string[]
@@ -191,4 +193,50 @@ export interface BilibiliGuard {
   filterStreams: (streams: Stream[]) => Stream[]
   filterChannels: (channels: Channel[]) => Channel[]
   platformOptions: import('vue').ComputedRef<{ label: string; value: string }[]>
+}
+
+export interface BilibiliInfoData {
+  mid: number
+  name: string
+  face: string | undefined
+  sign: string | null
+  fans: number | undefined
+  attention: number | null
+  archive_count: number | null
+}
+
+export interface BilibiliVideosData {
+  videos: Array<{
+    bvid: string
+    title: string
+    pic: string
+    aid: number
+    duration: string
+    pubdate: number
+    play: number
+  }>
+  total: number
+}
+
+export interface BilibiliDynamicsData {
+  dynamics: Array<{
+    dynamic_id: string
+    url: string
+    uid: string
+    uname: string
+    face: string
+    type: number
+    timestamp: number
+    content_nodes: ContentNode[]
+    images: string[]
+    repost_content: string | null
+    stat: {
+      forward: number
+      comment: number
+      like: number
+    }
+    topic: string
+    is_top: boolean
+  }>
+  next_offset: string
 }

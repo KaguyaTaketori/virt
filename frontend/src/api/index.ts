@@ -1,7 +1,7 @@
 // frontend/src/api/index.ts
 import axios from 'axios'
 import type { AxiosInstance, AxiosError } from 'axios'
-import type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, Role, Permission, UserWithRoles } from '@/types'
+import type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, BilibiliInfoData, BilibiliVideosData, BilibiliDynamicsData, Role, Permission, UserWithRoles } from '@/types'
 
 const api: AxiosInstance = axios.create({
   baseURL: '',
@@ -58,6 +58,19 @@ export const channelApi = {
   getBilibili: (id: number, dynamicsOffset?: string, dynamicsLimit?: number) =>
     api.get<BilibiliInfo>(`/api/channels/${id}/bilibili`, {
       params: { dynamics_offset: dynamicsOffset, dynamics_limit: dynamicsLimit },
+    }),
+
+  getBilibiliInfo: (id: number) =>
+    api.get<BilibiliInfoData>(`/api/channels/${id}/bilibili/info`),
+
+  getBilibiliVideos: (id: number, page?: number, pageSize?: number) =>
+    api.get<BilibiliVideosData>(`/api/channels/${id}/bilibili/videos`, {
+      params: { page, page_size: pageSize },
+    }),
+
+  getBilibiliDynamics: (id: number, offset?: string, limit?: number) =>
+    api.get<BilibiliDynamicsData>(`/api/channels/${id}/bilibili/dynamics`, {
+      params: { offset, limit },
     }),
 
   // 明确返回 PaginatedVideos，消除隐式 any

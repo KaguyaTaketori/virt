@@ -22,11 +22,11 @@ async def get_redis() -> Optional[Redis]:
         return None
 
 
-async def _get_channel_repo(session: AsyncSession) -> ChannelRepository:
+async def _get_channel_repo(session: AsyncSession = Depends(get_db_session)) -> ChannelRepository:
     return ChannelRepository(session)
 
 
-async def _get_stream_repo(session: AsyncSession) -> StreamRepository:
+async def _get_stream_repo(session: AsyncSession = Depends(get_db_session)) -> StreamRepository:
     return StreamRepository(session)
 
 

@@ -179,7 +179,9 @@ async def login(
 
     roles = await get_user_roles(user.id, db)
     permissions = await get_all_permissions_for_user(user.id, db)
-    await permission_cache.set_permissions(result.jti, roles, permissions, token_exp, user.id)
+    await permission_cache.set_permissions(
+        result.jti, roles, permissions, token_exp, user.id
+    )
 
     return {"access_token": result.token, "token_type": "bearer"}
 
@@ -198,7 +200,7 @@ async def logout(
     db: AsyncSession = Depends(get_db_session),
 ):
     if token:
-        await token_blacklist.revoke(token, db, current_user.id)
+        await token_blacklist.revoke(token, current_user.id)
         try:
             jti, _ = get_token_jti_and_exp(token)
             if jti:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 from app.loguru_config import logger
@@ -24,22 +24,33 @@ class PollContext:
     continuation: str
     is_live: bool
 
+@dataclass
+class _VideoSeenState:
+    """每个视频独立的去重状态，隔离不同视频的消息 ID 空间"""
+    id_set: set[str] = field(default_factory=set)
+    id_queue: deque[str] = field(default_factory=deque)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
 class DanmakuPoller:
     def __init__(self) -> None:
         self._tasks: Dict[str, asyncio.Task] = {}
-        self._seen_ids_queue: deque[str] = deque()
-        self._seen_ids_set: set[str] = set()
-        self._seen_lock = asyncio.Lock()
+        self._seen_states: Dict[str, _VideoSeenState] = {}
 
-    async def _add_seen(self, mid: str) -> bool:
-        async with self._seen_lock:
-            if mid in self._seen_ids_set:
+    def _get_seen_state(self, video_id: str) -> _VideoSeenState:
+        if video_id not in self._seen_states:
+            self._seen_states[video_id] = _VideoSeenState()
+        return self._seen_states[video_id]
+    
+    async def _add_seen(self, video_id: str, mid: str) -> bool:
+        state = self._get_seen_state(video_id)
+        async with state.lock:
+            if mid in state.id_set:
                 return False
-            self._seen_ids_set.add(mid)
-            self._seen_ids_queue.append(mid)
-            if len(self._seen_ids_queue) > DANMAKU_MAX_SEEN_IDS:
-                oldest = self._seen_ids_queue.popleft()
-                self._seen_ids_set.discard(oldest)
+            state.id_set.add(mid)
+            state.id_queue.append(mid)
+            if len(state.id_queue) > DANMAKU_MAX_SEEN_IDS:
+                oldest = state.id_queue.popleft()
+                state.id_set.discard(oldest)
             return True
 
     def start_polling(self, video_id: str) -> None:
@@ -58,6 +69,8 @@ class DanmakuPoller:
         if task and not task.done():
             task.cancel()
             logger.info("danmaku poll cancelled: {}", video_id)
+        self._seen_states.pop(video_id, None)
+
 
     def get_active_videos(self) -> Set[str]:
         return {vid for vid, t in self._tasks.items() if not t.done()}
@@ -151,7 +164,7 @@ class DanmakuPoller:
         new_msgs: list[dict] = []
         for m in messages:
             mid = m.get("message_id", "")
-            if mid and await self._add_seen(mid):
+            if mid and await self._add_seen(video_id, mid):
                 new_msgs.append(m)
             if len(new_msgs) >= DANMAKU_TRUNCATE_BATCH:
                 break

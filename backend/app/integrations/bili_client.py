@@ -457,12 +457,14 @@ class BiliClient:
             reply=v.get("comment", 0),
         )
 
-    async def get_channel_info(self, uid: str) -> Optional[BiliUserInfo]:
-        """获取频道基本信息"""
-        cred = self._create_credential()
+    async def get_channel_info(
+        self,
+        uid: str,
+        credential: Optional[Credential] = None,
+    ) -> Optional[BiliUserInfo]:
+        cred = credential or self._create_credential()
         if not cred:
             return None
-
         try:
             u = user.User(uid=int(uid), credential=cred)
             info = await u.get_user_info()

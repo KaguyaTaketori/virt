@@ -1,56 +1,59 @@
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 
-const STORAGE_KEY_BLOCKED    = 'danmaku_blocked_users'
+const STORAGE_KEY_BLOCKED = 'danmaku_blocked_users'
 const STORAGE_KEY_HIGHLIGHTED = 'danmaku_highlighted_users'
 
-const _blocked     = ref<Set<string>>(loadSet(STORAGE_KEY_BLOCKED))
-const _highlighted = ref<Set<string>>(loadSet(STORAGE_KEY_HIGHLIGHTED))
-
-function loadSet(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? new Set(JSON.parse(raw)) : new Set()
-  } catch {
-    return new Set()
-  }
+const setSerializer = {
+  read: (v: string) => v ? new Set<string>(JSON.parse(v)) : new Set<string>(),
+  write: (v: Set<string>) => JSON.stringify(Array.from(v)),
 }
 
-function saveSet(key: string, set: Set<string>) {
-  try {
-    localStorage.setItem(key, JSON.stringify([...set]))
-  } catch { /* ignore */ }
-}
+const _blocked = useLocalStorage<Set<string>>(STORAGE_KEY_BLOCKED, new Set(), {
+  serializer: setSerializer,
+})
+
+const _highlighted = useLocalStorage<Set<string>>(STORAGE_KEY_HIGHLIGHTED, new Set(), {
+  serializer: setSerializer,
+})
 
 export function useDanmakuUsers() {
-  const blockedUsers     = computed(() => _blocked.value)
+  const blockedUsers = computed(() => _blocked.value)
   const highlightedUsers = computed(() => _highlighted.value)
 
   function blockUser(userId: string) {
-    if (!userId) return
-    _blocked.value = new Set([..._blocked.value, userId])
-    // 屏蔽时自动取消高亮
-    _highlighted.value.delete(userId)
-    _highlighted.value = new Set(_highlighted.value)
-    saveSet(STORAGE_KEY_BLOCKED, _blocked.value)
-    saveSet(STORAGE_KEY_HIGHLIGHTED, _highlighted.value)
+    if (!userId || _blocked.value.has(userId)) return
+    
+    const nextBlocked = new Set(_blocked.value)
+    nextBlocked.add(userId)
+    _blocked.value = nextBlocked
+
+    if (_highlighted.value.has(userId)) {
+      unhighlightUser(userId)
+    }
   }
 
   function unblockUser(userId: string) {
-    _blocked.value.delete(userId)
-    _blocked.value = new Set(_blocked.value)
-    saveSet(STORAGE_KEY_BLOCKED, _blocked.value)
+    if (!_blocked.value.has(userId)) return
+    const next = new Set(_blocked.value)
+    next.delete(userId)
+    _blocked.value = next
   }
 
   function highlightUser(userId: string) {
-    if (!userId) return
-    _highlighted.value = new Set([..._highlighted.value, userId])
-    saveSet(STORAGE_KEY_HIGHLIGHTED, _highlighted.value)
+    if (!userId || _highlighted.value.has(userId)) return
+    if (_blocked.value.has(userId)) return
+
+    const next = new Set(_highlighted.value)
+    next.add(userId)
+    _highlighted.value = next
   }
 
   function unhighlightUser(userId: string) {
-    _highlighted.value.delete(userId)
-    _highlighted.value = new Set(_highlighted.value)
-    saveSet(STORAGE_KEY_HIGHLIGHTED, _highlighted.value)
+    if (!_highlighted.value.has(userId)) return
+    const next = new Set(_highlighted.value)
+    next.delete(userId)
+    _highlighted.value = next
   }
 
   function isBlocked(userId: string): boolean {
@@ -64,8 +67,6 @@ export function useDanmakuUsers() {
   function clearAll() {
     _blocked.value = new Set()
     _highlighted.value = new Set()
-    localStorage.removeItem(STORAGE_KEY_BLOCKED)
-    localStorage.removeItem(STORAGE_KEY_HIGHLIGHTED)
   }
 
   return {
