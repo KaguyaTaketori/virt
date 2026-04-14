@@ -34,7 +34,7 @@ const orgName = computed(() => {
 })
 
 const displaySign = computed(() => {
-  return props.channel.bilibili_sign || props.channel.description || ''
+  return props.channel.bio || props.channel.description || ''
 })
 
 const externalUrl = computed(() => {
@@ -93,8 +93,8 @@ const externalUrl = computed(() => {
               {{ orgName }}
             </span>
             
-            <span v-if="channel.platform === 'bilibili' && channel.bilibili_fans" class="flex items-center gap-1">
-              粉丝 <strong class="text-zinc-200 font-semibold">{{ formatCount(channel.bilibili_fans) }}</strong>
+            <span v-if="channel.platform === 'bilibili' && channel.follower_count" class="flex items-center gap-1">
+              粉丝 <strong class="text-zinc-200 font-semibold">{{ formatCount(channel.follower_count) }}</strong>
             </span>
 
             <span v-if="channel.platform === 'youtube' && channel.subscriber_count" class="flex items-center gap-1">
