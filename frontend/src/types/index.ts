@@ -37,9 +37,13 @@ export interface Channel {
   status: string
   is_liked: boolean
   is_blocked: boolean
-  bilibili_sign: string | null
-  bilibili_fans: number | null
-  bilibili_archive_count: number | null
+  follower_count: number | null
+  bio: string | null
+  video_count: number | null
+  following_count: number | null
+  extra_info: Record<string, unknown> | null
+  full_sync_completed: boolean
+  full_sync_at: string | null
   subscriber_count: number | null
 }
 
