@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
+import { useScriptTag, useIntervalFn } from '@vueuse/core'
 
 interface YT {
   Player: new (element: HTMLElement, options: any) => any
@@ -25,22 +26,44 @@ const emit = defineEmits<{
 
 const containerRef = ref<HTMLDivElement | null>(null)
 let ytPlayer: any = null
-let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
 
-function onYouTubeIframeAPIReady() {
+const { pause, resume } = useIntervalFn(() => {
+  if (ytPlayer?.getCurrentTime) {
+    try {
+      emit('timeUpdate', ytPlayer.getCurrentTime())
+    } catch (e) {
+      console.error('[YouTubePlayer] Get time error:', e)
+    }
+  }
+}, 500, { immediate: false })
+
+function initPlayer() {
   if (!containerRef.value || !props.videoId || !window.YT) return
 
+  if (ytPlayer) {
+    ytPlayer.loadVideoById(props.videoId)
+    return
+  }
+
   ytPlayer = new window.YT.Player(containerRef.value, {
+    width: '100%',
+    height: '100%',
     videoId: props.videoId,
     playerVars: {
       autoplay: 1,
       enablejsapi: 1,
       origin: window.location.origin,
+      rel: 0,
+      modestbranding: 1
     },
     events: {
       onReady: () => {
         emit('ready')
-        startTimeUpdate()
+        resume()
+      },
+      onStateChange: (event: any) => {
+        if (event.data === 1) resume()
+        else pause()
       },
       onError: (event: any) => {
         console.error('[YouTubePlayer] Error:', event.data)
@@ -49,58 +72,40 @@ function onYouTubeIframeAPIReady() {
   })
 }
 
-function startTimeUpdate() {
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-  }
-  timeUpdateInterval = setInterval(() => {
-    if (ytPlayer && ytPlayer.getCurrentTime) {
-      try {
-        const currentTime = ytPlayer.getCurrentTime()
-        emit('timeUpdate', currentTime)
-      } catch (e) {
-        console.error('[YouTubePlayer] Get time error:', e)
-      }
+useScriptTag(
+  'https://www.youtube.com/iframe_api',
+  () => {
+    if (window.YT && window.YT.Player) {
+      initPlayer()
+    } else {
+      window.onYouTubeIframeAPIReady = initPlayer
     }
-  }, 500)
-}
-
-function loadYouTubeAPI() {
-  if (window.YT && window.YT.Player) {
-    onYouTubeIframeAPIReady()
-    return
   }
+)
 
-  const tag = document.createElement('script')
-  tag.src = 'https://www.youtube.com/iframe_api'
-  const firstScriptTag = document.getElementsByTagName('script')[0]
-  if (firstScriptTag?.parentNode) {
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+watch(() => props.videoId, (newId) => {
+  if (ytPlayer?.loadVideoById && newId) {
+    ytPlayer.loadVideoById(newId)
   }
-
-  window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady
-}
-
-onMounted(() => {
-  loadYouTubeAPI()
 })
 
 onUnmounted(() => {
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-  }
-  if (ytPlayer) {
+  if (ytPlayer?.destroy) {
     ytPlayer.destroy()
-  }
-})
-
-watch(() => props.videoId, (newId) => {
-  if (ytPlayer && newId) {
-    ytPlayer.loadVideoById(newId)
   }
 })
 </script>
 
 <template>
-  <div ref="containerRef" class="absolute inset-0 w-full h-full"></div>
+  <div class="absolute inset-0 w-full h-full bg-black overflow-hidden">
+    <div ref="containerRef" class="w-full h-full"></div>
+  </div>
 </template>
+
+<style scoped>
+:deep(iframe) {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+</style>

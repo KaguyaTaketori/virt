@@ -62,15 +62,7 @@ def _should_retry(exception: Exception) -> bool:
     return False
 
 
-RETRY_CONFIG = {
-    "stop": stop_after_attempt(MAX_RETRIES),
-    "wait": wait_exponential(multiplier=RETRY_MULTIPLIER, min=RETRY_MIN, max=RETRY_MAX),
-    "retry": retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException))
-    | retry_if_result(_is_rate_limit_error),
-    "reraise": True,
-}
-
-NO_RETRY_CONFIG = {
+NETWORK_RETRY_CONFIG = {
     "stop": stop_after_attempt(MAX_RETRIES),
     "wait": wait_exponential(multiplier=RETRY_MULTIPLIER, min=1, max=5),
     "retry": retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
@@ -84,6 +76,10 @@ class BiliClient:
     仅负责网络请求、数据解析、异常处理。
     不直接操作数据库。
     """
+
+    @property
+    def platform(self) -> Platform:
+        return Platform.BILIBILI
 
     def _create_credential(self) -> Optional[Credential]:
         if not settings.bilibili_sessdata:
@@ -113,7 +109,7 @@ class BiliClient:
                 raise BilibiliAPIError(f"获取用户信息失败(风控): {e}", original_error=e)
             raise BilibiliAPIError(f"获取用户信息失败: {e}", original_error=e)
 
-    @retry(**NO_RETRY_CONFIG)
+    @retry(**NETWORK_RETRY_CONFIG)
     async def _fetch_user_info(self, u: user.User) -> dict:
         return await u.get_user_info()
 
@@ -266,10 +262,10 @@ class BiliClient:
             uid, status = item
             results[uid] = status
 
-        logger.info("Bilibili batch status: %d/%d", len(results), len(uids))
+        logger.info("Bilibili batch status: {}/{}", len(results), len(uids))
         return results
 
-    @retry(**NO_RETRY_CONFIG)
+    @retry(**NETWORK_RETRY_CONFIG)
     async def get_dynamics(
         self,
         uid: str,
@@ -417,13 +413,13 @@ class BiliClient:
 
         except Exception as e:
             logger.exception(
-                "解析新动态项失败: id=%s, error=%s",
+                "解析新动态项失败: id={}, error={}",
                 item.get("id_str", "unknown"),
                 str(e),
             )
             return None
 
-    @retry(**NO_RETRY_CONFIG)
+    @retry(**NETWORK_RETRY_CONFIG)
     async def get_videos(
         self,
         uid: str,

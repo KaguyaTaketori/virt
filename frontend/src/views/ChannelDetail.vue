@@ -31,7 +31,7 @@ const PLATFORM_TABS: Record<string, { value: string; label: string }[]> = {
 
 const route = useRoute()
 const router = useRouter()
-const channelId = computed(() => Number(route.params.id))
+const channelId = computed(() => route.params.id as string)
 
 const { data: channel, isLoading, error: queryError } = useQuery({
   queryKey: ['channel', channelId],

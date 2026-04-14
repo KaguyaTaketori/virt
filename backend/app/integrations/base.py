@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -63,52 +62,31 @@ class PaginatedVideos:
     total_pages: int
 
 
-class BaseLivePlatform(ABC):
-    PLATFORM: Platform
+from typing import Protocol, Any
 
+
+class PlatformClient(Protocol):
     @property
-    def platform(self) -> Platform:
-        return self.PLATFORM
+    def platform(self) -> Platform: ...
 
-    @abstractmethod
-    async def get_channel_info(self, channel_id: str) -> Optional[ChannelInfo]:
-        """获取频道基本信息"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def resolve_channel_id(self, input_str: str) -> Optional[str]:
-        """从URL/handle解析出频道ID"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def get_live_status(self, channel_id: str) -> Optional[LiveStatus]:
-        """获取单个频道的直播状态"""
-        raise NotImplementedError
-
-    @abstractmethod
+    async def get_channel_info(self, channel_id: str) -> Optional[Any]: ...
+    async def get_live_status(self, channel_id: str) -> Optional[Any]: ...
     async def batch_get_live_status(
         self, channel_ids: list[str], max_concurrent: int = 5
-    ) -> dict[str, Optional[LiveStatus]]:
-        """批量获取多个频道的直播状态"""
-        raise NotImplementedError
-
-    @abstractmethod
+    ) -> dict[str, Optional[Any]]: ...
     async def get_videos(
         self,
         channel_id: str,
         page: int = 1,
         page_size: int = 24,
         status_filter: Optional[str] = None,
-    ) -> PaginatedVideos:
-        """获取频道视频列表"""
-        raise NotImplementedError
+    ) -> Optional[Any]: ...
 
-    @abstractmethod
+    async def resolve_channel_id(self, input_str: str) -> Optional[str]:
+        raise NotImplementedError("Optional method")
+
     def generate_embed_url(self, video_id: str) -> str:
-        """生成 iframe 嵌入 URL"""
-        raise NotImplementedError
+        raise NotImplementedError("Optional method")
 
-    @abstractmethod
     def normalize_video_id(self, video_id: str) -> str:
-        """标准化视频ID格式"""
-        raise NotImplementedError
+        raise NotImplementedError("Optional method")

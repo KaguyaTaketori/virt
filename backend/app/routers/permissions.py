@@ -19,9 +19,9 @@ from app.schemas.schemas import (
     UserRoleUpdate,
 )
 from app.auth import get_current_user
-from app.services.permissions import get_user_roles, has_permission
+from app.services.permissions import get_user_roles
 from app.deps.guards import AdminUser, SuperAdminUser
-from app.services.permission_cache import permission_cache
+from app.services.permission_cache import get_permission_cache
 from app.constants import UserRole as UserRoleConstant
 
 router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
@@ -162,7 +162,7 @@ async def assign_permissions_to_role(
             db.add(rp)
 
     await db.commit()
-    await permission_cache.delete_all()
+    await get_permission_cache().delete_all()
     return {"message": "Permissions assigned"}
 
 
@@ -225,7 +225,7 @@ async def update_user_roles(
             db.add(ur)
 
     await db.commit()
-    await permission_cache.delete_all_by_user(user_id)
+    await get_permission_cache().delete_all_by_user(user_id)
     return {"message": "Roles updated"}
 
 

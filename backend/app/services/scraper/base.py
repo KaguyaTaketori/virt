@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.loguru_config import logger
 from app.constants import ChannelStatus
+from app.integrations.youtube import get_youtube_sync_service
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 
@@ -57,7 +58,7 @@ class BaseWikiScraper:
         resp.raise_for_status()
 
         if "cloudflare" in resp.text.lower() or "blocked" in resp.text.lower():
-            logger.warning(f"Cloudflare blocked request to {url}")
+            logger.warning("Cloudflare blocked request to {}", url)
             raise Exception(
                 "Cloudflare blocked - please solve CAPTCHA manually or wait"
             )
@@ -151,11 +152,9 @@ class BaseWikiScraper:
             return None
 
         try:
-            from app.integrations.youtube_client import get_youtube_client
-
-            yt_client = get_youtube_client()
+            yt_client = get_youtube_sync_service()
             channel_id = await yt_client.resolve_channel_id(handle)
             return channel_id
         except Exception as e:
-            logger.warning(f"Failed to resolve YouTube handle {handle}: {e}")
+            logger.warning("Failed to resolve YouTube handle {}: {}", handle, e)
             return None

@@ -1,9 +1,3 @@
-"""
-backend/app/services/token_blacklist.py
-────────────────────────────────────────────────────────────────────────────
-Token 黑名单服务 - 基于 Redis 实现，TTL 自动清理过期 token。
-"""
-
 from __future__ import annotations
 
 import asyncio

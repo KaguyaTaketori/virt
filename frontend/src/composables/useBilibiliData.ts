@@ -48,7 +48,7 @@ export function useBilibiliData() {
   const loading = ref(false)
   const hasMore = ref(true)
 
-  async function fetchInfo(channelId: number) {
+  async function fetchInfo(channelId: string) {
     loading.value = true
     try {
       const { data } = await channelApi.getBilibiliInfo(channelId)
@@ -60,7 +60,7 @@ export function useBilibiliData() {
     }
   }
 
-  async function fetchVideos(channelId: number, page = 1, pageSize = 30) {
+  async function fetchVideos(channelId: string, page = 1, pageSize = 30) {
     loading.value = true
     try {
       const { data } = await channelApi.getBilibiliVideos(channelId, page, pageSize)
@@ -72,7 +72,7 @@ export function useBilibiliData() {
     }
   }
 
-  async function fetchDynamics(channelId: number, offset = '', append = false) {
+  async function fetchDynamics(channelId: string, offset = '', append = false) {
     if (loading.value) return
     loading.value = true
     try {
@@ -91,7 +91,7 @@ export function useBilibiliData() {
     }
   }
 
-  function loadMoreDynamics(channelId: number) {
+  function loadMoreDynamics(channelId: string) {
     if (!hasMore.value || !nextOffset.value) return
     fetchDynamics(channelId, nextOffset.value, true)
   }

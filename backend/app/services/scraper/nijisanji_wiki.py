@@ -48,7 +48,7 @@ class NijisanjiWikiScraper(BaseWikiScraper):
                 seen.add(key)
                 unique_channels.append(ch)
 
-        logger.info(f"Parsed {len(unique_channels)} Nijisanji channels from wiki")
+        logger.info("Parsed {} Nijisanji channels from wiki", len(unique_channels))
         return unique_channels
 
     def _parse_list(self, ul, group: str) -> list[VtuberChannel]:
@@ -62,7 +62,7 @@ class NijisanjiWikiScraper(BaseWikiScraper):
                 if channel:
                     channels.append(channel)
             except Exception as e:
-                logger.debug(f"Failed to parse list item: {e}")
+                logger.debug("Failed to parse list item: {}", e)
                 continue
 
         return channels

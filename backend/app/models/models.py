@@ -15,6 +15,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
 from app.database import Base
+from app.utils.snowflake import generate_channel_id
 
 
 class User(Base):
@@ -65,7 +66,7 @@ class UserChannel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
+    channel_id = Column(BigInteger, ForeignKey("channels.id"), nullable=False)
     status = Column(String(20), nullable=False)  # "liked" 或 "blocked"
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -107,7 +108,9 @@ class Organization(Base):
 class Channel(Base):
     __tablename__ = "channels"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        BigInteger, primary_key=True, index=True, default=lambda: generate_channel_id()
+    )
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     platform = Column(SQLEnum(Platform), nullable=False)
     channel_id = Column(String(100), unique=True, nullable=False)
@@ -149,7 +152,7 @@ class Stream(Base):
     __tablename__ = "streams"
 
     id = Column(Integer, primary_key=True, index=True)
-    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
+    channel_id = Column(BigInteger, ForeignKey("channels.id"), nullable=False)
     platform = Column(SQLEnum(Platform), nullable=False)
     video_id = Column(String(100), nullable=False, index=True)
     title = Column(String(500), nullable=True)
@@ -181,7 +184,7 @@ class Video(Base):
     __tablename__ = "videos"
 
     id = Column(Integer, primary_key=True, index=True)
-    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
+    channel_id = Column(BigInteger, ForeignKey("channels.id"), nullable=False)
     platform = Column(SQLEnum(Platform), nullable=False)
     video_id = Column(String(100), nullable=False, index=True)
     title = Column(String(500), nullable=True)
@@ -212,7 +215,9 @@ class BilibiliDynamic(Base):
     __tablename__ = "bilibili_dynamics"
 
     id = Column(Integer, primary_key=True, index=True)
-    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False, index=True)
+    channel_id = Column(
+        BigInteger, ForeignKey("channels.id"), nullable=False, index=True
+    )
     dynamic_id = Column(String(50), unique=True, nullable=False)
     uid = Column(String(50))
     uname = Column(String(100))

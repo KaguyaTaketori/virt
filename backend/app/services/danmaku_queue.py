@@ -27,15 +27,20 @@ class DanmakuQueue:
 
     async def pop_batch(self, video_id: str, max_count: int = 100) -> list[dict]:
         key = f"{self.PREFIX}{video_id}"
+        try:
+            raw_list = await self.redis.lpop(key, max_count)
+        except Exception:
+            raw_list = None
+
+        if not raw_list:
+            return []
+
         messages = []
-        for _ in range(max_count):
-            msg = await self.redis.lpop(key)
-            if msg is None:
-                break
+        for raw in raw_list:
             try:
-                messages.append(json.loads(msg))
+                messages.append(json.loads(raw))
             except json.JSONDecodeError:
-                logger.warning("Failed to parse danmaku message: {}", msg)
+                logger.warning("Failed to parse danmaku message: {}", raw)
         return messages
 
     async def get_queue_length(self, video_id: str) -> int:

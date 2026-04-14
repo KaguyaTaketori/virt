@@ -19,7 +19,7 @@ export interface UseChannelVideosOptions extends ChannelVideoParams {
 }
 
 export function useChannelVideos(
-  channelId: MaybeRefOrGetter<number | undefined>,
+  channelId: MaybeRefOrGetter<string | undefined>,
   options: UseChannelVideosOptions = {}
 ) {
   return useQuery<PaginatedVideos, Error>({
@@ -59,7 +59,7 @@ export function useChannelVideos(
 }
 
 export function useMultiStatusVideos(
-  channelId: MaybeRefOrGetter<number>,
+  channelId: MaybeRefOrGetter<string>,
   statuses: MaybeRefOrGetter<string[]>,
   options?: Omit<UseQueryOptions<PaginatedVideos, Error>, 'queryKey' | 'queryFn'>,
 ) {
@@ -86,7 +86,7 @@ export function useMultiStatusVideos(
 
 export function useAdminVideos(
   params: MaybeRefOrGetter<{
-    channel_id: number
+    channel_id: string
     status?: string
     duration_min?: number | null
     duration_max?: number | null

@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.loguru_config import logger
 
+_SCHEME_WHITELIST = frozenset({"https"}) 
 
 _YOUTUBE_ALLOWED_HOSTS = frozenset(
     {
@@ -55,18 +56,21 @@ def _is_private_ip(ip_str: str) -> bool:
 def validate_safe_url(
     url: str,
     allowed_hosts: Optional[set[str]] = None,
+    *,
+    allow_http: bool = False,
 ) -> str:
     """
     验证 URL 是否为合法的公开地址（非私有/保留网段）。
     抛出 ValueError 如果不安全。
     """
+    allowed_schemes = {"https", "http"} if allow_http else _SCHEME_WHITELIST
     try:
         parsed = urlparse(url)
     except Exception:
         raise ValueError(f"Invalid URL format: {url}")
 
-    if parsed.scheme not in ("https", "http"):
-        raise ValueError(f"Only HTTP/HTTPS URLs are allowed, got: {parsed.scheme}")
+    if parsed.scheme not in allowed_schemes:
+        raise ValueError(f"Only {allowed_schemes} URLs allowed: {parsed.scheme}")
 
     host = (parsed.hostname or "").lower().lstrip(".")
 

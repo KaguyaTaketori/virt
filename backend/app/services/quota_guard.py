@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
 
 from app.loguru_config import logger
 from app.config import settings
@@ -18,7 +17,7 @@ COSTS: dict[str, int] = {
 }
 
 _KEY_PREFIX = "quota:"
-_redis = None  # 由 init_quota_guard 注入
+_redis = None
 
 
 def _date_key(op: str) -> str:
@@ -43,7 +42,6 @@ async def status() -> dict:
     used_raw = await _redis.get(_total_key())
     used = int(used_raw) if used_raw else 0
 
-    # 按操作类型统计
     keys = await _redis.keys(f"{_KEY_PREFIX}{date.today().isoformat()}:*")
     ops = {}
     for k in keys:
@@ -68,7 +66,7 @@ async def can_spend(op: str, count: int = 1) -> bool:
     cost = COSTS.get(op, 1) * count
 
     if _redis is None:
-        return True  # 无 Redis 时不限制（降级）
+        return True
 
     used_raw = await _redis.get(_total_key())
     used = int(used_raw) if used_raw else 0
@@ -89,13 +87,11 @@ async def spend(op: str, count: int = 1) -> int:
     cost = COSTS.get(op, 1) * count
 
     if _redis is None:
-        return DAILY_LIMIT  # 降级时返回满额
+        return DAILY_LIMIT
 
-    # ✅ Redis INCRBY 是原子操作，天然支持多进程/多实例
-    # 设置 TTL 为 25 小时，跨天自动重置
     pipe = _redis.pipeline()
     pipe.incrby(_total_key(), cost)
-    pipe.expire(_total_key(), 90000)          # 25h
+    pipe.expire(_total_key(), 90000)
     pipe.incrby(_date_key(op), count)
     pipe.expire(_date_key(op), 90000)
     results = await pipe.execute()

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     max_ws_connections_per_video: int = 1000
     max_ws_connections_total: int = 10000
 
+    snowflake_worker_id: int = 1
+    snowflake_datacenter_id: int = 1
+
     @property
     def db_dialect(self) -> str:
         """从 db_url 推断数据库类型，整个应用共用同一判断逻辑。"""

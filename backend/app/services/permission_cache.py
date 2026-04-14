@@ -1,4 +1,3 @@
-# backend/app/services/permission_cache.py  (完整替换)
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +5,8 @@ import json
 from abc import ABC, abstractmethod
 from time import time
 from typing import Any, Optional
+
+from redis import Redis
 
 from app.loguru_config import logger
 
@@ -97,14 +98,14 @@ def get_permission_cache() -> AbstractPermissionCache:
     return _cache_instance
 
 
-async def init_permission_cache(redis_client: Any) -> None:
+async def init_permission_cache(redis_client: Redis) -> None:
     """
     初始化 Redis 缓存。失败时保持 NullPermissionCache（降级运行）。
     使用锁确保并发启动时的安全性。
     """
     global _cache_instance
     try:
-        await redis_client.ping()  # 健康检查
+        await redis_client.ping()
         async with _init_lock:
             _cache_instance = RedisPermissionCache(redis_client)
         logger.info("Permission cache initialized with Redis")
@@ -113,15 +114,3 @@ async def init_permission_cache(redis_client: Any) -> None:
             "Redis permission cache unavailable ({}), degraded mode (no cache)",
             e,
         )
-        # _cache_instance 保持 NullPermissionCache，系统继续正常运行
-
-
-# 兼容旧代码的直接访问
-class _CacheProxy:
-    """代理模式：旧代码 `permission_cache.get_permissions(...)` 无需改动"""
-
-    def __getattr__(self, name: str):
-        return getattr(_cache_instance, name)
-
-
-permission_cache = _CacheProxy()

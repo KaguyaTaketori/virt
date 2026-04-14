@@ -63,7 +63,7 @@ export function useStreamsByPlatform(
 }
 
 export function useChannelStreams(
-  channelId: Ref<number> | ComputedRef<number>,
+  channelId: Ref<string> | ComputedRef<string>,
   options?: Omit<UseQueryOptions<Stream[], Error>, 'queryKey' | 'queryFn'>,
 ) {
   return useQuery<Stream[], Error>({
@@ -80,7 +80,7 @@ export function useChannelStreams(
 }
 
 export function useChannelInfo(
-  channelId: Ref<number> | ComputedRef<number>,
+  channelId: Ref<string> | ComputedRef<string>,
   options?: Omit<UseQueryOptions<Channel, Error>, 'queryKey' | 'queryFn'>,
 ) {
   return useQuery<Channel, Error>({

@@ -23,7 +23,7 @@ from app.config import settings
 from app.models.models import User, UserLoginLog, UserRole, Role
 from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
-from app.services.permission_cache import permission_cache
+from app.services.permission_cache import get_permission_cache
 from app.services.permissions import get_all_permissions_for_user, get_user_roles
 from app.constants import UserRole as UserRoleConstant
 
@@ -179,7 +179,7 @@ async def login(
 
     roles = await get_user_roles(user.id, db)
     permissions = await get_all_permissions_for_user(user.id, db)
-    await permission_cache.set_permissions(
+    await get_permission_cache().set_permissions(
         result.jti, roles, permissions, token_exp, user.id
     )
 
@@ -204,7 +204,7 @@ async def logout(
         try:
             jti, _ = get_token_jti_and_exp(token)
             if jti:
-                await permission_cache.delete_permissions(jti, current_user.id)
+                await get_permission_cache().delete_permissions(jti, current_user.id)
         except Exception:
             pass
 

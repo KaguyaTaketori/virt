@@ -5,7 +5,9 @@
 """
 
 from __future__ import annotations
+from typing import Optional
 
+from redis import Redis
 from sqlalchemy import select, func
 
 from app.loguru_config import logger
@@ -19,6 +21,16 @@ from app.services.bilibili_auth import bilibili_auth_service
 from app.integrations.websub.subscription_service import websub_service
 from app.deps import init_deps
 from app.integrations.api_client import BaseAPIClient
+from app.integrations.bili_client import get_bili_client
+from app.integrations.platform_registry import register_platform
+from app.integrations.youtube import get_youtube_sync_service
+from app.services.api_key_manager import api_key_manager
+from app.worker.tasks import (
+    update_bilibili_streams,
+    update_youtube_streams,
+    discover_live_streams_from_videos,
+    daily_backfill_sync,
+)
 
 
 async def check_production_secrets() -> None:
@@ -52,25 +64,31 @@ async def init_databases() -> None:
     logger.info("Database tables verified/created")
 
 
-async def init_redis() -> bool:
-    """
-    初始化 Redis 及依赖它的子系统。
-    返回 True 表示成功，False 表示降级运行（无 Redis）。
-    """
+async def init_api_keys() -> None:
+    """初始化 API keys"""
+    api_key_manager.initialize(settings.youtube_api_keys_list)
+    logger.info("API keys initialized")
+
+
+async def init_redis() -> Optional[Redis]:
     try:
         redis = await RedisClient.get_client()
         await redis.ping()
-        await init_deps(redis)
-        logger.info("Redis connected and subsystems initialized")
-        return True
+        logger.info("Redis connected")
+        return redis
     except Exception as e:
-        logger.warning("Redis unavailable, running in degraded mode: {}", e)
-        return False
+        logger.warning(
+            "Redis unavailable ({}), running in degraded mode: "
+            "token blacklist, permission cache and danmaku queue disabled",
+            e,
+        )
+        return None
 
 
-async def init_token_blacklist() -> None:
-    """预热 Token 黑名单（从 Redis 加载）。"""
-    redis = await RedisClient.get_client()
+async def init_token_blacklist(redis: Optional[Redis]) -> None:
+    if redis is None:
+        logger.warning("Token blacklist disabled: no Redis")
+        return
     await token_blacklist.init(redis)
     await token_blacklist.warm_up()
     logger.info("Token blacklist warmed up")
@@ -99,6 +117,20 @@ async def register_scheduled_jobs() -> None:
     bilibili_auth_service.start_cleanup_task()
 
     await scheduler_service.start()
+
+    scheduler_service.add_interval_job(
+        update_bilibili_streams, "update_bilibili_streams", seconds=60
+    )
+    scheduler_service.add_interval_job(
+        update_youtube_streams, "update_youtube_streams", seconds=300
+    )
+    scheduler_service.add_interval_job(
+        discover_live_streams_from_videos, "discover_live_streams", seconds=3600
+    )
+    scheduler_service.add_interval_job(
+        daily_backfill_sync, "daily_backfill_sync", seconds=3600
+    )
+
     logger.info("Scheduler started with all jobs registered")
 
 
@@ -107,3 +139,8 @@ async def cleanup_resources() -> None:
     await scheduler_service.shutdown()
     await BaseAPIClient.close_client()
     logger.info("Resources cleaned up")
+
+
+def register_platforms() -> None:
+    register_platform(get_youtube_sync_service())
+    register_platform(get_bili_client())

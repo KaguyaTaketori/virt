@@ -70,7 +70,7 @@ class RedisLock:
         acquired = await lock.acquire()
 
         if not acquired:
-            logger.warning("获取锁失败: %s", key)
+            logger.warning("获取锁失败: {}", key)
             yield False
             return
 

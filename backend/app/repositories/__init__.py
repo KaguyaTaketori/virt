@@ -7,6 +7,7 @@ from app.repositories.channels import (
 )
 from app.repositories.videos import VideoRepository
 from app.repositories.streams import StreamRepository
+from app.repositories.bilibili_dynamics import BilibiliDynamicRepository
 
 __all__ = [
     "ChannelRepository",
@@ -14,4 +15,5 @@ __all__ = [
     "OrganizationRepository",
     "VideoRepository",
     "StreamRepository",
+    "BilibiliDynamicRepository",
 ]

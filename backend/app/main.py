@@ -22,39 +22,44 @@ from app.routers import (
     permissions,
     bilibili_auth,
 )
-from app.services.youtube_websub import router as youtube_websub_router
+from app.routers.youtube_websub import router as youtube_websub_router
 from app.startup import (
     check_production_secrets,
     init_databases,
     init_redis,
     init_token_blacklist,
     init_websub,
+    init_api_keys,
+    register_platforms,
     register_scheduled_jobs,
     cleanup_resources,
 )
+from app.services.danmaku_queue import init_danmaku_queue
+from app.services.permission_cache import init_permission_cache
+from app.services.quota_guard import init_quota_guard
+from app.services.room_counter import init_room_counter
 
 
 @asynccontextmanager
 async def lifespan(app):
-    """
-    应用生命周期编排器。
-    职责：按顺序调用各初始化模块，处理整体启动失败。
-    """
-    try:
-        await check_production_secrets()
-        await init_databases()
-        await init_redis()
-        await init_token_blacklist()
-        await init_websub()
-        await register_scheduled_jobs()
-        logger.info("Application startup complete")
-    except Exception as e:
-        logger.critical("Application startup failed: {}", e)
-        raise
+    await check_production_secrets()
+    await init_databases()
 
+    redis = await init_redis()
+
+    await init_token_blacklist(redis)
+    await init_permission_cache(redis)
+    await init_danmaku_queue(redis)
+    await init_room_counter(redis)
+
+    if redis:
+        await init_quota_guard(redis)
+    await init_websub()
+    await init_api_keys()
+    await register_scheduled_jobs()
+    register_platforms()
+    logger.info("Application startup complete")
     yield
-
-    logger.info("Application shutting down...")
     await cleanup_resources()
 
 
@@ -109,11 +114,12 @@ async def log_requests(request: Request, call_next):
     process_time = (time.time() - start_time) * 1000
 
     logger.bind(access=True).info(
-        "Request: {} {} | Status: {} | Time: {:.2f}ms",
+        "Request: {} {} | Status: {} | Time: {:.2f}ms | Ip: {}",
         request.method,
         request.url.path,
         response.status_code,
         process_time,
+        request.client.host if request.client else "unknown",
     )
     return response
 

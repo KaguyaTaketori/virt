@@ -1,24 +1,30 @@
 from __future__ import annotations
 
 import asyncio
-import time
+import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
-from app.loguru_config import logger
+from app.loguru_config import logger, console
 from app.database import session_scope, upsert_stream
-from app.repositories import ChannelRepository, StreamRepository, VideoRepository
-from app.models.models import Platform
+from app.repositories import ChannelRepository, StreamRepository
+from app.models.models import Channel, Platform
 from app.integrations.bili_client import get_bili_client
-from app.integrations.youtube_client import get_youtube_client
+from app.integrations.youtube import get_youtube_sync_service
 from app.integrations.websub.subscription_service import websub_service
 from app.services.api_key_manager import get_api_key, is_api_available
-from app.deps.permissions import QuotaDep, get_quota_dep
-from app.config import settings
+from app.deps.permissions import get_quota_dep
 from app.services.scraper.sync import scrape_and_sync_all
+from app.services.youtube_sync_state import (
+    set_full_completed,
+    is_all_full_completed,
+    set_all_full_completed as set_all_completed,
+)
+from app.services.redis_client import RedisClient
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, MofNCompleteColumn
 
 
 quota_dep = get_quota_dep()
@@ -46,16 +52,16 @@ class BaseTask(ABC):
 
     async def run(self) -> bool:
         try:
-            logger.info(" task %s start", self.task_id)
+            logger.info(" task {} start", self.task_id)
             await self.execute()
             self._last_run = datetime.now(timezone.utc)
             self._run_count += 1
             logger.info(
-                " task %s completed (run_count=%d)", self.task_id, self._run_count
+                " task {} completed (run_count={})", self.task_id, self._run_count
             )
             return True
         except Exception as e:
-            logger.error(" task %s failed: %s", self.task_id, e)
+            logger.error(" task {} failed: {}", self.task_id, e)
             return False
 
 
@@ -122,20 +128,20 @@ async def update_bilibili_streams() -> None:
 
     async with session_scope() as session:
         for uid, room_data in rooms_data.items():
-            if uid in uid_to_ch_id and room_data:
+            if uid in uid_to_ch_id and room_data and room_data.status != "offline":
                 parsed = {
-                    "video_id": room_data.get("video_id"),
-                    "title": room_data.get("title"),
-                    "thumbnail_url": room_data.get("thumbnail_url"),
-                    "status": room_data.get("status", "offline"),
-                    "viewer_count": room_data.get("viewer_count", 0),
-                    "started_at": room_data.get("started_at"),
+                    "video_id": room_data.video_id,
+                    "title": room_data.title,
+                    "thumbnail_url": room_data.thumbnail_url,
+                    "status": room_data.status,
+                    "viewer_count": room_data.viewer_count,
+                    "started_at": room_data.started_at,
                 }
                 await upsert_stream(
                     session, uid_to_ch_id[uid], parsed, Platform.BILIBILI
                 )
         await session.commit()
-        logger.info("更新 %d 个房间", len(rooms_data))
+        logger.info("更新 {} 个房间", len(rooms_data))
 
 
 async def update_youtube_streams() -> None:
@@ -231,7 +237,7 @@ async def update_youtube_streams() -> None:
 
         await session.commit()
         status = await quota_dep.status()
-        logger.info("刷新 %d 条 | 配额剩余 %d", len(active), status["remaining"])
+        logger.info("刷新 {} 条 | 配额剩余 {}", len(active), status["remaining"])
 
 
 async def sync_youtube_videos_incremental() -> None:
@@ -249,7 +255,7 @@ async def sync_youtube_videos_incremental() -> None:
     if not channels:
         return
 
-    logger.info("开始增量同步，共 %d 个频道", len(channels))
+    logger.info("开始增量同步，共 {} 个频道", len(channels))
 
     for ch in channels:
         try:
@@ -258,98 +264,130 @@ async def sync_youtube_videos_incremental() -> None:
                 ch_obj = await channel_repo.get(ch.id)
                 if not ch_obj:
                     continue
-                yt_client = get_youtube_client()
+                yt_client = get_youtube_sync_service()
                 await yt_client.sync_channel_videos(session, ch_obj, api_key)
                 await session.commit()
-                logger.info("增量同步完成: %s", ch_obj.name)
+                logger.info("增量同步完成: {}", ch_obj.name)
                 await asyncio.sleep(0.3)
         except Exception as e:
-            logger.warning("增量同步错误 channel_id=%d: %s", ch.id, e)
+            logger.warning("增量同步错误 channel_id={}: {}", ch.id, e)
 
     logger.info("增量同步全部完成")
 
 
-async def sync_youtube_videos_full() -> None:
-    from app.services.youtube_sync_state import (
-        get_full_state,
-        set_full_completed,
-        is_all_full_completed,
-        set_all_full_completed as set_all_completed,
-    )
-
+async def sync_youtube_videos_full(limit: int = 10) -> None:
+    """
+    全量同步逻辑：每次执行只同步 limit 个频道。
+    """
     if not await is_api_available():
         logger.info("API 不可用，跳过全量同步")
         return
     if await is_all_full_completed():
         logger.info("所有频道全量同步已完成，跳过")
         return
+    
     api_key = await get_api_key()
     if not api_key:
         return
 
-    BATCH_SIZE = 10
-
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
-        channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
+        all_channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
 
-    if not channels:
+    if not all_channels:
         return
 
-    incomplete_channels = [
-        ch
-        for ch in channels
-        if not (await get_full_state(ch.id) or {}).get("completed")
-    ]
+    incomplete_channels = await _filter_incomplete_channels(all_channels)
+
     if not incomplete_channels:
-        logger.info("所有频道已完成全量同步，跳过")
+        await set_all_completed(True)
+        logger.info("所有频道已完成全量同步")
         return
 
-    total_incomplete = len(incomplete_channels)
-    total_batches = (total_incomplete + BATCH_SIZE - 1) // BATCH_SIZE
-
+    total_to_process_this_run = len(incomplete_channels)
+    batch_to_run = incomplete_channels[:limit]
+    
     logger.info(
-        "开始全量同步: %d 个频道需要同步，分 %d 批处理",
-        total_incomplete,
-        total_batches,
+        "本次全量同步任务启动: 处理 {} 个频道 (剩余待处理总量: {})", 
+        len(batch_to_run), 
+        total_to_process_this_run
     )
 
-    for batch_idx in range(total_batches):
-        batch_start = batch_idx * BATCH_SIZE
-        batch_end = min(batch_start + BATCH_SIZE, total_incomplete)
-        batch_channels = incomplete_channels[batch_start:batch_end]
-
-        logger.info(
-            "处理批次 %d/%d: %d 个频道",
-            batch_idx + 1,
-            total_batches,
-            len(batch_channels),
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        expand=True,
+        console=console
+    ) as progress:
+        main_task = progress.add_task(
+            f"[yellow]本次同步进度 (Batch Size: {limit})", 
+            total=len(batch_to_run)
         )
+        detail_task = progress.add_task("[white]等待中...", total=None)
 
-        for ch in batch_channels:
+        for ch in batch_to_run:
             try:
                 async with session_scope() as session:
                     channel_repo = ChannelRepository(session)
                     ch_obj = await channel_repo.get(ch.id)
                     if not ch_obj:
+                        progress.advance(main_task)
                         continue
 
-                    yt_client = get_youtube_client()
-                    await yt_client.sync_channel_videos(session, ch_obj, api_key)
-                    await set_full_completed(ch.id)
+                    progress.update(detail_task, description=f"正在同步: {ch_obj.name[:10]}", completed=0)
+                    
+                    yt_client = get_youtube_sync_service()
+                    total_count = await yt_client.sync_channel_videos(
+                        session=session,
+                        channel=ch_obj,
+                        full_refresh=True,
+                        progress=progress,
+                        task_id=detail_task,
+                    )
+
+                    # 标记该频道全量完成
+                    await set_full_completed(ch.id, total_count)
                     await session.commit()
+
+                    progress.console.log(f"[green]✓[/green] 完成: {ch_obj.name} (共抓取 {total_count} 视频)")
+                    progress.advance(main_task)
 
                 await asyncio.sleep(0.5)
             except Exception as e:
-                logger.warning("全量同步错误 channel=%s: %s", ch.channel_id, e)
+                progress.console.log(f"[red]× 错误[/red] {ch.channel_id}: {e}")
+                progress.advance(main_task)
                 await asyncio.sleep(2)
 
-        await asyncio.sleep(2)
+    if total_to_process_this_run <= len(batch_to_run):
+        await set_all_completed(True)
+        logger.info("所有频道全量同步已全部完成")
 
-    if len(incomplete_channels) > 0:
-        await set_all_completed()
 
-    logger.info("全量同步全部完成")
+async def _filter_incomplete_channels(
+    channels: list[Channel],
+) -> list[Channel]:
+    redis = await RedisClient.get_client()
+    keys = [f"youtube:sync:full:{ch.id}" for ch in channels]
+
+    raw_values = await redis.mget(*keys)
+
+    incomplete = []
+    for ch, raw in zip(channels, raw_values):
+        if raw is None:
+            incomplete.append(ch)
+            continue
+        try:
+            state = json.loads(raw)
+            if not state.get("completed"):
+                incomplete.append(ch)
+        except json.JSONDecodeError:
+            incomplete.append(ch)
+
+    return incomplete
 
 
 async def discover_live_streams_from_videos() -> None:
@@ -410,7 +448,7 @@ async def discover_live_streams_from_videos() -> None:
                 await quota_dep.spend("search.list", 1)
                 await asyncio.sleep(1)
             except Exception as e:
-                logger.warning("直播发现错误 channel=%s: %s", ch.channel_id, e)
+                logger.warning("直播发现错误 channel={}: {}", ch.channel_id, e)
 
     logger.info("直播发现完成")
 
@@ -420,7 +458,7 @@ async def refresh_channel_details() -> None:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
 
-    yt_client = get_youtube_client()
+    yt_client = get_youtube_sync_service()
     for ch in channels:
         try:
             info = await yt_client.get_channel_info(ch.channel_id)
@@ -435,7 +473,7 @@ async def refresh_channel_details() -> None:
                         db_ch.description = info.get("description", db_ch.description)
                         await session.commit()
         except Exception as e:
-            logger.warning("刷新频道详情错误 channel_id=%s: %s", ch.channel_id, e)
+            logger.warning("刷新频道详情错误 channel_id={}: {}", ch.channel_id, e)
 
     logger.info("频道详情刷新完成")
 
@@ -457,7 +495,7 @@ async def renew_websub() -> None:
         await websub_service.subscribe_all_active(settings.websub_callback_url)
         logger.info("WebSub 订阅刷新完成")
     except Exception as e:
-        logger.error("WebSub 订阅刷新失败: %s", e)
+        logger.error("WebSub 订阅刷新失败: {}", e)
 
 
 async def scheduled_scrape_all() -> None:
@@ -465,4 +503,4 @@ async def scheduled_scrape_all() -> None:
         await scrape_and_sync_all()
         logger.info("定时爬取完成")
     except Exception as e:
-        logger.error("定时爬取失败: %s", e)
+        logger.error("定时爬取失败: {}", e)

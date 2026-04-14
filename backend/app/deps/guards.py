@@ -15,7 +15,7 @@ from app.auth import get_current_user
 from app.deps.base import get_db_session
 from app.models.models import User
 from app.services.permissions import get_user_roles, get_all_permissions_for_user
-from app.services.permission_cache import permission_cache
+from app.services.permission_cache import get_permission_cache
 from app.services.token_blacklist import token_blacklist
 from app.constants import UserRole, PermissionResource, PermissionAction
 
@@ -86,7 +86,7 @@ async def _resolve_auth_context(
         raise HTTPException(status_code=401, detail="User not found",
                             headers={"WWW-Authenticate": "Bearer"})
 
-    cached = await permission_cache.get_permissions(jti, user.id)
+    cached = await get_permission_cache().get_permissions(jti, user.id)
     if cached is not None:
         return AuthContext(
             user=user,
@@ -99,7 +99,7 @@ async def _resolve_auth_context(
     roles = await get_user_roles(user.id, db)
     permissions = await get_all_permissions_for_user(user.id, db)
     if permissions:
-        await permission_cache.set_permissions(jti, roles, permissions, token_exp, user.id)
+        await get_permission_cache().set_permissions(jti, roles, permissions, token_exp, user.id)
 
     return AuthContext(
         user=user,

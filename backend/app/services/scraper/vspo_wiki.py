@@ -42,7 +42,7 @@ class VSPOWikiScraper(BaseWikiScraper):
                 seen.add(key)
                 unique_channels.append(ch)
 
-        logger.info(f"Parsed {len(unique_channels)} VSPO! channels from wiki")
+        logger.info("Parsed {} VSPO! channels from wiki", len(unique_channels))
         return unique_channels
 
     def _find_next_table_by_section(self, heading) -> Optional[Tag]:
@@ -77,7 +77,7 @@ class VSPOWikiScraper(BaseWikiScraper):
                 if channel:
                     channels.append(channel)
             except Exception as e:
-                logger.debug(f"Failed to parse row: {e}")
+                logger.debug("Failed to parse row: {}", e)
                 continue
 
         return channels

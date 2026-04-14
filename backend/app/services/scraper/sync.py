@@ -3,10 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.models import Channel, Organization, Platform
-from app.integrations.youtube_client import get_youtube_client
 from app.database import session_scope
 from app.loguru_config import logger
 from app.services.api_key_manager import get_api_key, is_api_available
+from app.integrations.youtube import get_youtube_sync_service
 from .base import VtuberChannel
 from .vspo_wiki import VSPO_ORG_NAME
 from .nijisanji_wiki import NIJISANJI_ORG_NAME
@@ -31,7 +31,7 @@ async def sync_wiki_channels(
         org = Organization(name=org_name)
         db.add(org)
         await db.flush()
-        logger.info(f"Created organization: {org_name}")
+        logger.info("Created organization: {}", org_name)
 
     for vtuber_ch in vtuber_channels:
         try:
@@ -43,7 +43,7 @@ async def sync_wiki_channels(
             else:
                 stats["skipped"] += 1
         except Exception as e:
-            logger.warning(f"Failed to sync channel {vtuber_ch.name}: {e}")
+            logger.warning("Failed to sync channel {}: {}", vtuber_ch.name, e)
             stats["skipped"] += 1
 
     return stats
@@ -62,7 +62,7 @@ async def _sync_single_channel(
             vtuber_ch.youtube_channel_id = channel_id
 
     if not channel_id:
-        logger.debug(f"Cannot resolve channel_id for {vtuber_ch.name}")
+        logger.debug("Cannot resolve channel_id for {}", vtuber_ch.name)
         return "skipped"
 
     result = await db.execute(
@@ -95,7 +95,7 @@ async def _sync_single_channel(
 
         if updated:
             await db.flush()
-            logger.debug(f"Updated channel: {vtuber_ch.name}")
+            logger.debug("Updated channel: {}", vtuber_ch.name)
             return "updated"
         return "skipped"
 
@@ -117,7 +117,7 @@ async def _sync_single_channel(
     )
     db.add(new_channel)
     await db.flush()
-    logger.info(f"Created channel: {vtuber_ch.name} ({channel_id})")
+    logger.info("Created channel: {} ({})", vtuber_ch.name, channel_id)
 
     try:
         from app.config import settings
@@ -125,17 +125,15 @@ async def _sync_single_channel(
         async with session_scope() as session:
             ch_obj = await session.get(Channel, new_channel.id)
             if ch_obj and await is_api_available():
-                from app.integrations.youtube_client import get_youtube_client
-
                 api_key = await get_api_key()
                 if api_key:
-                    yt_client = get_youtube_client()
+                    yt_client = get_youtube_sync_service()
                     await yt_client.sync_channel_videos(
                         session, ch_obj, api_key, full_refresh=True
                     )
-                    logger.info(f"Synced videos for channel: {vtuber_ch.name}")
+                    logger.info("Synced videos for channel: {}", vtuber_ch.name)
     except Exception as e:
-        logger.warning(f"Failed to sync videos for {vtuber_ch.name}: {e}")
+        logger.warning("Failed to sync videos for {}: {}", vtuber_ch.name, e)
 
     return "created"
 
@@ -143,24 +141,20 @@ async def _sync_single_channel(
 async def _resolve_handle(handle: str) -> Optional[str]:
     """将 @username 解析为 channel_id"""
     try:
-        from app.integrations.youtube_client import get_youtube_client
-
-        yt_client = get_youtube_client()
+        yt_client = get_youtube_sync_service()
         return await yt_client.resolve_channel_id(handle)
     except Exception as e:
-        logger.warning(f"Failed to resolve handle {handle}: {e}")
+        logger.warning("Failed to resolve handle {}: {}", handle, e)
         return None
 
 
 async def _fetch_youtube_info(channel_id: str) -> Optional[dict]:
     """获取YouTube频道详情"""
     try:
-        from app.integrations.youtube_client import get_youtube_client
-
-        yt_client = get_youtube_client()
+        yt_client = get_youtube_sync_service()
         return await yt_client.get_channel_info(channel_id)
     except Exception as e:
-        logger.warning(f"Failed to fetch YouTube info for {channel_id}: {e}")
+        logger.warning("Failed to fetch YouTube info for {}: {}", channel_id, e)
         return None
 
 
@@ -195,13 +189,13 @@ async def scrape_and_sync_all(db: AsyncSession) -> dict:
     try:
         all_stats["vspo"] = await scrape_and_sync_vspo(db)
     except Exception as e:
-        logger.error(f"Failed to scrape VSPO!: {e}")
+        logger.error("Failed to scrape VSPO!: {}", e)
         all_stats["vspo"] = {"error": str(e)}
 
     try:
         all_stats["nijisanji"] = await scrape_and_sync_nijisanji(db)
     except Exception as e:
-        logger.error(f"Failed to scrape Nijisanji: {e}")
+        logger.error("Failed to scrape Nijisanji: {}", e)
         all_stats["nijisanji"] = {"error": str(e)}
 
     return all_stats

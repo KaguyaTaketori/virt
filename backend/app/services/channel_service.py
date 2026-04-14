@@ -7,12 +7,13 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.bili_client import BiliClient, get_bili_client
-from app.integrations.youtube_client import YouTubeClient, get_youtube_client
+from app.integrations.bili_client import BiliClient
+from app.integrations.youtube import YouTubeSyncService
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.repositories import ChannelRepository, StreamRepository, UserChannelRepository
-from app.schemas.schemas import ChannelCreate, BiliLiveStatus, YTLiveStatus
+from app.schemas.schemas import ChannelCreate
+from app.integrations.platform_registry import get_platform
 
 
 class ChannelService:
@@ -24,7 +25,7 @@ class ChannelService:
         channel_repo: ChannelRepository,
         stream_repo: StreamRepository,
         bili_client: BiliClient,
-        youtube_client: YouTubeClient,
+        youtube_service: YouTubeSyncService,
         redis: Optional[Redis] = None,
         user_channel_repo: Optional[UserChannelRepository] = None,
     ):
@@ -32,7 +33,7 @@ class ChannelService:
         self.channel_repo = channel_repo
         self.stream_repo = stream_repo
         self.bili_client = bili_client
-        self.yt_client = youtube_client
+        self.yt_service = youtube_service
         self.redis = redis
         self.user_channel_repo = user_channel_repo or UserChannelRepository(session)
 
@@ -57,7 +58,7 @@ class ChannelService:
 
         if channel_in.platform == Platform.YOUTUBE:
             resolved_id = channel_in.channel_id
-            info = await self.yt_client.get_channel_info(channel_in.channel_id)
+            info = await self.yt_service.get_channel_info(channel_in.channel_id)
             if info and hasattr(info, "channel_id") and info.channel_id:
                 resolved_id = info.channel_id
                 data["channel_id"] = resolved_id
@@ -67,7 +68,7 @@ class ChannelService:
                 data["name"] = data.get("name") or getattr(info, "name", None)
 
             details = (
-                await self.yt_client._get_channel_info_fallback(resolved_id)
+                await self.yt_service._get_channel_info_fallback(resolved_id)
                 if resolved_id
                 else None
             )
@@ -123,7 +124,7 @@ class ChannelService:
         )
         if created:
             logger.info(
-                "Created new channel: %s (%s)", channel.name, channel.channel_id
+                "Created new channel: {} ({})", channel.name, channel.channel_id
             )
         return channel
 
@@ -158,7 +159,7 @@ class ChannelService:
         await self.session.execute(delete(Video).where(Video.channel_id == channel_id))
         await self.session.delete(channel)
         await self.session.flush()
-        logger.info("Deleted channel completely: id=%d", channel_id)
+        logger.info("Deleted channel completely: id={}", channel_id)
         return True
 
     async def set_user_status(
@@ -192,12 +193,12 @@ class ChannelService:
             prev_stream = existing_streams[0]
             prev_status = prev_stream.status.value if prev_stream.status else "offline"
 
-        if channel.platform == Platform.BILIBILI:
-            live_status = await self.bili_client.get_live_status(channel.channel_id)
-        elif channel.platform == Platform.YOUTUBE:
-            live_status = await self.yt_client.get_live_status(channel.channel_id)
-        else:
-            live_status = None
+        platform_client = get_platform(channel.platform)
+        if platform_client is None:
+            logger.warning("No client registered for platform: {}", channel.platform)
+            return None, False
+
+        live_status = await platform_client.get_live_status(channel.channel_id)
 
         if live_status is None:
             return None, False
@@ -233,7 +234,7 @@ class ChannelService:
                 result = await self.sync_channel_status(cid)
                 results[cid] = result
             except Exception as e:
-                logger.warning(f"同步频道 {cid} 失败: {e}")
+                logger.warning("同步频道 {} 失败: {}", cid, e)
                 results[cid] = (None, False)
         return results
 
@@ -253,7 +254,7 @@ class ChannelService:
                 "title": stream.title,
             }
             await self.redis.publish(channel_key, str(payload))
-            logger.info("Published live_started: channel=%s", channel.channel_id)
+            logger.info("Published live_started: channel={}", channel.channel_id)
         except Exception as e:
             logger.error("Failed to publish live_started: {}", e)
 
