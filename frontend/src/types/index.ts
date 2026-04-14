@@ -42,8 +42,6 @@ export interface Channel {
   video_count: number | null
   following_count: number | null
   extra_info: Record<string, unknown> | null
-  full_sync_completed: boolean
-  full_sync_at: string | null
   subscriber_count: number | null
 }
 
