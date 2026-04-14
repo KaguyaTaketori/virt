@@ -205,8 +205,6 @@ class ChannelResponse(ChannelBase):
     video_count: Optional[int] = None
     following_count: Optional[int] = None
     extra_info: Optional[Union[dict, list]] = None
-    full_sync_completed: bool = False
-    full_sync_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
