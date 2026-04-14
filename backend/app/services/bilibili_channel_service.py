@@ -217,22 +217,20 @@ async def fetch_bilibili_channel_data(
     # 3. 获取并刷新频道信息
     info_obj = await client.get_channel_info(uid, credential=credential)
     if info_obj:
-        channel.bilibili_face = info_obj.face or channel.bilibili_face
-        channel.bilibili_sign = info_obj.sign or channel.bilibili_sign
-        channel.bilibili_fans = info_obj.fans or channel.bilibili_fans
-        channel.bilibili_archive_count = (
-            info_obj.archive_count or channel.bilibili_archive_count
-        )
+        channel.avatar_url = info_obj.face or channel.avatar_url
+        channel.bio = info_obj.sign or channel.bio
+        channel.follower_count = info_obj.fans or channel.follower_count
+        channel.video_count = info_obj.archive_count or channel.video_count
         await db.commit()
 
     info_dict = {
         "mid": uid,
         "name": channel.name,
-        "face": channel.bilibili_face,
-        "sign": channel.bilibili_sign,
-        "fans": channel.bilibili_fans,
-        "attention": channel.bilibili_following,
-        "archive_count": channel.bilibili_archive_count,
+        "face": channel.avatar_url,
+        "sign": channel.bio,
+        "fans": channel.follower_count,
+        "attention": channel.following_count,
+        "archive_count": channel.video_count,
     }
     return BilibiliChannelData(
         info=info_dict,
@@ -251,22 +249,20 @@ async def fetch_bilibili_info(
     uid = channel.channel_id
     info_obj = await client.get_channel_info(uid, credential=credential)
     if info_obj:
-        channel.bilibili_face = info_obj.face or channel.bilibili_face
-        channel.bilibili_sign = info_obj.sign or channel.bilibili_sign
-        channel.bilibili_fans = info_obj.fans or channel.bilibili_fans
-        channel.bilibili_archive_count = (
-            info_obj.archive_count or channel.bilibili_archive_count
-        )
+        channel.avatar_url = info_obj.face or channel.avatar_url
+        channel.bio = info_obj.sign or channel.bio
+        channel.follower_count = info_obj.fans or channel.follower_count
+        channel.video_count = info_obj.archive_count or channel.video_count
         await db.commit()
 
     return BilibiliChannelInfo(
         mid=uid,
         name=channel.name,
-        face=channel.bilibili_face,
-        sign=channel.bilibili_sign,
-        fans=channel.bilibili_fans,
-        attention=channel.bilibili_following,
-        archive_count=channel.bilibili_archive_count,
+        face=channel.avatar_url,
+        sign=channel.bio,
+        fans=channel.follower_count,
+        attention=channel.following_count,
+        archive_count=channel.video_count,
     )
 
 
