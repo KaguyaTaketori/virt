@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     Text,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -134,11 +135,13 @@ class Channel(Base):
     videos = relationship("Video", back_populates="channel")
     user_channels = relationship("UserChannel", back_populates="channel")
 
-    bilibili_fans = Column(Integer, nullable=True)
-    bilibili_sign = Column(Text, nullable=True)
-    bilibili_archive_count = Column(Integer, nullable=True)
-    bilibili_face = Column(String(500), nullable=True)
-    bilibili_following = Column(Integer, nullable=True)
+    follower_count = Column(Integer, nullable=True)
+    bio = Column(Text, nullable=True)
+    video_count = Column(Integer, nullable=True)
+    following_count = Column(Integer, nullable=True)
+    extra_info = Column(JSON, nullable=True)
+    full_sync_completed = Column(Boolean, default=False, nullable=False)
+    full_sync_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_channel_platform_active", "platform", "is_active"),)
 
