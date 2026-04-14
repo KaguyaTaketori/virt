@@ -26,10 +26,11 @@ class ChannelInfo:
     description: Optional[str] = None
     twitter_url: Optional[str] = None
     youtube_url: Optional[str] = None
-    bilibili_sign: Optional[str] = None
-    bilibili_fans: Optional[int] = None
-    bilibili_archive_count: Optional[int] = None
-    bilibili_face: Optional[str] = None
+    follower_count: Optional[int] = None
+    bio: Optional[str] = None
+    video_count: Optional[int] = None
+    following_count: Optional[int] = None
+    extra_info: Optional[dict] = None
 
 
 @dataclass

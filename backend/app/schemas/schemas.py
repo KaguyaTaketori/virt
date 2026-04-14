@@ -1,7 +1,7 @@
 import re
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
 from app.models.models import Platform, StreamStatus, User
 
@@ -192,9 +192,13 @@ class ChannelResponse(ChannelBase):
     status: Optional[str] = "active"
     is_liked: Optional[bool] = False
     is_blocked: Optional[bool] = False
-    bilibili_sign: Optional[str] = None
-    bilibili_fans: Optional[int] = None
-    bilibili_archive_count: Optional[int] = None
+    follower_count: Optional[int] = None
+    bio: Optional[str] = None
+    video_count: Optional[int] = None
+    following_count: Optional[int] = None
+    extra_info: Optional[Union[dict, list]] = None
+    full_sync_completed: bool = False
+    full_sync_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
