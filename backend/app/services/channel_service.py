@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.bili_client import BiliClient, get_bili_client
-from app.integrations.youtube import YouTubeSyncService, get_youtube_client
+from app.integrations.youtube import YouTubeSyncService, get_youtube_sync_service
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.repositories import ChannelRepository, StreamRepository, UserChannelRepository
@@ -24,7 +24,7 @@ class ChannelService:
         channel_repo: ChannelRepository,
         stream_repo: StreamRepository,
         bili_client: BiliClient,
-        youtube_client: YouTubeSyncService,
+        youtube_service: YouTubeSyncService,
         redis: Optional[Redis] = None,
         user_channel_repo: Optional[UserChannelRepository] = None,
     ):
@@ -32,7 +32,7 @@ class ChannelService:
         self.channel_repo = channel_repo
         self.stream_repo = stream_repo
         self.bili_client = bili_client
-        self.yt_client = youtube_client
+        self.yt_service = youtube_service
         self.redis = redis
         self.user_channel_repo = user_channel_repo or UserChannelRepository(session)
 
@@ -57,7 +57,7 @@ class ChannelService:
 
         if channel_in.platform == Platform.YOUTUBE:
             resolved_id = channel_in.channel_id
-            info = await self.yt_client.get_channel_info(channel_in.channel_id)
+            info = await self.yt_service.get_channel_info(channel_in.channel_id)
             if info and hasattr(info, "channel_id") and info.channel_id:
                 resolved_id = info.channel_id
                 data["channel_id"] = resolved_id
@@ -67,7 +67,7 @@ class ChannelService:
                 data["name"] = data.get("name") or getattr(info, "name", None)
 
             details = (
-                await self.yt_client._get_channel_info_fallback(resolved_id)
+                await self.yt_service._get_channel_info_fallback(resolved_id)
                 if resolved_id
                 else None
             )
@@ -195,7 +195,7 @@ class ChannelService:
         if channel.platform == Platform.BILIBILI:
             live_status = await self.bili_client.get_live_status(channel.channel_id)
         elif channel.platform == Platform.YOUTUBE:
-            live_status = await self.yt_client.get_live_status(channel.channel_id)
+            live_status = await self.yt_service.get_live_status(channel.channel_id)
         else:
             live_status = None
 

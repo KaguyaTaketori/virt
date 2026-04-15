@@ -48,7 +48,6 @@ def _video_to_bilivideo(video: Video) -> BiliVideo:
         bvid=video.video_id,
         title=video.title or "",
         pic=video.thumbnail_url or "",
-        aid=int(video.video_id) if video.video_id else 0,
         duration=video.duration or "",
         pubdate=int(video.published_at.timestamp()) if video.published_at else 0,
         play=video.view_count or 0,

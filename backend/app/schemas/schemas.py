@@ -316,7 +316,6 @@ class BiliVideo(BaseModel):
     bvid: str
     title: str
     pic: str
-    aid: int
     duration: str
     pubdate: int
     play: int = 0

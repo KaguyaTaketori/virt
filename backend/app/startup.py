@@ -19,6 +19,7 @@ from app.services.bilibili_auth import bilibili_auth_service
 from app.integrations.websub.subscription_service import websub_service
 from app.deps import init_deps
 from app.integrations.api_client import BaseAPIClient
+from app.services.api_key_manager import api_key_manager
 
 
 async def check_production_secrets() -> None:
@@ -100,6 +101,14 @@ async def register_scheduled_jobs() -> None:
 
     await scheduler_service.start()
     logger.info("Scheduler started with all jobs registered")
+
+
+async def init_api_keys() -> None:
+    """初始化 API key 管理器"""
+    api_key_manager.initialize(settings.youtube_api_keys_list)
+    logger.info(
+        "API key manager initialized with {} keys", len(settings.youtube_api_keys_list)
+    )
 
 
 async def cleanup_resources() -> None:

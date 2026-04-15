@@ -124,6 +124,7 @@ function goToLogin() {
           v-if="currentFeedComponent"
           :channel-id="channelId"
           :channel-data="channel"
+          :platform="platform"
           v-model:active-tab="activeTab"
         />
         

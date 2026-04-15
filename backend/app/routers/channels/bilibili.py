@@ -92,7 +92,6 @@ async def get_channel_bilibili_videos_only(
                 "bvid": v.bvid,
                 "title": v.title,
                 "pic": v.pic,
-                "aid": v.aid,
                 "duration": v.duration,
                 "pubdate": v.pubdate,
                 "play": v.play,

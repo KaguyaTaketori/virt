@@ -10,7 +10,8 @@ import { formatCount, formatPubDate } from '@/utils/format'
 interface Props {
   channelId: number
   activeTab: string
-  channelData: any 
+  channelData: any
+  platform: 'bilibili' | 'youtube'
 }
 
 const props = defineProps<Props>()
@@ -72,7 +73,7 @@ const isInitialLoading = (query: any) => query.isLoading.value && !query.data.va
           <div 
             v-for="video in uploadQuery.data.value.videos" :key="video.id" 
             class="group cursor-pointer flex flex-col"
-            @click="addToMultiview(video.id)"
+            @click="addToMultiview(video.id, platform)"
           >
             <div class="aspect-video relative rounded-xl overflow-hidden bg-zinc-900 mb-3 shadow-md group-hover:shadow-red-500/10 transition-all border border-zinc-800/50 group-hover:border-red-500/30">
               <img :src="video.thumbnail_url" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
@@ -107,7 +108,7 @@ const isInitialLoading = (query: any) => query.isLoading.value && !query.data.va
           <div 
             v-for="video in sortedLiveVideos" :key="video.id" 
             class="group cursor-pointer"
-            @click="addToMultiview(video.id)"
+            @click="addToMultiview(video.id, platform)"
           >
             <div class="aspect-video relative rounded-xl overflow-hidden bg-zinc-900 mb-3 border border-zinc-800/50 group-hover:border-red-500/30 transition-all">
               <img :src="video.thumbnail_url" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -149,7 +150,7 @@ const isInitialLoading = (query: any) => query.isLoading.value && !query.data.va
           <div 
             v-for="video in shortsQuery.data.value.videos" :key="video.id" 
             class="group cursor-pointer"
-            @click="addToMultiview(video.id)"
+            @click="addToMultiview(video.id, platform)"
           >
             <div class="aspect-[9/16] relative rounded-2xl overflow-hidden bg-zinc-900 mb-3 border border-zinc-800/50 group-hover:border-red-500/30 transition-all shadow-sm">
               <img :src="video.thumbnail_url" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" loading="lazy" />

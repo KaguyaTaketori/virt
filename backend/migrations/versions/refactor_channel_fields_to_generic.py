@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision: str = "refactor_channel_fields_generic"
-down_revision: Union[str, None] = "regenerate_channel_snowflake_ids"
+down_revision: Union[str, None] = "d0084d29372b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

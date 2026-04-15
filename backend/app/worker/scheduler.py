@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
-from typing import Any, Callable, FrozenSet, Optional
+from typing import Any, Callable, Optional
 
-import httpx
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import STATE_STOPPED

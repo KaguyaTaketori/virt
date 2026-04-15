@@ -31,6 +31,7 @@ from app.startup import (
     init_websub,
     register_scheduled_jobs,
     cleanup_resources,
+    init_api_keys,
 )
 
 
@@ -45,6 +46,7 @@ async def lifespan(app):
         await init_databases()
         await init_redis()
         await init_token_blacklist()
+        await init_api_keys()
         await init_websub()
         await register_scheduled_jobs()
         logger.info("Application startup complete")

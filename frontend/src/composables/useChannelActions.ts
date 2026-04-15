@@ -112,10 +112,11 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
     })
   }
 
-  function addToMultiview(videoId?: string) {
-    if (!channel.value) return
-    const id       = videoId ?? channel.value.channel_id
-    const platform = channel.value.platform as 'youtube' | 'bilibili'
+  function addToMultiview(videoId?: string, platformOverride?: 'youtube' | 'bilibili') {
+    const platform = platformOverride ?? (channel.value?.platform as 'youtube' | 'bilibili')
+    if (!platform) return
+    const id = videoId ?? channel.value?.channel_id
+    if (!id) return
     store.addFromVideoId(platform, id)
     router.push({ name: 'MultiView' })
   }

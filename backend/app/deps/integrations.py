@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db_session
 from app.integrations.bili_client import BiliClient, get_bili_client
-from app.integrations.youtube import YouTubeSyncService, get_youtube_client
+from app.integrations.youtube import YouTubeSyncService, get_youtube_sync_service
 from app.repositories import ChannelRepository, StreamRepository
 from app.services.channel_service import ChannelService
 from app.services.redis_client import RedisClient
@@ -39,7 +39,7 @@ async def get_channel_service(
     channel_repo: ChannelRepository = Depends(_get_channel_repo),
     stream_repo: StreamRepository = Depends(_get_stream_repo),
     bili_client: BiliClient = Depends(get_bili_client),
-    youtube_client: YouTubeSyncService = Depends(get_youtube_client),
+    youtube_service: YouTubeSyncService = Depends(get_youtube_sync_service),
     redis: Optional[Redis] = Depends(get_redis),
 ) -> ChannelService:
     """ChannelService 依赖注入"""
@@ -48,7 +48,7 @@ async def get_channel_service(
         channel_repo=channel_repo,
         stream_repo=stream_repo,
         bili_client=bili_client,
-        youtube_client=youtube_client,
+        youtube_service=youtube_service,
         redis=redis,
     )
 

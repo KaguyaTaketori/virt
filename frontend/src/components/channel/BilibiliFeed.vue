@@ -14,6 +14,7 @@ import { formatCount, formatTimestamp, formatPubDate } from '@/utils/format'
 interface Props {
   channelId: number
   activeTab: string
+  platform: 'bilibili' | 'youtube'
 }
 
 const props = defineProps<Props>()
@@ -84,7 +85,7 @@ const getDynamicTypeLabel = (type: number) => {
         <div 
           v-for="v in videos" :key="v.bvid" 
           class="group cursor-pointer bg-zinc-900/50 rounded-xl overflow-hidden hover:bg-zinc-800 transition-all border border-zinc-800/50 hover:border-pink-500/30"
-          @click="addToMultiview(v.bvid)"
+          @click="addToMultiview(v.bvid, platform)"
         >
           <div class="aspect-video relative overflow-hidden bg-zinc-800">
             <img 
@@ -201,7 +202,7 @@ const getDynamicTypeLabel = (type: number) => {
           <PlayCircle class="w-5 h-5 text-pink-500" /> 最近投稿
         </h3>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">
-          <div v-for="v in videos.slice(0, 4)" :key="v.bvid" class="group cursor-pointer" @click="addToMultiview(v.bvid)">
+          <div v-for="v in videos.slice(0, 4)" :key="v.bvid" class="group cursor-pointer" @click="addToMultiview(v.bvid, platform)">
             <div class="aspect-video rounded-xl overflow-hidden mb-3 bg-zinc-800 shadow-lg">
               <img :src="v.pic + '@320w_200h_1c.webp'" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" referrerpolicy="no-referrer" />
             </div>

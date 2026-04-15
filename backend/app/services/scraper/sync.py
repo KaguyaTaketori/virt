@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.models import Channel, Organization, Platform
-from app.integrations.youtube_client import get_youtube_client
+from app.integrations.youtube import get_youtube_sync_service
 from app.database import session_scope
 from app.loguru_config import logger
 from app.services.api_key_manager import get_api_key, is_api_available
@@ -125,13 +125,13 @@ async def _sync_single_channel(
         async with session_scope() as session:
             ch_obj = await session.get(Channel, new_channel.id)
             if ch_obj and await is_api_available():
-                from app.integrations.youtube_client import get_youtube_client
+                from app.integrations.youtube import get_youtube_sync_service
 
                 api_key = await get_api_key()
                 if api_key:
-                    yt_client = get_youtube_client()
-                    await yt_client.sync_channel_videos(
-                        session, ch_obj, api_key, full_refresh=True
+                    yt_service = get_youtube_sync_service()
+                    await yt_service.sync_channel_videos(
+                        session, ch_obj, full_refresh=True
                     )
                     logger.info(f"Synced videos for channel: {vtuber_ch.name}")
     except Exception as e:
@@ -143,10 +143,10 @@ async def _sync_single_channel(
 async def _resolve_handle(handle: str) -> Optional[str]:
     """将 @username 解析为 channel_id"""
     try:
-        from app.integrations.youtube_client import get_youtube_client
+        from app.integrations.youtube import get_youtube_sync_service
 
-        yt_client = get_youtube_client()
-        return await yt_client.resolve_channel_id(handle)
+        yt_service = get_youtube_sync_service()
+        return await yt_service.resolve_channel_id(handle)
     except Exception as e:
         logger.warning(f"Failed to resolve handle {handle}: {e}")
         return None
@@ -155,10 +155,10 @@ async def _resolve_handle(handle: str) -> Optional[str]:
 async def _fetch_youtube_info(channel_id: str) -> Optional[dict]:
     """获取YouTube频道详情"""
     try:
-        from app.integrations.youtube_client import get_youtube_client
+        from app.integrations.youtube import get_youtube_sync_service
 
-        yt_client = get_youtube_client()
-        return await yt_client.get_channel_info(channel_id)
+        yt_service = get_youtube_sync_service()
+        return await yt_service.get_channel_info(channel_id)
     except Exception as e:
         logger.warning(f"Failed to fetch YouTube info for {channel_id}: {e}")
         return None
