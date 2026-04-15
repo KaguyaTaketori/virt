@@ -310,7 +310,7 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
     incomplete_pool = await _filter_incomplete_channels(all_channels)
 
     if not incomplete_pool:
-        await set_all_full_completed(True) # 标记全局完成
+        await set_all_full_completed() # 标记全局完成
         logger.info("恭喜！所有频道已全部完成全量同步")
         return
 
@@ -386,7 +386,7 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
 
     # 7. 再次检查是否已经彻底跑完了整个大池子
     if len(incomplete_pool) <= len(batch_to_run):
-        await set_all_full_completed(True)
+        await set_all_full_completed()
         logger.info("全量同步全部完成！")
 
 

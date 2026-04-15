@@ -160,6 +160,3 @@ class DanmakuPoller:
 
     def get_active_videos(self) -> Set[str]:
         return {vid for vid, t in self._tasks.items() if not t.done()}
-    
-
-poller = DanmakuPoller()

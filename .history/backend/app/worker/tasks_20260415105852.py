@@ -1,30 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
-from app.loguru_config import logger, console
+from app.loguru_config import logger
 from app.database import session_scope, upsert_stream
 from app.repositories import ChannelRepository, StreamRepository
-from app.models.models import Channel, Platform
+from app.models.models import Platform
 from app.integrations.bili_client import get_bili_client
-from app.integrations.youtube import get_youtube_sync_service
+from app.integrations.youtube import get_youtube_client
 from app.integrations.websub.subscription_service import websub_service
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import get_quota_dep
 from app.services.scraper.sync import scrape_and_sync_all
-from app.services.youtube_sync_state import (
-    set_full_completed,
-    is_all_full_completed,
-    set_all_full_completed,
-)
-from app.services.redis_client import RedisClient
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, MofNCompleteColumn
 
 
 quota_dep = get_quota_dep()
@@ -128,13 +120,16 @@ async def update_bilibili_streams() -> None:
 
     async with session_scope() as session:
         for uid, room_data in rooms_data.items():
-            if uid in uid_to_ch_id and room_data and room_data.status != "offline":
+            if not room_data.video_id:
+                logger.info(f"Skipping update for {uid}: No active video_id (Channel likely offline)")
+                continue 
+            if uid in uid_to_ch_id and room_data:
                 parsed = {
                     "video_id": room_data.video_id,
                     "title": room_data.title,
                     "thumbnail_url": room_data.thumbnail_url,
-                    "status": room_data.status,
-                    "viewer_count": room_data.viewer_count,
+                    "status": room_data.status or "offline",
+                    "viewer_count": room_data.viewer_count or 0,
                     "started_at": room_data.started_at,
                 }
                 await upsert_stream(
@@ -264,7 +259,7 @@ async def sync_youtube_videos_incremental() -> None:
                 ch_obj = await channel_repo.get(ch.id)
                 if not ch_obj:
                     continue
-                yt_client = get_youtube_sync_service()
+                yt_client = get_youtube_client()
                 await yt_client.sync_channel_videos(session, ch_obj, api_key)
                 await session.commit()
                 logger.info("增量同步完成: {}", ch_obj.name)
@@ -310,7 +305,7 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
     incomplete_pool = await _filter_incomplete_channels(all_channels)
 
     if not incomplete_pool:
-        await set_all_full_completed(True) # 标记全局完成
+        await set_all_full_completed() # 标记全局完成
         logger.info("恭喜！所有频道已全部完成全量同步")
         return
 
@@ -386,31 +381,8 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
 
     # 7. 再次检查是否已经彻底跑完了整个大池子
     if len(incomplete_pool) <= len(batch_to_run):
-        await set_all_full_completed(True)
+        await set_all_completed()
         logger.info("全量同步全部完成！")
-
-
-async def _filter_incomplete_channels(
-    channels: list[Channel],
-) -> list[Channel]:
-    redis = await RedisClient.get_client()
-    keys = [f"youtube:sync:full:{ch.id}" for ch in channels]
-
-    raw_values = await redis.mget(*keys)
-
-    incomplete = []
-    for ch, raw in zip(channels, raw_values):
-        if raw is None:
-            incomplete.append(ch)
-            continue
-        try:
-            state = json.loads(raw)
-            if not state.get("completed"):
-                incomplete.append(ch)
-        except json.JSONDecodeError:
-            incomplete.append(ch)
-
-    return incomplete
 
 
 async def discover_live_streams_from_videos() -> None:
@@ -481,7 +453,7 @@ async def refresh_channel_details() -> None:
         channel_repo = ChannelRepository(session)
         channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
 
-    yt_client = get_youtube_sync_service()
+    yt_client = get_youtube_client()
     for ch in channels:
         try:
             info = await yt_client.get_channel_info(ch.channel_id)

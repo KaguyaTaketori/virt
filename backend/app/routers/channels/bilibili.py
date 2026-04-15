@@ -85,7 +85,7 @@ async def get_channel_bilibili_videos_only(
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
-    data = await fetch_bilibili_videos(channel, credential, client, page, page_size)
+    data = await fetch_bilibili_videos(db, channel, credential, client, page, page_size)
     return {
         "videos": [
             {
@@ -117,7 +117,7 @@ async def get_channel_bilibili_dynamics_only(
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
-    data = await fetch_bilibili_dynamics(channel, credential, client, offset, limit)
+    data = await fetch_bilibili_dynamics(db, channel, credential, client, offset, limit)
     return {
         "dynamics": data.dynamics,
         "next_offset": data.next_offset,

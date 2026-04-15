@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+from tqdm import tqdm
 
-from app.loguru_config import logger, console
+from app.loguru_config import logger
 from app.database import session_scope, upsert_stream
 from app.repositories import ChannelRepository, StreamRepository
 from app.models.models import Channel, Platform
@@ -21,7 +22,7 @@ from app.services.scraper.sync import scrape_and_sync_all
 from app.services.youtube_sync_state import (
     set_full_completed,
     is_all_full_completed,
-    set_all_full_completed,
+    set_all_full_completed as set_all_completed,
 )
 from app.services.redis_client import RedisClient
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, MofNCompleteColumn
@@ -275,119 +276,99 @@ async def sync_youtube_videos_incremental() -> None:
     logger.info("增量同步全部完成")
 
 
-async def sync_youtube_videos_full(limit: int = 10) -> None:
-    """
-    全量同步逻辑：
-    每次执行只同步 limit 个尚未完成全量抓取的频道。
-    """
-    # 1. 环境与配额预检
+async def sync_youtube_videos_full() -> None:
     if not await is_api_available():
-        logger.warning("YouTube API 目前不可用或配额耗尽，跳过全量同步")
+        logger.info("API 不可用，跳过全量同步")
         return
-
     if await is_all_full_completed():
-        logger.info("所有频道全量同步状态为 [已完成]，跳过执行")
+        logger.info("所有频道全量同步已完成，跳过")
         return
-
     api_key = await get_api_key()
     if not api_key:
-        logger.error("未能获取有效的 YouTube API Key")
         return
 
-    # 2. 获取待处理数据
+    BATCH_SIZE = 10
+
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
-        # 获取所有激活的 YouTube 频道
-        all_channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
-    
-    if not all_channels:
-        logger.info("未发现需要同步的 YouTube 频道")
+        channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
+
+    if not channels:
         return
 
-    # 3. 过滤出尚未完成全量同步的频道 (基于 Redis/DB 的断点)
-    # _filter_incomplete_channels 会检查 Redis 里的 youtube:sync:full:{id} 状态
-    from app.worker.tasks import _filter_incomplete_channels # 确保导入路径正确
-    incomplete_pool = await _filter_incomplete_channels(all_channels)
+    incomplete_channels = await _filter_incomplete_channels(channels)
 
-    if not incomplete_pool:
-        await set_all_full_completed(True) # 标记全局完成
-        logger.info("恭喜！所有频道已全部完成全量同步")
+    if not incomplete_channels:
+        logger.info("所有频道已完成全量同步，跳过")
         return
 
-    # 4. 取出本次要处理的数量
-    batch_to_run = incomplete_pool[:limit]
-    logger.info("本次全量任务启动: 准备处理 {} 个频道 (总剩余: {})", len(batch_to_run), len(incomplete_pool))
+    total_incomplete = len(incomplete_channels)
+    total_batches = (total_incomplete + BATCH_SIZE - 1) // BATCH_SIZE
 
-    # 5. 使用 Rich 进度条渲染
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=40),
+        BarColumn(),
         TaskProgressColumn(),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
-        console=console, # 关键：共享 loguru 的 console
         expand=True
     ) as progress:
         
-        # 主任务：本次执行的频道进度
-        main_task = progress.add_task(
-            f"[yellow]本次全量进度 (Limit: {limit})", 
-            total=len(batch_to_run)
-        )
-        # 子任务：当前频道抓取的视频详情 (total=None 表示显示脉冲动画)
-        detail_task = progress.add_task("[white]准备中...", total=None)
+        # 1. 总进度条
+        overall_task = progress.add_task("[yellow]总全量同步进度", total=total_incomplete)
+        
+        # 2. 批次进度条 (描述会动态变)
+        batch_task = progress.add_task(f"[green]准备处理批次...", total=BATCH_SIZE)
+        
+        # 3. 详情条 (显示具体视频数)
+        detail_task = progress.add_task("[white]等待中...", total=None)
 
-        for ch in batch_to_run:
-            try:
-                async with session_scope() as session:
-                    channel_repo = ChannelRepository(session)
-                    ch_obj = await channel_repo.get(ch.id)
-                    
-                    if not ch_obj:
-                        progress.advance(main_task)
-                        continue
+        for batch_idx in range(total_batches):
+            batch_start = batch_idx * BATCH_SIZE
+            batch_end = min(batch_start + BATCH_SIZE, total_incomplete)
+            batch_channels = incomplete_channels[batch_start:batch_end]
 
-                    # 重置子进度条状态
-                    progress.update(detail_task, description=f"正在处理: {ch_obj.name[:10]}", completed=0, total=None)
-                    
-                    # 获取同步服务并执行
-                    yt_client = get_youtube_sync_service()
-                    
-                    # 传入 progress 和 detail_task 进行内部 UI 更新
-                    # sync_channel_videos 内部会执行：
-                    # progress.update(task_id, advance=1, description=...)
-                    total_count = await yt_client.sync_channel_videos(
-                        session=session,
-                        channel=ch_obj,
-                        full_refresh=True,
-                        progress=progress,
-                        task_id=detail_task
-                    )
-                    
-                    # 6. 完成后更新状态 (断点记录)
-                    # 这一步会写入 Redis: youtube:sync:full:{ch.id} -> {"completed": True}
-                    await set_full_completed(ch.id, total_count)
-                    await session.commit()
+            current_batch_size = len(batch_channels)
+            progress.update(batch_task, description=f"[green]第 {batch_idx+1}/{total_batches} 批次", completed=0, total=current_batch_size)
 
-                    # RichHandler 会拦截此日志并安全地显示在进度条上方
-                    logger.info("频道同步完成: {} (共 {} 个视频)", ch_obj.name, total_count)
-                    
-                    progress.advance(main_task)
+            for ch in batch_channels:
+                try:
+                    async with session_scope() as session:
+                        channel_repo = ChannelRepository(session)
+                        ch_obj = await channel_repo.get(ch.id)
+                        if not ch_obj:
+                            progress.advance(overall_task)
+                            progress.advance(batch_task)
+                            continue
 
-                # 频道间的微小停顿，保护 API
-                await asyncio.sleep(0.5)
+                        yt_client = get_youtube_sync_service()
+                        total_count = await yt_client.sync_channel_videos(
+                            session=session, 
+                            channel=ch_obj, 
+                            full_refresh=True,
+                            progress=progress,
+                            task_id=detail_task,
+                        )
+                        await set_full_completed(ch.id, total_count)
+                        await session.commit()
 
-            except Exception as e:
-                logger.error("同步过程中出错 [channel={}]: {}", ch.channel_id, str(e))
-                # 出错也继续下一个频道，不中断批次
-                progress.advance(main_task)
-                await asyncio.sleep(2)
+                        progress.console.log(f"[blue]批次 {batch_idx+1}[/blue] | [green]✓[/green] {ch_obj.name} ({total_count} 视频)")
+                        progress.advance(batch_task)
+                        progress.advance(overall_task)
 
-    # 7. 再次检查是否已经彻底跑完了整个大池子
-    if len(incomplete_pool) <= len(batch_to_run):
-        await set_all_full_completed(True)
-        logger.info("全量同步全部完成！")
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    progress.console.log(f"[red]× 错误[/red] {ch.channel_id}: {e}")
+                    progress.advance(batch_task)
+                    progress.advance(overall_task)
+                    await asyncio.sleep(2)
+        progress.console.log(f"[bold yellow]第 {batch_idx+1} 批次处理完成[/bold yellow]")
+        await asyncio.sleep(1)
+        if len(incomplete_channels) > 0:
+            await set_all_completed()
+
+        logger.info("全量同步全部完成")
 
 
 async def _filter_incomplete_channels(
