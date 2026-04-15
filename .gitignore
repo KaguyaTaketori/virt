@@ -5,6 +5,7 @@ Thumbs.db
 *.bak
 *.swp
 .idea/
+.history/
 .vscode/
 *.sublime-project
 *.sublime-workspace
@@ -77,3 +78,7 @@ wheels/
 # 临时文件
 tmp/
 temp/
+
+# --- Redis ---
+appendonlydir/
+dump.rdb

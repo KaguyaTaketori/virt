@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 
@@ -24,94 +22,18 @@ from app.services.youtube_sync_state import (
     set_all_full_completed,
 )
 from app.services.redis_client import RedisClient
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, MofNCompleteColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TimeElapsedColumn,
+    MofNCompleteColumn,
+)
 
 
 quota_dep = get_quota_dep()
-
-
-class BaseTask(ABC):
-    """后台任务基类。"""
-
-    def __init__(self, task_id: str):
-        self.task_id = task_id
-        self._last_run: Optional[datetime] = None
-        self._run_count: int = 0
-
-    @property
-    def last_run(self) -> Optional[datetime]:
-        return self._last_run
-
-    @property
-    def run_count(self) -> int:
-        return self._run_count
-
-    @abstractmethod
-    async def execute(self) -> None:
-        raise NotImplementedError
-
-    async def run(self) -> bool:
-        try:
-            logger.info(" task {} start", self.task_id)
-            await self.execute()
-            self._last_run = datetime.now(timezone.utc)
-            self._run_count += 1
-            logger.info(
-                " task {} completed (run_count={})", self.task_id, self._run_count
-            )
-            return True
-        except Exception as e:
-            logger.error(" task {} failed: {}", self.task_id, e)
-            return False
-
-
-class IntervalTask(BaseTask):
-    def __init__(self, task_id: str, interval_seconds: int):
-        super().__init__(task_id)
-        self.interval_seconds = interval_seconds
-
-    @property
-    def interval(self) -> int:
-        return self.interval_seconds
-
-
-class CronTask(BaseTask):
-    def __init__(
-        self,
-        task_id: str,
-        hour: Optional[int] = None,
-        minute: Optional[int] = None,
-        day_of_week: Optional[str] = None,
-    ):
-        super().__init__(task_id)
-        self.hour = hour
-        self.minute = minute
-        self.day_of_week = day_of_week
-
-
-class TaskRegistry:
-    _tasks: dict[str, BaseTask] = {}
-
-    @classmethod
-    def register(cls, task: BaseTask) -> None:
-        cls._tasks[task.task_id] = task
-
-    @classmethod
-    def get(cls, task_id: str) -> Optional[BaseTask]:
-        return cls._tasks.get(task_id)
-
-    @classmethod
-    def get_all(cls) -> dict[str, BaseTask]:
-        return cls._tasks.copy()
-
-    @classmethod
-    def list_tasks(cls) -> list[str]:
-        return list(cls._tasks.keys())
-
-
-def register_task(task: BaseTask) -> None:
-    TaskRegistry.register(task)
-    return task
 
 
 async def update_bilibili_streams() -> None:
@@ -299,24 +221,29 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
         channel_repo = ChannelRepository(session)
         # 获取所有激活的 YouTube 频道
         all_channels = await channel_repo.get_active_channels(Platform.YOUTUBE)
-    
+
     if not all_channels:
         logger.info("未发现需要同步的 YouTube 频道")
         return
 
     # 3. 过滤出尚未完成全量同步的频道 (基于 Redis/DB 的断点)
     # _filter_incomplete_channels 会检查 Redis 里的 youtube:sync:full:{id} 状态
-    from app.worker.tasks import _filter_incomplete_channels # 确保导入路径正确
+    from app.worker.tasks import _filter_incomplete_channels  # 确保导入路径正确
+
     incomplete_pool = await _filter_incomplete_channels(all_channels)
 
     if not incomplete_pool:
-        await set_all_full_completed(True) # 标记全局完成
+        await set_all_full_completed(True)  # 标记全局完成
         logger.info("恭喜！所有频道已全部完成全量同步")
         return
 
     # 4. 取出本次要处理的数量
     batch_to_run = incomplete_pool[:limit]
-    logger.info("本次全量任务启动: 准备处理 {} 个频道 (总剩余: {})", len(batch_to_run), len(incomplete_pool))
+    logger.info(
+        "本次全量任务启动: 准备处理 {} 个频道 (总剩余: {})",
+        len(batch_to_run),
+        len(incomplete_pool),
+    )
 
     # 5. 使用 Rich 进度条渲染
     with Progress(
@@ -326,14 +253,12 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
         TaskProgressColumn(),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
-        console=console, # 关键：共享 loguru 的 console
-        expand=True
+        console=console,  # 关键：共享 loguru 的 console
+        expand=True,
     ) as progress:
-        
         # 主任务：本次执行的频道进度
         main_task = progress.add_task(
-            f"[yellow]本次全量进度 (Limit: {limit})", 
-            total=len(batch_to_run)
+            f"[yellow]本次全量进度 (Limit: {limit})", total=len(batch_to_run)
         )
         # 子任务：当前频道抓取的视频详情 (total=None 表示显示脉冲动画)
         detail_task = progress.add_task("[white]准备中...", total=None)
@@ -343,17 +268,22 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
                 async with session_scope() as session:
                     channel_repo = ChannelRepository(session)
                     ch_obj = await channel_repo.get(ch.id)
-                    
+
                     if not ch_obj:
                         progress.advance(main_task)
                         continue
 
                     # 重置子进度条状态
-                    progress.update(detail_task, description=f"正在处理: {ch_obj.name[:10]}", completed=0, total=None)
-                    
+                    progress.update(
+                        detail_task,
+                        description=f"正在处理: {ch_obj.name[:10]}",
+                        completed=0,
+                        total=None,
+                    )
+
                     # 获取同步服务并执行
                     yt_client = get_youtube_sync_service()
-                    
+
                     # 传入 progress 和 detail_task 进行内部 UI 更新
                     # sync_channel_videos 内部会执行：
                     # progress.update(task_id, advance=1, description=...)
@@ -362,17 +292,19 @@ async def sync_youtube_videos_full(limit: int = 10) -> None:
                         channel=ch_obj,
                         full_refresh=True,
                         progress=progress,
-                        task_id=detail_task
+                        task_id=detail_task,
                     )
-                    
+
                     # 6. 完成后更新状态 (断点记录)
                     # 这一步会写入 Redis: youtube:sync:full:{ch.id} -> {"completed": True}
                     await set_full_completed(ch.id, total_count)
                     await session.commit()
 
                     # RichHandler 会拦截此日志并安全地显示在进度条上方
-                    logger.info("频道同步完成: {} (共 {} 个视频)", ch_obj.name, total_count)
-                    
+                    logger.info(
+                        "频道同步完成: {} (共 {} 个视频)", ch_obj.name, total_count
+                    )
+
                     progress.advance(main_task)
 
                 # 频道间的微小停顿，保护 API
