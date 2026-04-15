@@ -52,29 +52,28 @@ export const channelApi = {
   getAll:    (params?: Record<string, unknown>) =>
     api.get<Channel[]>('/api/channels/', { params }),
 
-  get:       (id: number) =>
+  get:       (id: string) =>
     api.get<Channel>(`/api/channels/${id}`),
 
-  getBilibili: (id: number, dynamicsOffset?: string, dynamicsLimit?: number) =>
+  getBilibili: (id: string, dynamicsOffset?: string, dynamicsLimit?: number) =>
     api.get<BilibiliInfo>(`/api/channels/${id}/bilibili`, {
       params: { dynamics_offset: dynamicsOffset, dynamics_limit: dynamicsLimit },
     }),
 
-  getBilibiliInfo: (id: number) =>
+  getBilibiliInfo: (id: string) =>
     api.get<BilibiliInfoData>(`/api/channels/${id}/bilibili/info`),
 
-  getBilibiliVideos: (id: number, page?: number, pageSize?: number) =>
+  getBilibiliVideos: (id: string, page?: number, pageSize?: number) =>
     api.get<BilibiliVideosData>(`/api/channels/${id}/bilibili/videos`, {
       params: { page, page_size: pageSize },
     }),
 
-  getBilibiliDynamics: (id: number, offset?: string, limit?: number) =>
+  getBilibiliDynamics: (id: string, offset?: string, limit?: number) =>
     api.get<BilibiliDynamicsData>(`/api/channels/${id}/bilibili/dynamics`, {
       params: { offset, limit },
     }),
 
-  // 明确返回 PaginatedVideos，消除隐式 any
-  getVideos: (id: number, page?: number, pageSize?: number, status?: string) =>
+  getVideos: (id: string, page?: number, pageSize?: number, status?: string) =>
     api.get<PaginatedVideos>(`/api/channels/${id}/videos`, {
       params: { page, page_size: pageSize, status },
     }),
@@ -82,10 +81,10 @@ export const channelApi = {
   create:    (data: Partial<Channel>) =>
     api.post<Channel>('/api/channels/', data),
 
-  update:    (id: number, data: Partial<Channel>) =>
+  update:    (id: string, data: Partial<Channel>) =>
     api.put<Channel>(`/api/channels/${id}`, data),
 
-  delete:    (id: number) =>
+  delete:    (id: string) =>
     api.delete(`/api/channels/${id}`),
 }
 

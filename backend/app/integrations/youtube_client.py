@@ -226,7 +226,7 @@ class YouTubeClient:
                                 items[0], channel_id
                             )
             except Exception as e:
-                logger.warning("YouTube API Error for channel info: %s", e)
+                logger.warning("YouTube API Error for channel info: {}", e)
 
         return await self._get_channel_info_fallback(channel_id)
 
@@ -288,7 +288,7 @@ class YouTubeClient:
                         "avatar_url": avatar_url,
                     }
         except Exception as e:
-            logger.debug("Scraping channel info error: %s", e)
+            logger.debug("Scraping channel info error: {}", e)
         return None
 
     async def resolve_channel_id(self, input_str: str) -> Optional[str]:
@@ -310,7 +310,7 @@ class YouTubeClient:
             channel_id = await self._resolve_from_page(safe_url)
             return channel_id
         except Exception as e:
-            logger.debug("Failed to resolve channel ID from %s: %s", safe_url, e)
+            logger.debug("Failed to resolve channel ID from {}: {}", safe_url, e)
             return None
 
     def _build_safe_url(self, input_str: str) -> Optional[str]:
@@ -349,7 +349,7 @@ class YouTubeClient:
         try:
             validate_safe_url(url, allowed_hosts={"youtube.com", "youtu.be"})
         except ValueError as e:
-            logger.warning("Resolve from page blocked unsafe URL %r: %s", url[:80], e)
+            logger.warning("Resolve from page blocked unsafe URL {}: {}", url[:80], e)
             return None
 
         try:
@@ -468,7 +468,7 @@ class YouTubeClient:
             cid, status = item
             results[cid] = status
 
-        logger.info("YouTube batch status: %d/%d", len(results), len(channel_ids))
+        logger.info("YouTube batch status: {}/{}", len(results), len(channel_ids))
         return results
 
     def _uc_to_uu(self, channel_id: str) -> Optional[str]:
@@ -726,7 +726,7 @@ class YouTubeClient:
         await session.commit()
 
         logger.info(
-            "频道 %r 同步任务完成 | 平台: %s | 新增/更新视频数: %d | 模式: %s",
+            "频道 {} 同步任务完成 | 平台: {} | 新增/更新视频数: {} | 模式: {}",
             channel.name,
             channel.platform,
             total_processed,

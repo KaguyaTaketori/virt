@@ -203,7 +203,7 @@ function openEditModal(channel: Channel) {
   tableRef.value.openEdit()
 }
 
-async function handleDelete(id: number) {
+async function handleDelete(id: string) {
   if (!confirm('确定删除吗？')) return
   try {
     await channelApi.delete(id)

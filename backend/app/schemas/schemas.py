@@ -181,8 +181,16 @@ class ChannelCreate(ChannelBase):
 
 
 class ChannelResponse(ChannelBase):
-    id: int
+    id: str = Field(..., description="Channel ID (Snowflake)")
     org_id: Optional[int] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_id_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+
     banner_url: Optional[str] = None
     twitter_url: Optional[str] = None
     youtube_url: Optional[str] = None
@@ -216,16 +224,30 @@ class StreamBase(BaseModel):
 
 
 class StreamCreate(StreamBase):
-    channel_id: int
+    channel_id: str = Field(..., description="Channel ID (Snowflake)")
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def convert_channel_id_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
 
 
 class StreamResponse(StreamBase):
     id: int
-    channel_id: int
+    channel_id: str = Field(..., description="Channel ID (Snowflake)")
     channel_name: Optional[str] = None
     channel_avatar: Optional[str] = None
-    channel_avatar_shape: Optional[str] = None  # 新增
-    org_id: Optional[int] = None  # 新增
+    channel_avatar_shape: Optional[str] = None
+    org_id: Optional[int] = None
+
+    @field_validator("channel_id", mode="before")
+    @classmethod
+    def convert_channel_id_to_str(cls, v):
+        if v is not None:
+            return str(v)
+        return v
 
     class Config:
         from_attributes = True

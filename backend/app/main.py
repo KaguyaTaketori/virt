@@ -22,7 +22,7 @@ from app.routers import (
     permissions,
     bilibili_auth,
 )
-from app.services.youtube_websub import router as youtube_websub_router
+from app.routers.youtube_websub import router as youtube_websub_router
 from app.startup import (
     check_production_secrets,
     init_databases,

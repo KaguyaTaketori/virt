@@ -21,11 +21,11 @@ export function useCreateChannel(
 }
 
 export function useUpdateChannel(
-  options?: Omit<UseMutationOptions<Channel, Error, { id: number; data: Partial<Channel> }>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<Channel, Error, { id: string; data: Partial<Channel> }>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<Channel, Error, { id: number; data: Partial<Channel> }>({
+  return useMutation<Channel, Error, { id: string; data: Partial<Channel> }>({
     mutationFn: async ({ id, data }) => {
       const { data: result } = await channelApi.update(id, data)
       return result
@@ -39,11 +39,11 @@ export function useUpdateChannel(
 }
 
 export function useDeleteChannel(
-  options?: Omit<UseMutationOptions<void, Error, number>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<void, Error, string>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<void, Error, number>({
+  return useMutation<void, Error, string>({
     mutationFn: async (channelId) => {
       await channelApi.delete(channelId)
     },
@@ -55,11 +55,11 @@ export function useDeleteChannel(
 }
 
 export function useLikeChannel(
-  options?: Omit<UseMutationOptions<void, Error, number>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<void, Error, string>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<void, Error, number>({
+  return useMutation<void, Error, string>({
     mutationFn: async (channelId) => {
       await userChannelApi.like(channelId)
     },
@@ -71,11 +71,11 @@ export function useLikeChannel(
 }
 
 export function useUnlikeChannel(
-  options?: Omit<UseMutationOptions<void, Error, number>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<void, Error, string>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<void, Error, number>({
+  return useMutation<void, Error, string>({
     mutationFn: async (channelId) => {
       await userChannelApi.unlike(channelId)
     },
@@ -87,11 +87,11 @@ export function useUnlikeChannel(
 }
 
 export function useBlockChannel(
-  options?: Omit<UseMutationOptions<void, Error, number>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<void, Error, string>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<void, Error, number>({
+  return useMutation<void, Error, string>({
     mutationFn: async (channelId) => {
       await userChannelApi.block(channelId)
     },
@@ -103,11 +103,11 @@ export function useBlockChannel(
 }
 
 export function useUnblockChannel(
-  options?: Omit<UseMutationOptions<void, Error, number>, 'mutationFn'>,
+  options?: Omit<UseMutationOptions<void, Error, string>, 'mutationFn'>,
 ) {
   const queryClient = useQueryClient()
 
-  return useMutation<void, Error, number>({
+  return useMutation<void, Error, string>({
     mutationFn: async (channelId) => {
       await userChannelApi.unblock(channelId)
     },

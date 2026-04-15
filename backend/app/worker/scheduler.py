@@ -114,7 +114,7 @@ class SchedulerService:
             **self._job_defaults,
             **kwargs,
         )
-        logger.debug("Registered interval job: %s", job_id)
+        logger.debug("Registered interval job: {}", job_id)
 
     def add_cron_job(
         self,
@@ -146,7 +146,7 @@ class SchedulerService:
             **self._job_defaults,
             **kwargs,
         )
-        logger.debug("Registered cron job: %s", job_id)
+        logger.debug("Registered cron job: {}", job_id)
 
     def remove_job(self, job_id: str) -> bool:
         """移除任务"""
@@ -154,7 +154,7 @@ class SchedulerService:
             return False
         try:
             self._scheduler.remove_job(job_id)
-            logger.info("Removed job: %s", job_id)
+            logger.info("Removed job: {}", job_id)
             return True
         except Exception:
             return False
@@ -199,15 +199,15 @@ class PeriodicTaskRunner:
             f"task:{self.task_id}", timeout=self.lock_timeout
         ) as acquired:
             if not acquired:
-                logger.info("Task %s skipped (already running)", self.task_id)
+                logger.info("Task {} skipped (already running)", self.task_id)
                 return False
 
             try:
                 await func(*args, **kwargs)
-                logger.info("Task %s completed", self.task_id)
+                logger.info("Task {} completed", self.task_id)
                 return True
             except Exception as e:
-                logger.error("Task %s failed: %s", self.task_id, e)
+                logger.error("Task {} failed: {}", self.task_id, e)
                 return False
 
 

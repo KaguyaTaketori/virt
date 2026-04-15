@@ -19,7 +19,7 @@ from app.models.models import (
     UserChannel,
 )
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
-from app.integrations.youtube_client import get_youtube_client
+from app.integrations.youtube import get_youtube_client
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.constants import UserChannelStatus
 from app.deps import get_channel_service

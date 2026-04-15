@@ -25,6 +25,7 @@ dependencies = [
     "cloudscraper>=1.2.71",
     "redis>=5.0.0",
     "tenacity>=9.0.0",
+    "rich>=15.0.0"
 ]
 
 [project.optional-dependencies]

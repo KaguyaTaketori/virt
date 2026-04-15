@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.bili_client import BiliClient, get_bili_client
-from app.integrations.youtube_client import YouTubeClient, get_youtube_client
+from app.integrations.youtube import YouTubeSyncService, get_youtube_client
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.repositories import ChannelRepository, StreamRepository, UserChannelRepository
@@ -24,7 +24,7 @@ class ChannelService:
         channel_repo: ChannelRepository,
         stream_repo: StreamRepository,
         bili_client: BiliClient,
-        youtube_client: YouTubeClient,
+        youtube_client: YouTubeSyncService,
         redis: Optional[Redis] = None,
         user_channel_repo: Optional[UserChannelRepository] = None,
     ):
@@ -123,7 +123,7 @@ class ChannelService:
         )
         if created:
             logger.info(
-                "Created new channel: %s (%s)", channel.name, channel.channel_id
+                "Created new channel: {} ({})", channel.name, channel.channel_id
             )
         return channel
 
@@ -158,7 +158,7 @@ class ChannelService:
         await self.session.execute(delete(Video).where(Video.channel_id == channel_id))
         await self.session.delete(channel)
         await self.session.flush()
-        logger.info("Deleted channel completely: id=%d", channel_id)
+        logger.info("Deleted channel completely: id={}", channel_id)
         return True
 
     async def set_user_status(
@@ -233,7 +233,7 @@ class ChannelService:
                 result = await self.sync_channel_status(cid)
                 results[cid] = result
             except Exception as e:
-                logger.warning(f"同步频道 {cid} 失败: {e}")
+                logger.warning("同步频道 {} 失败: {}", cid, e)
                 results[cid] = (None, False)
         return results
 
@@ -253,7 +253,7 @@ class ChannelService:
                 "title": stream.title,
             }
             await self.redis.publish(channel_key, str(payload))
-            logger.info("Published live_started: channel=%s", channel.channel_id)
+            logger.info("Published live_started: channel={}", channel.channel_id)
         except Exception as e:
             logger.error("Failed to publish live_started: {}", e)
 

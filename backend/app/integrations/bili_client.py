@@ -266,7 +266,7 @@ class BiliClient:
             uid, status = item
             results[uid] = status
 
-        logger.info("Bilibili batch status: %d/%d", len(results), len(uids))
+        logger.info("Bilibili batch status: {}/{}", len(results), len(uids))
         return results
 
     @retry(**NO_RETRY_CONFIG)
@@ -417,7 +417,7 @@ class BiliClient:
 
         except Exception as e:
             logger.exception(
-                "解析新动态项失败: id=%s, error=%s",
+                "解析新动态项失败: id={}, error={}",
                 item.get("id_str", "unknown"),
                 str(e),
             )

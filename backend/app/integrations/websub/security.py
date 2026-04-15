@@ -28,7 +28,7 @@ def verify_hmac_signature(
     
     hash_fn = _SUPPORTED_ALGOS.get(algo_name)
     if hash_fn is None:
-        logger.warning("不支持的 HMAC 算法: %s", algo_name)
+        logger.warning("不支持的 HMAC 算法: {}", algo_name)
         return False
 
     expected = hmac.new(secret.encode("utf-8"), body, hash_fn).hexdigest()

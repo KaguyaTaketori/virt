@@ -15,9 +15,18 @@ from app.integrations.urls import (
     validate_safe_url,
 )
 from app.integrations.bili_client import BiliClient, get_bili_client, bili_client_dep
+from app.integrations.youtube import (
+    YouTubeApiClient,
+    YouTubeSyncService,
+    VideoParser,
+    get_yt_api_client,
+    get_yt_parser,
+    get_youtube_sync_service,
+    get_youtube_client,
+)
 from app.integrations.youtube_client import (
     YouTubeClient,
-    get_youtube_client,
+    get_youtube_client as get_youtube_client_old,
     youtube_client_dep,
 )
 from app.integrations.api_client import (
@@ -38,7 +47,14 @@ __all__ = [
     "bili_client_dep",
     "YouTubeClient",
     "get_youtube_client",
+    "get_youtube_client_old",
     "youtube_client_dep",
+    "YouTubeApiClient",
+    "YouTubeSyncService",
+    "VideoParser",
+    "get_yt_api_client",
+    "get_yt_parser",
+    "get_youtube_sync_service",
     "BaseAPIClient",
     "BilibiliAPIClient",
     "YouTubeAPIClient",

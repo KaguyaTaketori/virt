@@ -1,6 +1,6 @@
 export interface Stream {
   id: number
-  channel_id: number
+  channel_id: string
   platform: 'youtube' | 'bilibili'
   video_id: string | null
   title: string | undefined
@@ -20,7 +20,7 @@ export interface Stream {
 export type StreamStatus = 'live' | 'upcoming' | 'archive' | 'offline'
 
 export interface Channel {
-  id: number
+  id: string
   platform: 'youtube' | 'bilibili' | 'empty'
   channel_id: string
   name: string
