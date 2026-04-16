@@ -1,9 +1,5 @@
-from app.worker.scheduler import (
-    SchedulerService,
-    scheduler_service,
-    PeriodicTaskRunner,
-    run_with_lock,
-)
+from __future__ import annotations
+
 from app.worker.tasks.bilibili import update_bilibili_streams
 from app.worker.tasks.youtube import (
     update_youtube_streams,
@@ -15,15 +11,8 @@ from app.worker.tasks.youtube import (
 )
 from app.worker.tasks.websub import renew_websub
 from app.worker.tasks.scraper import scheduled_scrape_all
-from app.worker.locks import RedisLock, distributed_lock
 
 __all__ = [
-    "SchedulerService",
-    "scheduler_service",
-    "PeriodicTaskRunner",
-    "run_with_lock",
-    "RedisLock",
-    "distributed_lock",
     "update_bilibili_streams",
     "update_youtube_streams",
     "sync_youtube_videos_incremental",

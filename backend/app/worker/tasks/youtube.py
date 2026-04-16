@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 
@@ -10,12 +10,9 @@ from app.loguru_config import logger, console
 from app.database import session_scope, upsert_stream
 from app.repositories import ChannelRepository, StreamRepository
 from app.models.models import Channel, Platform
-from app.integrations.bili_client import get_bili_client
 from app.integrations.youtube import get_youtube_sync_service
-from app.integrations.websub.subscription_service import websub_service
 from app.services.api_key_manager import get_api_key, is_api_available
 from app.deps.permissions import get_quota_dep
-from app.services.scraper.sync import scrape_and_sync_all
 from app.services.youtube_sync_state import (
     set_full_completed,
     is_all_full_completed,
@@ -34,36 +31,6 @@ from rich.progress import (
 
 
 quota_dep = get_quota_dep()
-
-
-async def update_bilibili_streams() -> None:
-    client = get_bili_client()
-    async with session_scope() as session:
-        channel_repo = ChannelRepository(session)
-        channels = await channel_repo.get_active_channels(Platform.BILIBILI)
-        if not channels:
-            return
-        uid_to_ch_id = {ch.channel_id: ch.id for ch in channels}
-        uids = list(uid_to_ch_id.keys())
-
-    rooms_data = await client.batch_get_live_status(uids)
-
-    async with session_scope() as session:
-        for uid, room_data in rooms_data.items():
-            if uid in uid_to_ch_id and room_data and room_data.status != "offline":
-                parsed = {
-                    "video_id": room_data.video_id,
-                    "title": room_data.title,
-                    "thumbnail_url": room_data.thumbnail_url,
-                    "status": room_data.status,
-                    "viewer_count": room_data.viewer_count,
-                    "started_at": room_data.started_at,
-                }
-                await upsert_stream(
-                    session, uid_to_ch_id[uid], parsed, Platform.BILIBILI
-                )
-        await session.commit()
-        logger.info("更新 {} 个房间", len(rooms_data))
 
 
 async def update_youtube_streams() -> None:
@@ -193,10 +160,6 @@ async def sync_youtube_videos_incremental() -> None:
 
 
 async def sync_youtube_videos_full(limit: int = 10) -> None:
-    """
-    全量同步逻辑：
-    每次执行只同步 limit 个尚未完成全量抓取的频道。
-    """
     if not await is_api_available():
         logger.warning("YouTube API 目前不可用或配额耗尽，跳过全量同步")
         return
@@ -406,27 +369,3 @@ async def refresh_channel_details() -> None:
 
 async def daily_backfill_sync() -> None:
     await sync_youtube_videos_full()
-
-
-async def renew_websub() -> None:
-    from app.config import settings
-
-    if (
-        not settings.websub_callback_url
-        or settings.websub_callback_url == "https://your-domain.com/api/websub/youtube"
-    ):
-        return
-
-    try:
-        await websub_service.subscribe_all_active(settings.websub_callback_url)
-        logger.info("WebSub 订阅刷新完成")
-    except Exception as e:
-        logger.error("WebSub 订阅刷新失败: {}", e)
-
-
-async def scheduled_scrape_all() -> None:
-    try:
-        await scrape_and_sync_all()
-        logger.info("定时爬取完成")
-    except Exception as e:
-        logger.error("定时爬取失败: {}", e)

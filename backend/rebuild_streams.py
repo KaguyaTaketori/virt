@@ -6,7 +6,7 @@
 import asyncio
 from app.config import settings
 from app.services.api_key_manager import api_key_manager
-from app.worker.tasks import sync_youtube_videos_full
+from app.worker.tasks.youtube import sync_youtube_videos_full
 
 api_key_manager.initialize(settings.youtube_api_keys_list)
 
