@@ -86,7 +86,7 @@ export function useMultiStatusVideos(
 
 export function useAdminVideos(
   params: MaybeRefOrGetter<{
-    channel_id: number
+    channel_id: string
     status?: string
     duration_min?: number | null
     duration_max?: number | null
