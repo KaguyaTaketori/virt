@@ -17,6 +17,14 @@ class ChannelRepository(BaseRepository[Channel]):
 
     model = Channel
 
+    async def get_multi_by_ids(self, ids: list[int]) -> list[Channel]:
+        """通过多个ID批量查询频道。"""
+        if not ids:
+            return []
+        query = select(Channel).where(Channel.id.in_(ids))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def get_by_channel_id(
         self, platform_channel_id: str, platform: Platform
     ) -> Optional[Channel]:
@@ -118,6 +126,47 @@ class UserChannelRepository(BaseRepository[UserChannel]):
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def get_multi_by_user_and_channels(
+        self, user_id: int, channel_ids: list[int]
+    ) -> list[UserChannel]:
+        """获取用户对多个频道的关注状态。"""
+        if not channel_ids:
+            return []
+        query = select(UserChannel).where(
+            and_(
+                UserChannel.user_id == user_id, UserChannel.channel_id.in_(channel_ids)
+            )
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_user_channel_and_status(
+        self, user_id: int, channel_id: int, status: str
+    ) -> Optional[UserChannel]:
+        """获取用户对特定频道且指定状态的用户-频道关联。"""
+        query = select(UserChannel).where(
+            and_(
+                UserChannel.user_id == user_id,
+                UserChannel.channel_id == channel_id,
+                UserChannel.status == status,
+            )
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_user_and_status(
+        self, user_id: int, status: str
+    ) -> list[UserChannel]:
+        """获取用户指定状态的所有用户-频道关联。"""
+        query = select(UserChannel).where(
+            and_(
+                UserChannel.user_id == user_id,
+                UserChannel.status == status,
+            )
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def get_user_liked_channels(self, user_id: int) -> list[Channel]:
         """获取用户喜欢的频道列表。"""

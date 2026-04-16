@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
@@ -20,12 +19,14 @@ from app.auth import (
     get_token_jti_and_exp,
 )
 from app.config import settings
-from app.models.models import User, UserLoginLog, UserRole, Role
+from app.models.models import User, UserLoginLog, UserRole
 from app.schemas.schemas import Token, UserCreate, UserResponse
 from app.services.token_blacklist import token_blacklist
 from app.services.permission_cache import permission_cache
 from app.services.permissions import get_all_permissions_for_user, get_user_roles
 from app.constants import UserRole as UserRoleConstant
+from app.deps import get_user_repo, get_role_repo
+from app.repositories import UserRepository, RoleRepository
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
@@ -33,9 +34,6 @@ limiter = Limiter(key_func=get_remote_address)
 _DUMMY_HASH = get_password_hash("__dummy_password_for_timing__")
 
 _PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
-
-
-# ── IP 工具 ───────────────────────────────────────────────────────────────────
 
 
 def get_client_ip(request: Request) -> str:
@@ -98,43 +96,40 @@ async def record_login_log(
     await db.commit()
 
 
-# ── 注册 ──────────────────────────────────────────────────────────────────────
-
-
 @router.post("/register", response_model=UserResponse, status_code=201)
 @limiter.limit("5/minute")
 async def register(
     request: Request,
     user: UserCreate,
     db: AsyncSession = Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
+    role_repo: RoleRepository = Depends(get_role_repo),
 ):
-    result = await db.execute(select(User).where(User.username == user.username))
-    if result.scalar_one_or_none():
+    existing = await user_repo.get_by_username(user.username)
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Registration failed. Please try a different username or email.",
         )
 
     if user.email:
-        result = await db.execute(select(User).where(User.email == user.email))
-        if result.scalar_one_or_none():
+        existing = await user_repo.get_by_email(user.email)
+        if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Registration failed. Please try a different username or email.",
             )
 
     hashed_password = get_password_hash(user.password)
-    db_user = User(
-        username=user.username,
-        email=user.email,
-        hashed_password=hashed_password,
+    db_user = await user_repo.create(
+        {
+            "username": user.username,
+            "email": user.email,
+            "hashed_password": hashed_password,
+        }
     )
-    db.add(db_user)
-    await db.commit()
-    await db.refresh(db_user)
 
-    result = await db.execute(select(Role).where(Role.name == UserRoleConstant.USER))
-    user_role = result.scalar_one_or_none()
+    user_role = await role_repo.get_by_name(UserRoleConstant.USER)
     if user_role:
         db.add(UserRole(user_id=db_user.id, role_id=user_role.id))
         await db.commit()
@@ -143,18 +138,15 @@ async def register(
     return db_user
 
 
-# ── 登录 ──────────────────────────────────────────────────────────────────────
-
-
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
 ):
-    result = await db.execute(select(User).where(User.username == form_data.username))
-    user = result.scalar_one_or_none()
+    user = await user_repo.get_by_username(form_data.username)
 
     password_to_check = user.hashed_password if user else _DUMMY_HASH
     password_valid = verify_password(form_data.password, password_to_check)
@@ -174,7 +166,6 @@ async def login(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
     )
-    # ✅ 直接使用，无需二次解码
     token_exp = result.expires_at
 
     roles = await get_user_roles(user.id, db)
@@ -185,8 +176,6 @@ async def login(
 
     return {"access_token": result.token, "token_type": "bearer"}
 
-
-# ── 注销 ──────────────────────────────────────────────────────────────────────
 
 _bearer_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 

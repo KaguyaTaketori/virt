@@ -1,16 +1,15 @@
 from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
 
-from app.deps import get_db_session
+from app.deps import get_db_session, get_stream_repo
 from app.deps.guards import BilibiliAccess
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import Channel, Platform, Stream, StreamStatus, User
+from app.models.models import Platform, Stream, StreamStatus, User
 from app.schemas.schemas import StreamResponse
 from app.auth import get_current_user_optional
 from app.services.permissions import has_permission
+from app.repositories import StreamRepository
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])
 
@@ -19,18 +18,15 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 async def get_live_streams(
     db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
+    stream_repo: StreamRepository = Depends(get_stream_repo),
 ):
-    query = (
-        select(Stream)
-        .options(joinedload(Stream.channel))
-        .join(Channel, Stream.channel_id == Channel.id)
-        .where(Stream.status == StreamStatus.LIVE)
+    streams = await stream_repo.get_live_streams_with_channel(
+        platform=ctx.platform if ctx.platform else None
     )
 
-    query = ctx.apply_platform_filter(query, Channel.platform)
+    if ctx.platform:
+        streams = [s for s in streams if s.platform == ctx.platform]
 
-    result = await db.execute(query)
-    streams = result.scalars().all()
     return [_to_response(s) for s in streams]
 
 
@@ -40,24 +36,16 @@ async def get_all_streams(
     status: Optional[StreamStatus] = None,
     db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
+    stream_repo: StreamRepository = Depends(get_stream_repo),
 ):
-    query = (
-        select(Stream)
-        .options(joinedload(Stream.channel)) 
-        .join(Channel, Stream.channel_id == Channel.id)
+    streams = await stream_repo.get_multi_with_channel(
+        platform=platform,
+        status=status,
     )
 
-    query = ctx.apply_platform_filter(query, Channel.platform)
+    if ctx.platform:
+        streams = [s for s in streams if s.platform == ctx.platform]
 
-    if platform is not None:
-        ctx.assert_platform_access(platform)
-        query = query.where(Stream.platform == platform)
-
-    if status is not None:
-        query = query.where(Stream.status == status)
-
-    result = await db.execute(query)
-    streams = result.scalars().all()
     return [_to_response(s) for s in streams]
 
 

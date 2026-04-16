@@ -5,9 +5,10 @@ from typing import Any, Optional
 
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.database.base import BaseRepository
-from app.models.models import Stream, Platform, StreamStatus
+from app.models.models import Stream, Platform, StreamStatus, Channel
 from app.loguru_config import logger
 
 
@@ -15,6 +16,36 @@ class StreamRepository(BaseRepository[Stream]):
     """Stream 实体的 Repository。"""
 
     model = Stream
+
+    async def get_live_streams_with_channel(
+        self,
+        platform: Optional[Platform] = None,
+    ) -> list[Stream]:
+        """获取当前直播中的流，并预加载关联的 Channel。"""
+        query = (
+            select(Stream)
+            .options(joinedload(Stream.channel))
+            .where(Stream.status == StreamStatus.LIVE)
+        )
+        if platform is not None:
+            query = query.where(Stream.platform == platform)
+        query = query.order_by(Stream.viewer_count.desc())
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_multi_with_channel(
+        self,
+        platform: Optional[Platform] = None,
+        status: Optional[StreamStatus] = None,
+    ) -> list[Stream]:
+        """获取所有流，并预加载关联的 Channel。"""
+        query = select(Stream).options(joinedload(Stream.channel))
+        if platform is not None:
+            query = query.where(Stream.platform == platform)
+        if status is not None:
+            query = query.where(Stream.status == status)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def get_by_video_id(self, channel_id: int, video_id: str) -> Optional[Stream]:
         """通过 channel_id + video_id 查询。"""
