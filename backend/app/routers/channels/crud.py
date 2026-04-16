@@ -3,21 +3,15 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.loguru_config import logger
 from app.database import session_scope
-from app.deps import get_db_session
+from app.deps import get_db_session, get_channel_repo, get_user_channel_repo
 from app.deps.guards import AdminUser
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import (
-    Channel,
-    Platform,
-    User,
-    UserChannel,
-)
+from app.models.models import Channel, Platform, User
 from app.schemas.schemas import ChannelCreate, ChannelResponse, ChannelUpdate
 from app.integrations.youtube import get_youtube_sync_service
 from app.services.api_key_manager import get_api_key, is_api_available
@@ -25,6 +19,7 @@ from app.constants import UserChannelStatus
 from app.deps import get_channel_service
 from app.integrations.websub.subscription_service import websub_service
 from app.services.channel_service import ChannelService
+from app.repositories import ChannelRepository, UserChannelRepository
 
 
 router = APIRouter()
@@ -88,33 +83,31 @@ async def get_channels(
     org_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
+    user_channel_repo: UserChannelRepository = Depends(get_user_channel_repo),
 ):
-    query = select(Channel)
-    query = ctx.apply_platform_filter(query, Channel.platform)
-
-    if platform:
-        ctx.assert_platform_access(platform)
-        query = query.where(Channel.platform == platform)
-    if is_active is not None:
-        query = query.where(Channel.is_active == is_active)
-    if org_id is not None:
-        query = query.where(Channel.org_id == org_id)
-
-    result = await db.execute(query)
-    channels = result.scalars().all()
+    channels = await channel_repo.get_multi()
 
     if not channels:
         return []
 
+    channels = [ch for ch in channels if ctx.check_platform_access(ch.platform)]
+
+    if platform:
+        ctx.assert_platform_access(platform)
+        channels = [ch for ch in channels if ch.platform == platform]
+    if is_active is not None:
+        channels = [ch for ch in channels if ch.is_active == is_active]
+    if org_id is not None:
+        channels = [ch for ch in channels if ch.org_id == org_id]
+
     status_map = {}
     if ctx.user_id:
         channel_ids = [ch.id for ch in channels]
-
-        user_channel_query = select(UserChannel).where(
-            UserChannel.user_id == ctx.user_id, UserChannel.channel_id.in_(channel_ids)
+        user_channels = await user_channel_repo.get_multi_by_user_and_channels(
+            ctx.user_id, channel_ids
         )
-        uc_result = await db.execute(user_channel_query)
-        status_map = {uc.channel_id: uc.status for uc in uc_result.scalars().all()}
+        status_map = {uc.channel_id: uc.status for uc in user_channels}
 
     return [
         _with_user_status(ChannelResponse.model_validate(ch), status_map.get(ch.id))
@@ -127,19 +120,18 @@ async def get_channel_by_id(
     channel_id: int,
     db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
+    user_channel_repo: UserChannelRepository = Depends(get_user_channel_repo),
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await channel_repo.get(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
     ctx.assert_platform_access(channel.platform)
 
     resp = ChannelResponse.model_validate(channel)
     if ctx.user_id:
-        result = await db.execute(
-            select(UserChannel).where(
-                UserChannel.user_id == ctx.user_id,
-                UserChannel.channel_id == channel_id,
-            )
-        )
-        uc = result.scalar_one_or_none()
+        uc = await user_channel_repo.get_by_user_and_channel(ctx.user_id, channel_id)
         if uc:
             resp.is_liked = uc.status == UserChannelStatus.LIKED
             resp.is_blocked = uc.status == UserChannelStatus.BLOCKED
@@ -151,13 +143,17 @@ async def update_channel(
     channel_id: int,
     channel_update: ChannelUpdate,
     db: AsyncSession = Depends(get_db_session),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
     _: User = AdminUser,
 ):
-    channel = await _get_or_404(db, channel_id)
-    for key, value in channel_update.model_dump(exclude_unset=True).items():
-        setattr(channel, key, value)
-    await db.commit()
-    await db.refresh(channel)
+    channel = await channel_repo.get(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    update_data = channel_update.model_dump(exclude_unset=True)
+    if update_data:
+        channel = await channel_repo.update(channel_id, update_data)
+
     return channel
 
 
@@ -175,9 +171,13 @@ async def delete_channel(
 async def refresh_channel(
     channel_id: int,
     db: AsyncSession = Depends(get_db_session),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
     _: User = AdminUser,
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await channel_repo.get(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
     if channel.platform == Platform.YOUTUBE:
         yt_service = get_youtube_sync_service()
         details = await yt_service.get_channel_info(channel.channel_id)
@@ -187,14 +187,6 @@ async def refresh_channel(
                     setattr(channel, field, details[field])
             await db.commit()
             await db.refresh(channel)
-    return channel
-
-
-async def _get_or_404(db: AsyncSession, channel_id: int) -> Channel:
-    result = await db.execute(select(Channel).where(Channel.id == channel_id))
-    channel = result.scalar_one_or_none()
-    if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
     return channel
 
 

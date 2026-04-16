@@ -1,30 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from typing import List
 
-from app.deps import get_db_session
+from app.deps import get_db_session, get_organization_repo
 from app.deps.guards import AdminUser
-from app.models.models import Organization, User
+from app.models.models import User
 from app.schemas.schemas import (
     OrganizationCreate,
     OrganizationResponse,
     OrganizationUpdate,
 )
+from app.repositories import OrganizationRepository
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
 
 
 @router.get("", response_model=List[OrganizationResponse])
-async def get_organizations(db: AsyncSession = Depends(get_db_session)):
-    result = await db.execute(select(Organization))
-    return result.scalars().all()
+async def get_organizations(
+    org_repo: OrganizationRepository = Depends(get_organization_repo),
+):
+    return await org_repo.get_multi()
 
 
 @router.get("/{org_id}", response_model=OrganizationResponse)
-async def get_organization(org_id: int, db: AsyncSession = Depends(get_db_session)):
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+async def get_organization(
+    org_id: int,
+    org_repo: OrganizationRepository = Depends(get_organization_repo),
+):
+    org = await org_repo.get(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
@@ -34,15 +37,14 @@ async def get_organization(org_id: int, db: AsyncSession = Depends(get_db_sessio
 async def create_organization(
     org: OrganizationCreate,
     db: AsyncSession = Depends(get_db_session),
+    org_repo: OrganizationRepository = Depends(get_organization_repo),
     _current_user: User = AdminUser,
 ):
-    result = await db.execute(select(Organization).where(Organization.name == org.name))
-    if result.scalar_one_or_none():
+    existing = await org_repo.get_by_name(org.name)
+    if existing:
         raise HTTPException(status_code=400, detail="Organization already exists")
-    db_org = Organization(**org.model_dump())
-    db.add(db_org)
-    await db.commit()
-    await db.refresh(db_org)
+
+    db_org = await org_repo.create(org.model_dump())
     return db_org
 
 
@@ -51,18 +53,17 @@ async def update_organization(
     org_id: int,
     org_update: OrganizationUpdate,
     db: AsyncSession = Depends(get_db_session),
+    org_repo: OrganizationRepository = Depends(get_organization_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+    org = await org_repo.get(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    for key, value in org_update.model_dump(exclude_unset=True).items():
-        setattr(org, key, value)
+    update_data = org_update.model_dump(exclude_unset=True)
+    if update_data:
+        org = await org_repo.update(org_id, update_data)
 
-    await db.commit()
-    await db.refresh(org)
     return org
 
 
@@ -70,16 +71,16 @@ async def update_organization(
 async def delete_organization(
     org_id: int,
     db: AsyncSession = Depends(get_db_session),
+    org_repo: OrganizationRepository = Depends(get_organization_repo),
     _current_user: User = AdminUser,
 ):
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+    org = await org_repo.get_with_channels(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
     for channel in org.channels:
         channel.org_id = None
 
-    await db.delete(org)
+    await org_repo.remove(org_id)
     await db.commit()
     return {"message": "Organization deleted successfully"}

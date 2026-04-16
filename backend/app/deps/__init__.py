@@ -26,6 +26,20 @@ from app.deps.guards import (
 )
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.deps.integrations import get_channel_service, ChannelService
+from app.deps.repositories import (
+    get_channel_repo,
+    get_user_channel_repo,
+    get_organization_repo,
+    get_video_repo,
+    get_stream_repo,
+    get_bilibili_dynamic_repo,
+    get_user_repo,
+    get_role_repo,
+    get_permission_repo,
+    get_user_role_repo,
+    get_role_permission_repo,
+    get_resource_acl_repo,
+)
 
 __all__ = [
     "get_db_session",
@@ -52,4 +66,16 @@ __all__ = [
     "PlatformGuardDep",
     "get_channel_service",
     "ChannelService",
+    "get_channel_repo",
+    "get_user_channel_repo",
+    "get_organization_repo",
+    "get_video_repo",
+    "get_stream_repo",
+    "get_bilibili_dynamic_repo",
+    "get_user_repo",
+    "get_role_repo",
+    "get_permission_repo",
+    "get_user_role_repo",
+    "get_role_permission_repo",
+    "get_resource_acl_repo",
 ]

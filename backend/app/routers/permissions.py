@@ -1,17 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy import select
 from typing import List
-from app.deps import get_db_session
-from app.models.models import (
-    User,
-    Role,
-    Permission,
-    UserRole,
-    RolePermission,
-    ResourceACL,
+
+from app.deps import (
+    get_db_session,
+    get_user_repo,
+    get_role_repo,
+    get_permission_repo,
+    get_user_role_repo,
+    get_role_permission_repo,
+    get_resource_acl_repo,
 )
+from app.repositories import (
+    UserRepository,
+    RoleRepository,
+    PermissionRepository,
+    UserRoleRepository,
+    RolePermissionRepository,
+    ResourceACLRepository,
+)
+from app.models.models import User
 from app.schemas.schemas import (
     RoleResponse,
     PermissionResponse,
@@ -19,7 +27,7 @@ from app.schemas.schemas import (
     UserRoleUpdate,
 )
 from app.auth import get_current_user
-from app.services.permissions import get_user_roles, has_permission
+from app.services.permissions import get_user_roles
 from app.deps.guards import AdminUser, SuperAdminUser
 from app.services.permission_cache import permission_cache
 from app.constants import UserRole as UserRoleConstant
@@ -31,104 +39,82 @@ router = APIRouter(prefix="/api/admin/permissions", tags=["permissions"])
 async def get_current_user_info(
     db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    permission_repo: PermissionRepository = Depends(get_permission_repo),
 ):
     resp = UserResponse.model_validate(current_user)
     resp.roles = await get_user_roles(current_user.id, db)
 
     if UserRoleConstant.SUPERADMIN in resp.roles:
-        result = await db.execute(select(Permission.name))
-        resp.permissions = list(result.scalars().all())
+        resp.permissions = await permission_repo.get_all_names()
         return resp
 
-    result = await db.execute(
-        select(Permission.name)
-        .join(RolePermission, Permission.id == RolePermission.permission_id)
-        .join(UserRole, RolePermission.role_id == UserRole.role_id)
-        .where(UserRole.user_id == current_user.id)
-        .distinct()
-    )
-    resp.permissions = list(result.scalars().all())
+    resp.permissions = await permission_repo.get_all_names_for_user(current_user.id)
     return resp
 
 
 @router.get("/roles", response_model=List[RoleResponse])
 async def list_roles(
-    db: AsyncSession = Depends(get_db_session),
+    role_repo: RoleRepository = Depends(get_role_repo),
     _: User = SuperAdminUser,
 ):
-    result = await db.execute(select(Role))
-    return result.scalars().all()
+    return await role_repo.get_all()
 
 
 @router.post("/roles", response_model=RoleResponse)
 async def create_role(
     role: RoleResponse,
     db: AsyncSession = Depends(get_db_session),
+    role_repo: RoleRepository = Depends(get_role_repo),
     _: User = SuperAdminUser,
 ):
-    result = await db.execute(select(Role).where(Role.name == role.name))
-    existing = result.scalar_one_or_none()
+    existing = await role_repo.get_by_name(role.name)
     if existing:
         raise HTTPException(status_code=400, detail="Role already exists")
 
-    db_role = Role(name=role.name, description=role.description)
-    db.add(db_role)
-    await db.commit()
-    await db.refresh(db_role)
+    db_role = role_repo.create({"name": role.name, "description": role.description})
     return db_role
 
 
 @router.get("/roles/{role_id}/permissions", response_model=List[int])
 async def get_role_permissions(
     role_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    role_repo: RoleRepository = Depends(get_role_repo),
+    role_permission_repo: RolePermissionRepository = Depends(get_role_permission_repo),
     _: User = AdminUser,
 ):
-    """获取角色已分配的权限ID列表"""
-    result = await db.execute(select(Role).where(Role.id == role_id))
-    role = result.scalar_one_or_none()
+    role = await role_repo.get(role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
 
-    result = await db.execute(
-        select(RolePermission).where(RolePermission.role_id == role_id)
-    )
-    perms = result.scalars().all()
-    return [rp.permission_id for rp in perms]
+    return await role_permission_repo.get_permission_ids_by_role_id(role_id)
 
 
 @router.get("/permissions", response_model=List[PermissionResponse])
 async def list_permissions(
-    db: AsyncSession = Depends(get_db_session),
+    permission_repo: PermissionRepository = Depends(get_permission_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(Permission))
-    return result.scalars().all()
+    return await permission_repo.get_all()
 
 
 @router.post("/permissions", response_model=PermissionResponse)
 async def create_permission(
     permission: PermissionResponse,
-    db: AsyncSession = Depends(get_db_session),
+    permission_repo: PermissionRepository = Depends(get_permission_repo),
     _: User = SuperAdminUser,
 ):
-    result = await db.execute(
-        select(Permission).where(Permission.name == permission.name)
-    )
-    existing = result.scalar_one_or_none()
+    existing = await permission_repo.get_by_column(name=permission.name)
     if existing:
         raise HTTPException(status_code=400, detail="Permission already exists")
 
-    db_perm = Permission(
-        name=permission.name,
-        description=permission.description,
-        resource=permission.resource,
-        action=permission.action,
+    return await permission_repo.create(
+        {
+            "name": permission.name,
+            "description": permission.description,
+            "resource": permission.resource,
+            "action": permission.action,
+        }
     )
-    db.add(db_perm)
-    await db.commit()
-    await db.refresh(db_perm)
-    return db_perm
 
 
 @router.post("/roles/{role_id}/permissions")
@@ -136,29 +122,23 @@ async def assign_permissions_to_role(
     role_id: int,
     permission_ids: List[int],
     db: AsyncSession = Depends(get_db_session),
+    role_repo: RoleRepository = Depends(get_role_repo),
+    permission_repo: PermissionRepository = Depends(get_permission_repo),
+    role_permission_repo: RolePermissionRepository = Depends(get_role_permission_repo),
     _: User = SuperAdminUser,
 ):
-    result = await db.execute(select(Role).where(Role.id == role_id))
-    role = result.scalar_one_or_none()
+    role = await role_repo.get(role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
 
     for perm_id in permission_ids:
-        result = await db.execute(select(Permission).where(Permission.id == perm_id))
-        perm = result.scalar_one_or_none()
+        perm = await permission_repo.get(perm_id)
         if not perm:
             continue
 
-        result = await db.execute(
-            select(RolePermission).where(
-                RolePermission.role_id == role_id,
-                RolePermission.permission_id == perm_id,
-            )
-        )
-        existing = result.scalar_one_or_none()
-
+        existing = await role_permission_repo.exists(role_id, perm_id)
         if not existing:
-            rp = RolePermission(role_id=role_id, permission_id=perm_id)
+            rp = role_permission_repo.model(role_id=role_id, permission_id=perm_id)
             db.add(rp)
 
     await db.commit()
@@ -169,30 +149,22 @@ async def assign_permissions_to_role(
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
     skip: int = 0,
-    limit: int = Query(default=100, ge=1, le=200),
-    db: AsyncSession = Depends(get_db_session),
+    limit: int = 100,
+    user_repo: UserRepository = Depends(get_user_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(
-        select(User)
-        .options(
-            selectinload(User.user_roles).selectinload(UserRole.role)
-        )
-        .offset(skip)
-        .limit(limit)
-    )
-    users = result.scalars().unique().all()
-
+    users = await user_repo.get_multi_with_roles(skip=skip, limit=limit)
     return [UserResponse.from_orm_with_roles(u) for u in users]
+
 
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
     db: AsyncSession = Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await user_repo.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -206,23 +178,15 @@ async def update_user_roles(
     user_id: int,
     role_update: UserRoleUpdate,
     db: AsyncSession = Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
+    user_role_repo: UserRoleRepository = Depends(get_user_role_repo),
     _: User = SuperAdminUser,
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await user_repo.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    result = await db.execute(select(UserRole).where(UserRole.user_id == user_id))
-    for er in result.scalars().all():
-        await db.delete(er)
-
-    for role_id in role_update.role_ids:
-        result = await db.execute(select(Role).where(Role.id == role_id))
-        role = result.scalar_one_or_none()
-        if role:
-            ur = UserRole(user_id=user_id, role_id=role_id)
-            db.add(ur)
+    await user_role_repo.assign_roles(user_id, role_update.role_ids)
 
     await db.commit()
     await permission_cache.delete_all_by_user(user_id)
@@ -236,29 +200,15 @@ async def create_resource_acl(
     resource_id: int,
     access: str,
     db: AsyncSession = Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
+    resource_acl_repo: ResourceACLRepository = Depends(get_resource_acl_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await user_repo.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    result = await db.execute(
-        select(ResourceACL).where(
-            ResourceACL.user_id == user_id,
-            ResourceACL.resource == resource,
-            ResourceACL.resource_id == resource_id,
-        )
-    )
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        existing.access = access
-    else:
-        acl = ResourceACL(
-            user_id=user_id, resource=resource, resource_id=resource_id, access=access
-        )
-        db.add(acl)
+    await resource_acl_repo.upsert_or_update(user_id, resource, resource_id, access)
 
     await db.commit()
     return {"message": "Resource ACL created/updated"}
@@ -268,13 +218,13 @@ async def create_resource_acl(
 async def delete_resource_acl(
     acl_id: int,
     db: AsyncSession = Depends(get_db_session),
+    resource_acl_repo: ResourceACLRepository = Depends(get_resource_acl_repo),
     _: User = AdminUser,
 ):
-    result = await db.execute(select(ResourceACL).where(ResourceACL.id == acl_id))
-    acl = result.scalar_one_or_none()
+    acl = await resource_acl_repo.get(acl_id)
     if not acl:
         raise HTTPException(status_code=404, detail="ACL not found")
 
-    await db.delete(acl)
+    await resource_acl_repo.remove(acl_id)
     await db.commit()
     return {"message": "ACL deleted"}
