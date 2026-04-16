@@ -134,24 +134,7 @@ async def fetch_bilibili_channel_data(
         vlist = raw.get("list", {}).get("vlist", [])
         videos = [client._parse_video(v) for v in vlist]
 
-        for v in videos:
-            await video_repo.upsert_video(
-                channel_id=channel.id,
-                video_id=v.bvid,
-                data={
-                    "platform": Platform.BILIBILI,
-                    "video_id": v.bvid,
-                    "title": v.title,
-                    "thumbnail_url": v.pic,
-                    "duration": v.duration,
-                    "view_count": v.play,
-                    "published_at": datetime.fromtimestamp(v.pubdate, tz=timezone.utc)
-                    if v.pubdate
-                    else None,
-                    "like_count": v.like,
-                    "status": "archive",
-                },
-            )
+        await video_repo.batch_upsert_bilibili(channel.id, videos)
         await db.commit()
     except Exception as e:
         logger.warning("获取 B 站视频列表失败 uid={}: {}", uid, e)
@@ -283,24 +266,7 @@ async def fetch_bilibili_videos(
         videos = [client._parse_video(v) for v in vlist]
         total = raw.get("list", {}).get("count", 0) or len(videos)
 
-        for v in videos:
-            await video_repo.upsert_video(
-                channel_id=channel.id,
-                video_id=v.bvid,
-                data={
-                    "platform": Platform.BILIBILI,
-                    "video_id": v.bvid,
-                    "title": v.title,
-                    "thumbnail_url": v.pic,
-                    "duration": v.duration,
-                    "view_count": v.play,
-                    "published_at": datetime.fromtimestamp(v.pubdate, tz=timezone.utc)
-                    if v.pubdate
-                    else None,
-                    "like_count": v.like,
-                    "status": "archive",
-                },
-            )
+        await video_repo.batch_upsert_bilibili(channel.id, videos)
         await db.commit()
     except Exception as e:
         logger.warning("获取 B 站视频列表失败 uid={}: {}", uid, e)

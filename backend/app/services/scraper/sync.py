@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -24,6 +25,7 @@ async def sync_wiki_channels(
     返回统计信息
     """
     stats = {"created": 0, "updated": 0, "skipped": 0}
+    channels_to_sync: list[int] = []
 
     result = await db.execute(select(Organization).where(Organization.name == org_name))
     org = result.scalar_one_or_none()
@@ -35,19 +37,34 @@ async def sync_wiki_channels(
 
     for vtuber_ch in vtuber_channels:
         try:
-            result = await _sync_single_channel(vtuber_ch, org.id, db)
-            if result == "created":
-                stats["created"] += 1
-            elif result == "updated":
-                stats["updated"] += 1
-            else:
-                stats["skipped"] += 1
+            result, channel_id = await _sync_single_channel(vtuber_ch, org.id, db)
+            if result == "created" and channel_id:
+                channels_to_sync.append(channel_id)
+            stats[result] = stats.get(result, 0) + 1
         except Exception as e:
             logger.warning(f"Failed to sync channel {vtuber_ch.name}: {e}")
             stats["skipped"] += 1
+    await db.commit()
+    if channels_to_sync and await is_api_available():
+        asyncio.create_task(
+            _batch_sync_new_channels(channels_to_sync),
+            name=f"video_sync_{len(channels_to_sync)}_channels"
+        )
 
     return stats
 
+async def _batch_sync_new_channels(channel_ids: list[int]) -> None:
+    yt_service = get_youtube_sync_service()
+    for channel_id in channel_ids:
+        try:
+            async with session_scope() as session:
+                ch = await session.get(Channel, channel_id)
+                if ch:
+                    await yt_service.sync_channel_videos(session, ch, full_refresh=True)
+                    logger.info("新频道视频同步完成: {}", ch.name)
+            await asyncio.sleep(1.0)  # 避免 API 突发
+        except Exception as e:
+            logger.error("新频道视频同步失败 channel_id={}: {}", channel_id, e)
 
 async def _sync_single_channel(
     vtuber_ch: VtuberChannel,
@@ -117,27 +134,7 @@ async def _sync_single_channel(
     )
     db.add(new_channel)
     await db.flush()
-    logger.info(f"Created channel: {vtuber_ch.name} ({channel_id})")
-
-    try:
-        from app.config import settings
-
-        async with session_scope() as session:
-            ch_obj = await session.get(Channel, new_channel.id)
-            if ch_obj and await is_api_available():
-                from app.integrations.youtube import get_youtube_sync_service
-
-                api_key = await get_api_key()
-                if api_key:
-                    yt_service = get_youtube_sync_service()
-                    await yt_service.sync_channel_videos(
-                        session, ch_obj, full_refresh=True
-                    )
-                    logger.info(f"Synced videos for channel: {vtuber_ch.name}")
-    except Exception as e:
-        logger.warning(f"Failed to sync videos for {vtuber_ch.name}: {e}")
-
-    return "created"
+    return "created", new_channel.id
 
 
 async def _resolve_handle(handle: str) -> Optional[str]:

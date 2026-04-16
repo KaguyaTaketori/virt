@@ -55,23 +55,26 @@ class ConnectionManager:
             if not self.active_connections[video_id]:
                 del self.active_connections[video_id]
 
-    async def send_message(self, video_id: str, message: dict):
-        """向指定video_id的所有连接发送消息"""
-        if video_id not in self.active_connections:
-            return
+    async def send_message(self, video_id: str, message: dict) -> int:
+        connections = self.active_connections.get(video_id)
+        if not connections:
+            return 0
 
-        disconnected = []
-        for connection in self.active_connections[video_id]:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                disconnected.append(connection)
-
-        for ws in disconnected:
+        results = await asyncio.gather(
+            *[conn.send_json(message) for conn in list(connections)],
+            return_exceptions=True,
+        )
+        
+        failed = [
+            conn for conn, result in zip(list(connections), results)
+            if isinstance(result, Exception)
+        ]
+        for ws in failed:
             self.disconnect(video_id, ws)
+        
+        return len(connections) - len(failed)
 
-    async def broadcast(self, message: dict):
-        """广播消息到所有连接"""
+    async def broadcast(self, message: dict) -> None:
         for video_id in list(self.active_connections.keys()):
             await self.send_message(video_id, message)
 

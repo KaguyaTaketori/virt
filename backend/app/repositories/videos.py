@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func, and_, or_, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_, desc
 
 from app.database.base import BaseRepository
 from app.models.models import Video, Platform
-from app.loguru_config import logger
+from app.schemas.schemas import BiliVideo
+from app.database.utils import upsert_batch
 
 
 class VideoRepository(BaseRepository[Video]):
@@ -145,6 +145,41 @@ class VideoRepository(BaseRepository[Video]):
             )
             results.append(video)
         return results
+
+    async def batch_upsert_bilibili(
+        self,
+        channel_id: int,
+        videos: list[BiliVideo],
+    ) -> None:
+        if not videos:
+            return
+
+        records = [
+            {
+                "channel_id": channel_id,
+                "platform": Platform.BILIBILI,
+                "video_id": v.bvid,
+                "title": v.title,
+                "thumbnail_url": v.pic,
+                "duration": v.duration,
+                "view_count": v.play,
+                "published_at": datetime.fromtimestamp(v.pubdate, tz=timezone.utc)
+                    if v.pubdate else None,
+                "like_count": v.like,
+                "status": "archive",
+            }
+            for v in videos
+        ]
+        await upsert_batch(
+            self.session,
+            Video,
+            index_elements=["channel_id", "video_id"],
+            values=records,
+            update_cols={
+                "title": ..., "thumbnail_url": ...,
+                "duration": ..., "view_count": ..., "like_count": ...,
+            }
+        )
 
     async def count_by_channel(
         self, channel_id: int, status: Optional[str] = None

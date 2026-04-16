@@ -166,9 +166,6 @@ async def sync_youtube_videos_incremental() -> None:
     if not await is_api_available():
         logger.info("API 不可用，跳过增量同步")
         return
-    api_key = await get_api_key()
-    if not api_key:
-        return
 
     async with session_scope() as session:
         channel_repo = ChannelRepository(session)
@@ -178,17 +175,15 @@ async def sync_youtube_videos_incremental() -> None:
         return
 
     logger.info("开始增量同步，共 {} 个频道", len(channels))
+    yt_service = get_youtube_sync_service()
 
     for ch in channels:
         try:
             async with session_scope() as session:
-                channel_repo = ChannelRepository(session)
-                ch_obj = await channel_repo.get(ch.id)
+                ch_obj = await session.get(Channel, ch.id)
                 if not ch_obj:
                     continue
-                yt_client = get_youtube_sync_service()
-                await yt_client.sync_channel_videos(session, ch_obj, api_key)
-                await session.commit()
+                await yt_service.sync_channel_videos(session, ch_obj)
                 logger.info("增量同步完成: {}", ch_obj.name)
                 await asyncio.sleep(0.3)
         except Exception as e:
