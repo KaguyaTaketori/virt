@@ -3,13 +3,6 @@ import { channelApi } from '@/api'
 import type { BilibiliInfoData, BilibiliVideo, BilibiliDynamic } from '@/types'
 
 
-export interface ContentNode {
-  type: 'text' | 'emoji' | 'at'
-  text: string
-  url?: string
-  rid?: string
-}
-
 export function useBilibiliData() {
   const dynamics = ref<BilibiliDynamic[]>([])
   const videos = ref<BilibiliVideo[]>([])

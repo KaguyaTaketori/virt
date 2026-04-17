@@ -1,12 +1,4 @@
-export interface Theme {
-  id: string
-  name: string
-  colors: {
-    primary: string
-    primaryHover: string
-    secondary: string
-  }
-}
+import type { Theme } from '@/types'
 
 export const themes: Theme[] = [
   {

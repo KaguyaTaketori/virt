@@ -190,13 +190,6 @@ export interface User {
   permissions?: string[]
 }
 
-export interface BilibiliGuard {
-  canAccess: import('vue').ComputedRef<boolean>
-  filterStreams: (streams: Stream[]) => Stream[]
-  filterChannels: (channels: Channel[]) => Channel[]
-  platformOptions: import('vue').ComputedRef<{ label: string; value: string }[]>
-}
-
 export interface BilibiliInfoData {
   mid: number
   name: string
@@ -235,4 +228,14 @@ export interface BilibiliDynamic {
   }
   topic: string
   is_top: boolean
+}
+
+export interface Theme {
+  id: string
+  name: string
+  colors: {
+    primary: string
+    primaryHover: string
+    secondary: string
+  }
 }

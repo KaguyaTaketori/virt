@@ -104,7 +104,6 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChannels, useOrganizations } from '@/queries'
 import { useAuthStore } from '@/stores/auth'
-import type { Channel } from '@/types'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -138,7 +137,7 @@ function getOrgName(orgId: number | null): string {
   return org?.name || '未知机构'
 }
 
-function goToChannel(id: number) {
+function goToChannel(id: string) {
   router.push(`/channel/${id}`)
 }
 </script>

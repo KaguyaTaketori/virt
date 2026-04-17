@@ -17,31 +17,10 @@ import {
   getActiveChannels,
 } from '@/utils/layoutEngine'
 import { PRESET_GENERATORS, type PresetId } from '@/utils/presetLayouts'
+import  { type DanmakuSettings, DEFAULT_DANMAKU_SETTINGS } from '@/types/danmaku'
 
 const STORAGE_KEY = 'multiview_tree'
 const DANMAKU_SETTINGS_KEY = 'danmaku_settings'
-
-export interface DanmakuSettings {
-  enabled?: boolean
-  fontSize: number
-  speed: number
-  opacity: number
-  color: string
-  strokeEnabled: boolean
-  strokeColor: string
-  strokeWidth: number
-}
-
-export const DEFAULT_DANMAKU_SETTINGS: DanmakuSettings = {
-  enabled: false,
-  fontSize: 24,
-  speed: 2,
-  opacity: 1,
-  color: '#ffffff',
-  strokeEnabled: true,
-  strokeColor: '#000000',
-  strokeWidth: 2,
-}
 
 export const useMultiviewStore = defineStore('multiview', () => {
   const tree = useLocalStorage<LayoutNode>(STORAGE_KEY, createEmptyLeaf())
