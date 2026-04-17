@@ -1,0 +1,2359 @@
+================================================================================
+FILE: frontend\src\stores\multiview.ts
+================================================================================
+
+import { defineStore } from 'pinia'
+import { computed } from 'vue'
+import { debounceFilter, useLocalStorage } from '@vueuse/core'
+import { type GridItem, type LayoutChannel, type PresetId } from '@/types/multiview'
+import { PRESET_GENERATORS } from '@/utils/presetLayouts'
+import { DEFAULT_DANMAKU_SETTINGS, type DanmakuSettings } from '@/types/danmaku'
+
+const STORAGE_KEY = 'multiview_items'
+const DANMAKU_SETTINGS_KEY = 'danmaku_settings'
+const GRID_COLS = 12
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9)
+}
+
+function createEmptyChannel(): LayoutChannel {
+  return { platform: 'empty', id: `empty-${generateId()}` }
+}
+
+
+export const useMultiviewStore = defineStore('multiview', () => {
+  const items = useLocalStorage<GridItem[]>(STORAGE_KEY, [], {
+  })
+
+  const activeChannels = computed<LayoutChannel[]>(() => 
+    items.value
+      .filter(i => i.channel.platform !== 'empty')
+      .map(i => i.channel)
+  )
+
+
+  const danmakuSettings = useLocalStorage<DanmakuSettings>(
+    DANMAKU_SETTINGS_KEY,
+    DEFAULT_DANMAKU_SETTINGS,
+    { eventFilter: debounceFilter(500) }
+  )
+
+  function updateDanmakuSettings(partial: Partial<DanmakuSettings>) {
+    danmakuSettings.value = { ...danmakuSettings.value, ...partial }
+  }
+
+  function resetDanmakuSettings() {
+    danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
+  }
+
+  function findEmptyPosition(w: number, h: number): { x: number, y: number } | null {
+    const occupied = new Set<string>()
+    items.value.forEach(item => {
+      for (let dx = 0; dx < item.w; dx++) {
+        for (let dy = 0; dy < item.h; dy++) {
+          occupied.add(`${item.x + dx},${item.y + dy}`)
+        }
+      }
+    })
+
+    for (let y = 0; y <= 12 - h; y++) {
+      for (let x = 0; x <= GRID_COLS - w; x++) {
+        let fits = true
+        for (let dx = 0; dx < w && fits; dx++) {
+          for (let dy = 0; dy < h && fits; dy++) {
+            if (occupied.has(`${x + dx},${y + dy}`)) {
+              fits = false
+            }
+          }
+        }
+        if (fits) return { x, y }
+      }
+    }
+    return null
+  }
+
+function addChannel(channel: LayoutChannel) {
+    // 1. 获取当前非空的频道
+    const currentItems = items.value.filter(i => i.channel.platform !== 'empty');
+    const channels = [...currentItems.map(i => i.channel), channel];
+    
+    const autoPresets: Record<number, PresetId> = {
+      1: '1-s', 2: '2-h', 3: '3-1+2', 4: '4-grid',
+    };
+
+    const presetId = autoPresets[channels.length];
+
+    // 2. 如果在自动预设范围内 (1-4个视频)
+    if (presetId && PRESET_GENERATORS[presetId]) {
+      const newLayout = PRESET_GENERATORS[presetId](channels);
+      
+      // 这里的映射逻辑要非常小心，确保新加的那个视频获得一个新 ID，旧的复用
+      items.value = newLayout.map((newItem, index) => {
+        // 如果是原来的位置，复用原来的 ID
+        if (index < currentItems.length) {
+          return { ...newItem, id: currentItems[index].id };
+        }
+        // 如果是新加的那个（最后一个），使用生成器生成的新 ID
+        return newItem;
+      });
+    } else {
+      // 3. 超过 4 个视频，寻找空位放置
+      const pos = findEmptyPosition(4, 4);
+      items.value = [...items.value, { 
+        id: generateId(), 
+        x: pos?.x ?? 0, 
+        y: pos?.y ?? 0, 
+        w: 4, 
+        h: 4, 
+        channel 
+      }];
+    }
+  }
+
+
+  function closeChannel(nodeId: string) {
+    const remainingItems = items.value.filter(item => item.id !== nodeId)
+    
+    if (remainingItems.length === 0) {
+      items.value = []
+      return
+    }
+
+    const remainingChannels = remainingItems
+      .filter(i => i.channel.platform !== 'empty')
+      .map(i => ({ ...i.channel }))
+
+    const autoPresets: Record<number, PresetId> = {
+      1: '1-s',
+      2: '2-h',
+      3: '3-1+2',
+      4: '4-grid',
+    }
+
+    const presetId = autoPresets[remainingChannels.length]
+
+    if (presetId && PRESET_GENERATORS[presetId]) {
+      items.value = PRESET_GENERATORS[presetId](remainingChannels)
+    } else {
+      items.value = remainingItems
+    }
+  }
+
+  function clearChannel(nodeId: string) {
+    const item = items.value.find(i => i.id === nodeId)
+    if (item) {
+      item.channel = createEmptyChannel()
+    }
+  }
+
+  function replaceChannel(nodeId: string, channel: LayoutChannel) {
+    const item = items.value.find(i => i.id === nodeId)
+    if (item) {
+      item.channel = channel
+    }
+  }
+
+  function removeByPlatformId(platform: string, id: string) {
+    items.value = items.value.filter(item => 
+      !(item.channel.platform === platform && item.channel.id === id)
+    )
+  }
+
+  function applyPreset(id: PresetId) {
+    const currentItems = items.value.filter(i => i.channel.platform !== 'empty');
+    const activeChannels = currentItems.map(i => ({ ...i.channel }));
+
+    const generator = PRESET_GENERATORS[id];
+    if (generator) {
+      const newLayout = generator(activeChannels);
+      
+      items.value = newLayout.map((newItem, index) => {
+        return {
+          ...newItem,
+          id: currentItems[index]?.id || generateId()
+        };
+      });
+    }
+  }
+
+  function buildShareCode(): string {
+    const data = items.value.map(item => ({
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      p: item.channel.platform,
+      i: item.channel.id,
+    }))
+    return btoa(JSON.stringify(data))
+  }
+
+  async function copyShareUrl(): Promise<void> {
+    const code = buildShareCode()
+    const url = `${window.location.origin}/multiview?c=${code}`
+    await navigator.clipboard.writeText(url)
+  }
+
+  function loadFromShareParam(encoded: string): boolean {
+    try {
+      const data = JSON.parse(atob(encoded)) as Array<{
+        x: number
+        y: number
+        w: number
+        h: number
+        p: string
+        i: string
+      }>
+
+      if (!data.length) return false
+
+      items.value = data.map(d => ({
+        id: generateId(),
+        x: d.x,
+        y: d.y,
+        w: d.w,
+        h: d.h,
+        channel: { platform: d.p as LayoutChannel['platform'], id: d.i },
+      }))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function addFromVideoId(platform: 'youtube' | 'bilibili', videoId: string) {
+    if (!videoId) return
+    const channel: LayoutChannel = { platform, id: videoId }
+    
+    const alreadyAdded = activeChannels.value.some(
+      c => c.id === channel.id && c.platform === channel.platform
+    )
+    
+    if (!alreadyAdded) {
+      addChannel(channel)
+    }
+  }
+
+  function updateItemPosition(id: string, x: number, y: number, w: number, h: number) {
+    const item = items.value.find(i => i.id === id)
+    if (item) {
+      if (item.x === x && item.y === y && item.w === w && item.h === h) return
+
+      item.x = x
+      item.y = y
+      item.w = w
+      item.h = h
+    }
+  }
+
+  return {
+    items,
+    activeChannels,
+    danmakuSettings,
+    updateDanmakuSettings,
+    resetDanmakuSettings,
+    addChannel,
+    closeChannel,
+    clearChannel,
+    replaceChannel,
+    removeByPlatformId,
+    applyPreset,
+    copyShareUrl,
+    loadFromShareParam,
+    addFromVideoId,
+    updateItemPosition,
+  }
+})
+
+================================================================================
+FILE: frontend\src\types\multiview.ts
+================================================================================
+
+export type GroupSelection =
+  | { kind: 'favorites' }
+  | { kind: 'org'; orgId: number }
+  | null
+
+export interface LayoutChannel {
+  platform: 'youtube' | 'bilibili' | 'empty'
+  id: string
+  danmakuEnabled?: boolean
+}
+
+export interface GridItem {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  channel: LayoutChannel
+}
+
+export type PresetId = '1-s' | '2-h' | '2-v' | '3-1+2' | '3-cols' | '4-grid' | '4-1+3'
+
+================================================================================
+FILE: frontend\src\utils\presetLayouts.ts
+================================================================================
+
+/**
+ * frontend/src/utils/presetLayouts.ts（GridStack 版本）
+ *
+ * 预设布局生成器，返回 GridItem[] 数组
+ */
+import { type GridItem, type LayoutChannel } from '@/types/multiview'
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9)
+}
+
+function createEmptyChannel(): LayoutChannel {
+  return { platform: 'empty', id: `empty-${generateId()}` }
+}
+
+function L(channels: LayoutChannel[], i: number): LayoutChannel {
+  return channels[i] ?? createEmptyChannel()
+}
+
+export type PresetId = '1-s' | '2-h' | '2-v' | '3-1+2' | '3-cols' | '4-grid' | '4-1+3'
+
+function makeItem(x: number, y: number, w: number, h: number, channel: LayoutChannel): GridItem {
+  return { id: generateId(), x, y, w, h, channel }
+}
+
+export const PRESET_GENERATORS: Record<PresetId, (channels: LayoutChannel[]) => GridItem[]> = {
+  '1-s': (v) => [
+    makeItem(0, 0, 12, 12, L(v, 0)),
+  ],
+
+  '2-h': (v) => [
+    makeItem(0, 0, 6, 12, L(v, 0)),
+    makeItem(6, 0, 6, 12, L(v, 1)),
+  ],
+
+  '2-v': (v) => [
+    makeItem(0, 0, 12, 6, L(v, 0)),
+    makeItem(0, 6, 12, 6, L(v, 1)),
+  ],
+
+  '3-1+2': (v) => [
+    makeItem(0, 0, 8, 12, L(v, 0)),
+    makeItem(8, 0, 4, 6, L(v, 1)),
+    makeItem(8, 6, 4, 6, L(v, 2)),
+  ],
+
+  '3-cols': (v) => [
+    makeItem(0, 0, 4, 12, L(v, 0)),
+    makeItem(4, 0, 4, 12, L(v, 1)),
+    makeItem(8, 0, 4, 12, L(v, 2)),
+  ],
+
+  '4-grid': (v) => [
+    makeItem(0, 0, 6, 6, L(v, 0)),
+    makeItem(6, 0, 6, 6, L(v, 1)),
+    makeItem(0, 6, 6, 6, L(v, 2)),
+    makeItem(6, 6, 6, 6, L(v, 3)),
+  ],
+
+  '4-1+3': (v) => [
+    makeItem(0, 0, 9, 12, L(v, 0)),
+    makeItem(9, 0, 3, 4, L(v, 1)),
+    makeItem(9, 4, 3, 4, L(v, 2)),
+    makeItem(9, 8, 3, 4, L(v, 3)),
+  ],
+}
+
+export const PRESET_GROUPS = [
+  { label: '1本视频', items: ['1-s'] as PresetId[] },
+  { label: '2本视频', items: ['2-h', '2-v'] as PresetId[] },
+  { label: '3本视频', items: ['3-1+2', '3-cols'] as PresetId[] },
+  { label: '4本视频', items: ['4-grid', '4-1+3'] as PresetId[] },
+]
+
+export const PRESET_META: Record<PresetId, { label: string }> = {
+  '1-s'  : { label: '单窗口模式' },
+  '2-h'  : { label: '左右对半分割' },
+  '2-v'  : { label: '上下对半分割' },
+  '3-1+2': { label: '1大 + 2小' },
+  '3-cols': { label: '三列并行' },
+  '4-grid': { label: '2×2 田字格' },
+  '4-1+3': { label: '1大 + 3小' },
+}
+
+export function getPresetMeta(id: string) {
+  return PRESET_META[id as PresetId] || { label: id }
+}
+
+================================================================================
+FILE: frontend\src\views\MultiView.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { X, LayoutGrid } from 'lucide-vue-next'
+
+import { useMultiviewStore } from '@/stores/multiview'
+import { useThemeStore } from '@/stores/theme'
+import { useOrganizations } from '@/queries'
+
+import { streamApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
+import { type LayoutChannel } from '@/types/multiview'
+import { PRESET_GROUPS, PRESET_META, type PresetId } from '@/utils/presetLayouts'
+
+import VideoGrid from '@/components/multiview/VideoGrid.vue'
+import AddVideoModal from '@/components/multiview/AddVideoModal.vue'
+import CollapsibleHeader from '@/components/multiview/CollapsibleHeader.vue'
+import SidebarDrawer from '@/components/multiview/SidebarDrawer.vue'
+import LayoutThumbnail from '@/components/multiview/LayoutThumbnail.vue'
+import GroupSelectorModal from '@/components/multiview/GroupSelectorModal.vue'
+
+const route = useRoute()
+const router = useRouter()
+const themeStore = useThemeStore()
+const store = useMultiviewStore()
+const orgsQuery = useOrganizations()
+
+// === UI 状态管理 ===
+const isLibraryOpen = ref(false)
+const isCollapsed = ref(false)
+const isDrawerOpen = ref(false)
+const isAddModalOpen = ref(false)
+const showDanmaku = ref(false)
+const showDanmakuSettings = ref(false)
+const replaceTargetNodeId = ref<string | null>(null)
+
+// === 分组选择状态 ===
+const isGroupSelectorOpen = ref(false)
+const selectedGroup = ref<'favorites' | number | null>(null) 
+const isRefreshing = ref(false)
+
+// === 数据状态 ===
+const allStreams = ref<Stream[]>([])
+const likedChannels = ref<ApiChannel[]>([])
+const likedOrgIds = ref<number[]>([])
+
+// === 数据获取 ===
+async function fetchData() {
+  try {
+    const [streamsRes, likedRes] = await Promise.all([
+      streamApi.getAllStreams(),
+      userChannelApi.getLiked()
+    ])
+    
+    allStreams.value = streamsRes.data.filter(s => s.status === 'live')
+    likedChannels.value = likedRes.data
+    
+    // 获取已收藏频道的 orgId
+    const likedOrgs = new Set<number>()
+    for (const ch of likedRes.data) {
+      if (ch.org_id) likedOrgs.add(ch.org_id)
+    }
+    likedOrgIds.value = Array.from(likedOrgs)
+  } catch (error) {
+    console.error('Failed to fetch data:', error)
+  }
+}
+
+// === 计算当前分组直播成员 ===
+const groupMembers = computed<Stream[]>(() => {
+  if (selectedGroup.value === null) return []
+  
+  let filtered: Stream[]
+  if (selectedGroup.value === 'favorites') {
+    const likedChannelIds = new Set(likedChannels.value.map(ch => ch.id))
+    filtered = allStreams.value.filter(s => likedChannelIds.has(s.channel_id))
+  } else {
+    const orgId = selectedGroup.value
+    filtered = allStreams.value.filter(s => s.org_id === orgId)
+  }
+  
+  return filtered.sort((a, b) => {
+    if (!a.started_at) return 1
+    if (!b.started_at) return -1
+    return new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+  })
+})
+
+
+const organizationName = computed(() => {
+  if (selectedGroup.value === null || selectedGroup.value === 'favorites') return null
+  const orgId = selectedGroup.value
+  const org = orgsQuery.data.value?.find(o => o.id === orgId)
+  return org?.name || null
+})
+
+function handleSelectGroup(group: 'favorites' | number) {
+  selectedGroup.value = group
+}
+
+function handleClearGroup() {
+  selectedGroup.value = null
+}
+
+function handleOpenGroupSelector() {
+  isGroupSelectorOpen.value = true
+}
+
+function handleGroupSelected(orgId: number) {
+  selectedGroup.value = orgId
+  isGroupSelectorOpen.value = false
+}
+
+// === 刷新处理 ===
+async function handleRefresh() {
+  isRefreshing.value = true
+  try {
+    await fetchData()
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+// === 添加成员到网格 ===
+function handleAddMember(member: Stream) {
+  if (!member.video_id) return
+  handleAddChannel({ platform: member.platform, id: member.video_id })
+}
+
+// === 业务逻辑转发至 Store ===
+
+function openAddModal() {
+  replaceTargetNodeId.value = null
+  isAddModalOpen.value = true
+}
+
+function openReplaceModal(nodeId: string) {
+  replaceTargetNodeId.value = nodeId
+  isAddModalOpen.value = true
+}
+
+function handleAddChannel(channel: LayoutChannel) {
+  if (replaceTargetNodeId.value) {
+    store.replaceChannel(replaceTargetNodeId.value, channel)
+  } else {
+    store.addChannel(channel)
+  }
+}
+
+async function handleShare() {
+  await store.copyShareUrl()
+  alert('分享链接已复制 ✓')
+}
+
+function handleApplyPreset(id: PresetId) {
+  store.applyPreset(id)
+  isLibraryOpen.value = false
+}
+
+// === 生命周期 ===
+onMounted(async () => {
+  // 加载直播数据
+  await fetchData()
+  
+  // 1. 优先检查分享参数
+  const shareCode = route.query.c as string
+  if (shareCode) {
+    const success = store.loadFromShareParam(shareCode)
+    if (success) {
+      router.replace({ name: 'MultiView' }) // 清理 URL
+      return
+    }
+  }
+
+  // 2. 否则初始化本地缓存
+})
+</script>
+
+
+<template>
+  <div class="h-full w-full flex flex-col overflow-hidden bg-zinc-950 text-white">
+    <SidebarDrawer
+      v-model="isDrawerOpen"
+      :is-dark="themeStore.isDark"
+      :current-theme-id="themeStore.currentThemeId"
+      :themes="themeStore.themes"
+      @toggle-dark="themeStore.toggleDark()"
+      @set-theme="themeStore.setTheme"
+    />
+
+    <CollapsibleHeader
+      :is-collapsed="isCollapsed"
+      :channels="store.activeChannels"
+      :show-danmaku="showDanmaku"
+      :selected-group="selectedGroup"
+      :organization-name="organizationName"
+      :group-members="groupMembers"
+      :is-refreshing="isRefreshing"
+      @toggle-drawer="isDrawerOpen = !isDrawerOpen"
+      @toggle-collapse="isCollapsed = !isCollapsed"
+      @open-add-modal="openAddModal"
+      @remove-channel-by-platform-id="store.removeByPlatformId"
+      @apply-preset="handleApplyPreset"
+      @open-preset-library="isLibraryOpen = true" 
+      @share="handleShare"
+      @update:show-danmaku="showDanmaku = $event"
+      @open-settings="showDanmakuSettings = true"
+      @select-group="handleSelectGroup"
+      @clear-group="handleClearGroup"
+      @open-group-selector="handleOpenGroupSelector"
+      @refresh="handleRefresh"
+      @add-member="handleAddMember"
+    />
+
+    <VideoGrid
+      @request-add="openAddModal"
+      @request-replace="openReplaceModal"
+      @clear-channel="store.clearChannel"
+      @close-channel="store.closeChannel"
+    />
+
+    <AddVideoModal v-model="isAddModalOpen" @add="handleAddChannel" />
+
+    <GroupSelectorModal
+      v-model="isGroupSelectorOpen"
+      :organizations="orgsQuery.data.value ?? []"
+      :liked-org-ids="likedOrgIds"
+      @select="handleGroupSelected"
+    />
+
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="isLibraryOpen" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4" @click.self="isLibraryOpen = false">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+            <div class="px-8 py-6 border-b border-zinc-800 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="p-2 bg-rose-500/20 rounded-lg text-rose-500"><LayoutGrid class="w-6 h-6" /></div>
+                <div>
+                  <h2 class="text-xl font-bold">全量布局预设库</h2>
+                  <p class="text-xs text-zinc-500">根据视频数量选择最适合的排版模式</p>
+                </div>
+              </div>
+              <button @click="isLibraryOpen = false" class="p-2 hover:bg-zinc-800 rounded-full transition-colors"><X /></button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-8 grid grid-cols-1 gap-10">
+              <div v-for="group in PRESET_GROUPS" :key="group.label">
+                <h3 class="text-xs font-black text-zinc-600 uppercase tracking-[0.3em] mb-6 border-l-2 border-rose-500 pl-3">
+                  {{ group.label }}
+                </h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
+                  <button 
+                    v-for="id in group.items" 
+                    :key="id" 
+                    @click="handleApplyPreset(id)" 
+                    class="group flex flex-col gap-3 text-center"
+                  >
+                    <div class="aspect-video w-full p-1 bg-zinc-800 rounded-xl border-2 border-transparent group-hover:border-rose-500 transition-all">
+                      <LayoutThumbnail :type="id" />
+                    </div>
+                    <div class="flex flex-col">
+                      <span class="text-xs font-bold text-zinc-400 group-hover:text-white">{{ PRESET_META[id].label }}</span>
+                      <span class="text-[9px] text-zinc-600 mt-0.5 tracking-widest uppercase">{{ id }}</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showDanmakuSettings"
+        class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+        @click.self="showDanmakuSettings = false"
+      >
+        <div class="bg-zinc-900 rounded-xl p-6 w-[400px] max-h-[80vh] overflow-y-auto border border-zinc-700">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-lg font-bold">弹幕设置</h2>
+            <button @click="showDanmakuSettings = false" class="text-zinc-400 hover:text-white">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="space-y-5">
+            <div>
+              <label class="block text-sm text-zinc-400 mb-2">字体大小: {{ store.danmakuSettings.fontSize }}px</label>
+              <input
+                type="range"
+                v-model.number="store.danmakuSettings.fontSize"
+                min="12"
+                max="48"
+                class="w-full accent-rose-500"
+                
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm text-zinc-400 mb-2">弹幕速度: {{ store.danmakuSettings.speed }}</label>
+              <input
+                type="range"
+                v-model.number="store.danmakuSettings.speed"
+                min="0.5"
+                max="6"
+                step="0.5"
+                class="w-full accent-rose-500"
+                
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm text-zinc-400 mb-2">不透明度: {{ store.danmakuSettings.opacity }}</label>
+              <input
+                type="range"
+                v-model.number="store.danmakuSettings.opacity"
+                min="0.3"
+                max="1"
+                step="0.1"
+                class="w-full accent-rose-500"
+                
+              />
+            </div>
+
+            <div>
+              <label class="block text-sm text-zinc-400 mb-2">弹幕颜色</label>
+              <div class="flex gap-2 flex-wrap">
+                <button
+                  v-for="c in ['#ffffff', '#ff6b6b', '#ffd700', '#90EE90', '#87CEEB', '#ff69b4']"
+                  :key="c"
+                  @click="store.updateDanmakuSettings({ color: c })"
+                  class="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
+                  :style="{ backgroundColor: c }"
+                  :class="store.danmakuSettings.color === c ? 'border-white' : 'border-transparent'"
+                />
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  v-model="store.danmakuSettings.strokeEnabled"
+                  class="w-4 h-4 accent-rose-500"
+                  
+                />
+                <span class="text-sm text-zinc-300">描边</span>
+              </label>
+              <template v-if="store.danmakuSettings.strokeEnabled">
+                <input
+                  v-model="store.danmakuSettings.strokeColor"
+                  type="color"
+                  class="w-8 h-8 rounded cursor-pointer"
+                  
+                />
+                <span class="text-xs text-zinc-500">宽度</span>
+                <input
+                  type="range"
+                  v-model.number="store.danmakuSettings.strokeWidth"
+                  min="0"
+                  max="4"
+                  class="w-20 accent-rose-500"
+                  
+                />
+              </template>
+            </div>
+
+            <div class="pt-4 border-t border-zinc-700">
+              <button
+                @click="store.resetDanmakuSettings()"
+                class="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm transition-colors"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\VideoGrid.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { GridStack, type GridItemHTMLElement } from 'gridstack'
+import 'gridstack/dist/gridstack.min.css'
+import { useMultiviewStore } from '@/stores/multiview'
+import VideoCell from './VideoCell.vue'
+
+const store = useMultiviewStore()
+const gridContainerRef = ref<HTMLElement | null>(null)
+let grid: GridStack | null = null
+
+let isInternalUpdate = false 
+
+function initGrid() {
+  if (!gridContainerRef.value) return
+
+  const containerHeight = gridContainerRef.value.offsetHeight
+  const rowHeight = containerHeight / 12
+
+  grid = GridStack.init({
+    column: 12,
+    row: 12,
+    cellHeight: rowHeight,
+    margin: 4,
+    float: true,
+    animate: true,
+    draggable: { handle: '.drag-handle' },
+    resizable: { handles: 'se' }
+  }, gridContainerRef.value)
+
+  grid.on('change', (event, items) => {
+    isInternalUpdate = true
+    items?.forEach(item => {
+      if (item.id) {
+        store.updateItemPosition(
+          item.id as string, 
+          item.x || 0, 
+          item.y || 0, 
+          item.w || 4, 
+          item.h || 4
+        )
+      }
+    })
+    setTimeout(() => { isInternalUpdate = false }, 100)
+  })
+}
+
+async function syncLayout() {
+  if (!grid || isInternalUpdate) return
+  
+  await nextTick()
+  await nextTick()
+
+  const els = Array.from(gridContainerRef.value?.querySelectorAll('.grid-stack-item') || []) as GridItemHTMLElement[]
+  
+  grid.batchUpdate()
+
+  // 1. 注册新节点
+  els.forEach(el => {
+    if (!el.gridstackNode) {
+      // 关键修复：从 DOM 属性中读取初始值
+      const id = el.getAttribute('gs-id')
+      const item = store.items.find(i => i.id === id)
+      grid!.makeWidget(el, {
+        x: item?.x,
+        y: item?.y,
+        w: item?.w,
+        h: item?.h,
+        autoPosition: false
+      })
+    }
+  })
+
+  // 2. 强制同步所有坐标（处理预设切换）
+  store.items.forEach(item => {
+    const el = els.find(e => e.getAttribute('gs-id') === item.id)
+    if (el) {
+      grid!.update(el, { 
+        x: item.x, 
+        y: item.y, 
+        w: item.w, 
+        h: item.h,
+        autoPosition: false 
+      })
+    }
+  })
+
+  // 3. 移除冗余
+  const storeIds = new Set(store.items.map(i => i.id))
+  const currentWidgets = grid.getGridItems()
+  currentWidgets.forEach(w => {
+    const id = w.getAttribute('gs-id')
+    if (!id || !storeIds.has(id)) {
+      grid!.removeWidget(w, false) 
+    }
+  })
+
+  grid.batchUpdate(false)
+}
+
+watch(() => store.items, () => syncLayout(), { deep: true })
+
+const handleResize = () => {
+  if (grid && gridContainerRef.value) {
+    grid.cellHeight(gridContainerRef.value.offsetHeight / 12)
+  }
+}
+
+onMounted(() => {
+  initGrid()
+  syncLayout()
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  grid?.destroy(false)
+})
+
+const emit = defineEmits<{ (e: 'requestReplace', nodeId: string): void }>()
+</script>
+
+<template>
+  <div class="flex-1 min-h-0 w-full relative bg-zinc-950 p-1 overflow-hidden">
+    <div ref="gridContainerRef" class="grid-stack">
+      <!-- 关键修复：添加 gs-x, gs-y, gs-w, gs-h 属性绑定 -->
+      <div
+        v-for="item in store.items"
+        :key="item.id"
+        class="grid-stack-item"
+        :gs-id="item.id"
+        :gs-x="item.x"
+        :gs-y="item.y"
+        :gs-w="item.w"
+        :gs-h="item.h"
+      >
+        <div class="grid-stack-item-content">
+          <VideoCell 
+            :item="item"
+            :show-danmaku="true"
+            :danmaku-settings="store.danmakuSettings"
+            @clear="store.clearChannel"
+            @close="store.closeChannel"
+            @request-replace="emit('requestReplace', $event)"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div v-if="store.items.length === 0" class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-zinc-700 pointer-events-none">
+      <p class="text-sm font-medium">点击头部“添加”按钮或选择一个分组开始</p>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.grid-stack { min-height: 100%; height: 100%; }
+.grid-stack-item-content { overflow: hidden !important; background: #000; border-radius: 4px; }
+:deep(.grid-stack-placeholder > .placeholder-content) {
+  background: rgba(244, 63, 94, 0.1) !important;
+  border: 2px dashed #f43f5e !important;
+  border-radius: 4px;
+}
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\CollapsibleHeader.vue
+================================================================================
+
+<script setup lang="ts">
+import { 
+  Menu, ChevronUp, ChevronDown, Share2, 
+  Captions, Settings, RefreshCw 
+} from 'lucide-vue-next'
+import type { Stream } from '@/api'
+import type { LayoutChannel } from '@/types/multiview'
+import type { PresetId } from '@/utils/presetLayouts'
+
+// 导入拆分的子组件
+import ToolbarGroupSelect from './header/ToolbarGroupSelect.vue'
+import ToolbarMemberList from './header/ToolbarMemberList.vue'
+import ToolbarPresetMenu from './header/ToolbarPresetMenu.vue'
+
+// 定义类型
+export type GroupType = 'favorites' | number
+
+interface Props {
+  isCollapsed: boolean
+  channels: LayoutChannel[]
+  showDanmaku: boolean
+  selectedGroup: GroupType | null
+  organizationName: string | null
+  groupMembers: Stream[]
+  isRefreshing: boolean
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'toggleDrawer'): void
+  (e: 'toggleCollapse'): void
+  (e: 'openAddModal'): void
+  (e: 'removeChannelByPlatformId', platform: string, id: string): void
+  (e: 'applyPreset', type: PresetId): void
+  (e: 'openPresetLibrary'): void 
+  (e: 'openSettings'): void
+  (e: 'share'): void
+  (e: 'update:showDanmaku', val: boolean): void
+  (e: 'selectGroup', group: GroupType): void
+  (e: 'clearGroup'): void
+  (e: 'refresh'): void
+  (e: 'addMember', member: Stream): void
+  (e: 'openGroupSelector'): void
+}>()
+</script>
+
+<template>
+  <div class="relative w-full select-none">
+    <!-- 顶部感应区：点击可快速切换折叠状态 -->
+    <div 
+      class="absolute top-0 left-0 right-0 h-1.5 z-50 cursor-pointer hover:bg-rose-500/20 transition-colors" 
+      @click="emit('toggleCollapse')" 
+    />
+
+    <!-- 1. 展开状态的工具栏 -->
+    <Transition name="slide-down">
+      <header 
+        v-if="!isCollapsed" 
+        class="flex items-center gap-2 px-3 h-14 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 z-40 overflow-hidden"
+      >
+        <!-- 基础导航操作 -->
+        <div class="flex items-center shrink-0">
+          <button @click="emit('toggleDrawer')" class="icon-btn" title="打开侧边栏">
+            <Menu class="w-4 h-4" />
+          </button>
+          <div class="w-px h-5 bg-zinc-800 mx-1.5" />
+        </div>
+
+        <!-- 子组件 A: 分组选择 -->
+        <ToolbarGroupSelect 
+          :selected-group="selectedGroup"
+          :organization-name="organizationName"
+          :members-count="groupMembers.length"
+          @select="g => emit('selectGroup', g)"
+          @open-selector="emit('openGroupSelector')"
+        />
+
+        <!-- 刷新按钮 -->
+        <button
+          @click="emit('refresh')"
+          class="shrink-0 p-2 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all active:scale-90"
+          :class="{ 'animate-spin text-rose-500': isRefreshing }"
+          :disabled="isRefreshing"
+          title="刷新成员状态"
+        >
+          <RefreshCw class="w-4 h-4" />
+        </button>
+
+        <!-- 子组件 B: 正在直播的成员头像列表 (占据中间剩余空间) -->
+        <ToolbarMemberList 
+          :members="groupMembers"
+          :has-selected-group="!!selectedGroup"
+          @add="m => emit('addMember', m)"
+          @open-add-modal="emit('openAddModal')"
+        />
+
+        <!-- 右侧工具组 -->
+        <div class="flex items-center gap-1 shrink-0 ml-auto">
+          <!-- 子组件 C: 布局预设菜单 -->
+          <ToolbarPresetMenu 
+            :channel-count="channels.length"
+            @apply="p => emit('applyPreset', p)"
+            @open-library="emit('openPresetLibrary')"
+          />
+
+          <div class="w-px h-5 bg-zinc-800 mx-1" />
+
+          <!-- 功能开关 -->
+          <button 
+            @click="emit('update:showDanmaku', !showDanmaku)" 
+            class="icon-btn" 
+            :class="{ 'text-rose-500 bg-rose-500/10': showDanmaku }"
+            title="显示/隐藏弹幕"
+          >
+            <Captions class="w-4 h-4" />
+          </button>
+
+          <button @click="emit('share')" class="icon-btn" title="分享配置">
+            <Share2 class="w-4 h-4" />
+          </button>
+
+          <button @click="emit('openSettings')" class="icon-btn" title="播放器设置">
+            <Settings class="w-4 h-4" />
+          </button>
+
+          <div class="w-px h-5 bg-zinc-800 mx-1" />
+
+          <!-- 收起按钮 -->
+          <button @click="emit('toggleCollapse')" class="icon-btn hover:text-rose-500" title="收起工具栏">
+            <ChevronUp class="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+    </Transition>
+
+    <!-- 2. 已收起状态的迷你工具栏 (悬浮感) -->
+    <Transition name="fade">
+      <div
+        v-if="isCollapsed"
+        class="absolute top-0 left-0 right-0 h-10 z-30 flex items-center justify-between px-4 bg-gradient-to-b from-zinc-950/80 to-transparent pointer-events-none"
+      >
+        <div class="flex items-center gap-1 pointer-events-auto">
+          <button
+            @click="emit('toggleDrawer')"
+            class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900/80 backdrop-blur-sm transition-all"
+          >
+            <Menu class="w-4 h-4" />
+          </button>
+          <button
+            @click="emit('update:showDanmaku', !showDanmaku)"
+            class="p-2 rounded-lg transition-all backdrop-blur-sm"
+            :class="showDanmaku ? 'text-rose-500 bg-rose-500/10' : 'text-zinc-400 hover:text-white hover:bg-zinc-900/80'"
+          >
+            <Captions class="w-4 h-4" />
+          </button>
+        </div>
+
+        <button
+          @click="emit('toggleCollapse')"
+          class="pointer-events-auto flex items-center gap-1.5 px-4 py-1 rounded-full bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 text-[11px] font-bold border border-zinc-800 transition-all shadow-xl backdrop-blur-md"
+        >
+          <span>展开工具栏</span>
+          <ChevronDown class="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </Transition>
+  </div>
+</template>
+
+<style scoped>
+/* 统一样式类 */
+.icon-btn {
+  @apply p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all duration-200 active:scale-90;
+}
+
+/* 动画：工具栏下拉 */
+.slide-down-enter-active, 
+.slide-down-leave-active { 
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+}
+.slide-down-enter-from, 
+.slide-down-leave-to { 
+  transform: translateY(-100%); 
+  opacity: 0; 
+}
+
+/* 动画：渐显 */
+.fade-enter-active, 
+.fade-leave-active { 
+  transition: opacity 0.3s ease; 
+}
+.fade-enter-from, 
+.fade-leave-to { 
+  opacity: 0; 
+}
+
+/* 隐藏滚动条 */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\VideoCell.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { type GridItem } from '@/types/multiview'
+import { Plus, Youtube, Tv, Eraser, X, GripHorizontal, MessageSquare } from 'lucide-vue-next'
+import YouTubePlayer from './YouTubePlayer.vue'
+import DanmakuOverlay from './DanmakuOverlay.vue'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
+
+const props = defineProps<{
+  item: GridItem
+  showDanmaku: boolean
+  danmakuSettings: any
+}>()
+
+const emit = defineEmits<{
+  (e: 'clear', id: string): void
+  (e: 'close', id: string): void
+  (e: 'requestReplace', id: string): void
+  (e: 'toggleDanmaku', id: string, enabled: boolean): void
+}>()
+
+const currentTime = ref(0)
+const handleTimeUpdate = (time: number) => {
+  currentTime.value = time
+}
+
+const isDanmakuEnabled = computed(() => {
+  return props.showDanmaku && 
+         props.item.channel.platform === 'youtube' && 
+         props.item.channel.danmakuEnabled !== false
+})
+</script>
+
+<template>
+  <div class="relative w-full h-full bg-zinc-950 overflow-hidden group">
+    <div 
+      v-if="item.channel.platform === 'empty'" 
+      class="w-full h-full flex flex-col items-center justify-center bg-zinc-900/50 hover:bg-zinc-800 transition-colors cursor-pointer"
+      @click="emit('requestReplace', item.id)"
+    >
+      <Plus class="w-8 h-8 mb-2 text-zinc-600" />
+      <span class="text-xs text-zinc-500">点击添加视频，或拖拽视频至此</span>
+    </div>
+
+    <template v-else>
+      <YouTubePlayer 
+        v-if="item.channel.platform === 'youtube'" 
+        :video-id="item.channel.id" 
+        @time-update="handleTimeUpdate" 
+        :key="item.channel.id"
+      />
+      <template v-else-if="item.channel.platform === 'bilibili' && authStore.canAccessBilibili">
+        <iframe 
+          v-if="item.channel.id.startsWith('BV')" 
+          :src="`https://player.bilibili.com/player.html?bvid=${item.channel.id}&autoplay=1`" 
+          class="absolute inset-0 w-full h-full" 
+          frameborder="0" 
+          allowfullscreen 
+        />
+        <iframe 
+          v-else 
+          :src="`https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${item.channel.id}&quality=0`" 
+          class="absolute inset-0 w-full h-full" 
+          frameborder="0" 
+          allowfullscreen 
+        />
+      </template>
+      <div 
+        v-else-if="item.channel.platform === 'bilibili'" 
+        class="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500"
+      >
+        无B站访问权限
+      </div>
+      
+      <DanmakuOverlay 
+        v-if="isDanmakuEnabled" 
+        :video-id="item.channel.id" 
+        :platform="item.channel.platform" 
+        :enabled="true" 
+        :settings="danmakuSettings" 
+        :current-time="currentTime" 
+      />
+    </template>
+
+    <div class="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none flex justify-center pt-1 z-20">
+      <div class="drag-handle p-1 cursor-grab active:cursor-grabbing hover:bg-white/10 rounded-md pointer-events-auto">
+        <GripHorizontal class="w-5 h-5 text-white/70" />
+      </div>
+    </div>
+
+    <div class="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-between pointer-events-none z-20">
+      <div class="flex items-center gap-1.5">
+        <template v-if="item.channel.platform !== 'empty'">
+          <component 
+            :is="item.channel.platform === 'youtube' ? Youtube : Tv" 
+            class="w-3 h-3 shrink-0" 
+            :class="item.channel.platform === 'youtube' ? 'text-red-400' : 'text-blue-400'" 
+          />
+          <span class="text-white text-xs font-mono opacity-80 truncate max-w-[100px]">{{ item.channel.id }}</span>
+        </template>
+      </div>
+
+      <div class="flex items-center gap-1 pointer-events-auto">
+        <button 
+          v-if="item.channel.platform === 'youtube'" 
+          @click.stop="emit('toggleDanmaku', item.channel.id, item.channel.danmakuEnabled === false)" 
+          class="p-1.5 rounded hover:bg-white/20 transition-colors text-green-400" 
+          title="弹幕开关"
+        >
+          <MessageSquare class="w-3.5 h-3.5" />
+        </button>
+        <template v-if="item.channel.platform !== 'empty'">
+          <div class="w-px h-4 bg-zinc-600 mx-1"></div>
+          <button 
+            @click.stop="emit('clear', item.id)" 
+            class="p-1.5 rounded text-zinc-300 hover:text-yellow-400 hover:bg-white/20" 
+            title="清空并保留网格"
+          >
+            <Eraser class="w-3.5 h-3.5" />
+          </button>
+        </template>
+        <button 
+          @click.stop="emit('close', item.id)" 
+          class="p-1.5 rounded text-zinc-300 hover:text-red-500 hover:bg-white/20 ml-1" 
+          title="彻底关闭"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\DanmakuOverlay.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, watch, toRef, onUnmounted } from 'vue'
+import { useElementSize, useEventListener } from '@vueuse/core'
+import { DEFAULT_DANMAKU_SETTINGS, type DanmakuSettings } from '@/types/danmaku'
+import { useDanmakuEngine } from '@/composables/danmaku/useDanmakuEngine'
+
+interface Props {
+  videoId: string
+  platform: 'youtube' | 'bilibili'
+  enabled: boolean
+  settings?: DanmakuSettings
+}
+
+const props = defineProps<Props>()
+
+const containerRef = ref<HTMLDivElement | null>(null)
+const canvasRef = ref<HTMLCanvasElement | null>(null)
+const hitLayerRef = ref<HTMLDivElement | null>(null)
+const { width, height } = useElementSize(containerRef)
+
+const settings = ref<DanmakuSettings>({ ...DEFAULT_DANMAKU_SETTINGS })
+watch(() => props.settings, (s) => { 
+  if (s) { 
+    Object.assign(settings.value, s)
+    engine.applyCanvasFont()
+  } 
+}, { deep: true })
+
+const engine = useDanmakuEngine({
+  videoId: toRef(props, 'videoId'),
+  platform: toRef(props, 'platform'),
+  enabled: toRef(props, 'enabled'),
+  settings,
+  width,
+  height,
+  hitLayerRef,
+  canvasRef
+})
+
+const { hoveredDanmaku } = engine
+
+useEventListener(hitLayerRef, 'mouseover', (e) => {
+  const target = e.target as HTMLElement
+  if (target.classList.contains('danmaku-ghost')) {
+    const msgId = target.dataset.messageId
+    if (hoveredDanmaku.value.messageId !== msgId) {
+      engine.stopHideTimer()
+      engine.startForceResumeTimer()
+      
+      const danmaku = engine.activeDanmaku.value.find(item => item.msg.messageId === msgId)
+      if (danmaku) {
+        const rect = target.getBoundingClientRect()
+        hoveredDanmaku.value = {
+          show: true,
+          x: rect.left,
+          y: rect.bottom + 5,
+          userId: target.dataset.userId || '',
+          displayName: target.dataset.displayName || '',
+          messageId: msgId!
+        }
+      }
+    }
+  }
+})
+
+useEventListener(hitLayerRef, 'mouseout', (e) => {
+  if ((e.target as HTMLElement).classList.contains('danmaku-ghost')) {
+    engine.startHideTimer()
+  }
+})
+
+function handleMenuEnter() {
+  engine.stopHideTimer()
+}
+
+watch(() => props.enabled, (val) => {
+  if (val) engine.resume()
+  else { engine.pause(); engine.clearAll() }
+}, { immediate: true })
+
+watch(() => props.videoId, () => engine.clearAll())
+
+onUnmounted(() => {
+  engine.disconnect()
+  engine.clearAll()
+})
+</script>
+
+<template>
+  <div v-if="enabled" ref="containerRef" class="absolute inset-0 overflow-hidden pointer-events-none z-20">
+    <canvas ref="canvasRef" class="absolute inset-0 w-full h-full pointer-events-none" />
+    <div ref="hitLayerRef" class="absolute inset-0 pointer-events-none" />
+    
+    <!-- 操作菜单 -->
+    <div
+      v-if="hoveredDanmaku.show"
+      class="fixed bg-zinc-800/95 rounded-lg shadow-xl z-50 py-2 min-w-[140px] pointer-events-auto border border-zinc-700"
+      :style="{ left: hoveredDanmaku.x + 'px', top: hoveredDanmaku.y + 'px' }"
+      @mouseenter="handleMenuEnter"
+      @mouseleave="engine.startHideTimer"
+    >
+      <div class="px-3 py-1 text-xs text-zinc-400 border-b border-zinc-700 mb-1 truncate max-w-[140px]">
+        {{ hoveredDanmaku.displayName || hoveredDanmaku.userId }}
+      </div>
+      <button 
+        class="w-full px-4 py-1.5 text-left text-sm hover:bg-zinc-700 transition-colors text-white" 
+        @click="engine.handleHighlightUser"
+      >
+        高亮此人
+      </button>
+      <button 
+        class="w-full px-4 py-1.5 text-left text-sm hover:bg-zinc-700 transition-colors text-rose-400" 
+        @click="engine.handleBlockUser"
+      >
+        屏蔽用户
+      </button>
+    </div>
+  </div>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\AddVideoModal.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, watch, nextTick, useTemplateRef } from 'vue'
+import { X, Youtube, Tv, Link, AlertCircle } from 'lucide-vue-next'
+
+interface Props {
+  modelValue: boolean
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', val: boolean): void
+  (e: 'add', channel: { platform: 'youtube' | 'bilibili'; id: string }): void
+}>()
+
+const platform = ref<'youtube' | 'bilibili'>('youtube')
+const videoId = ref('')
+const error = ref('')
+const inputRef = useTemplateRef<HTMLInputElement>('inputRef')
+
+// 1. 自动聚焦逻辑
+watch(() => props.modelValue, async (val) => {
+  if (val) {
+    platform.value = 'youtube'
+    videoId.value = ''
+    error.value = ''
+    // 确保 DOM 渲染后聚焦
+    await nextTick()
+    inputRef.value?.focus()
+  }
+})
+
+// 2. 增强型解析逻辑
+function parseYouTubeId(input: string): string {
+  const raw = input.trim()
+  try {
+    // 匹配常见的 YouTube 各种格式 (v=, shorts/, live/, youtu.be/)
+    const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts|live)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
+    const match = raw.match(youtubeRegex)
+    return match ? match[1] : raw
+  } catch {
+    return raw
+  }
+}
+
+function parseBilibiliId(input: string): string {
+  const raw = input.trim()
+  // 匹配 live.bilibili.com/数字
+  const biliRegex = /live\.bilibili\.com\/(\d+)/
+  const match = raw.match(biliRegex)
+  return match ? match[1] : raw
+}
+
+function close() {
+  emit('update:modelValue', false)
+}
+
+function submit() {
+  const raw = videoId.value.trim()
+  if (!raw) {
+    error.value = '请填写房间号、ID 或完整链接'
+    return
+  }
+
+  let finalId = ''
+  if (platform.value === 'youtube') {
+    finalId = parseYouTubeId(raw)
+    // 校验 YouTube ID 长度通常为 11 位
+    if (finalId.length < 5) {
+      error.value = '无效的 YouTube ID'
+      return
+    }
+  } else {
+    finalId = parseBilibiliId(raw)
+    // 校验 B站 ID 是否为纯数字
+    if (!/^\d+$/.test(finalId)) {
+      error.value = 'B站直播间号必须为纯数字'
+      return
+    }
+  }
+
+  emit('add', { platform: platform.value, id: finalId })
+  close()
+}
+
+function handleKey(e: KeyboardEvent) {
+  if (e.key === 'Enter') submit()
+  if (e.key === 'Escape') close()
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <Transition
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition-all duration-200 ease-in"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="modelValue"
+        class="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center px-4"
+        @click.self="close"
+      >
+        <Transition
+          appear
+          enter-active-class="transition-all duration-300 cubic-bezier(0.34, 1.56, 0.64, 1)"
+          enter-from-class="opacity-0 scale-90 translate-y-4"
+          enter-to-class="opacity-100 scale-100 translate-y-0"
+          leave-active-class="transition-all duration-200 ease-in"
+          leave-from-class="opacity-100 scale-100"
+          leave-to-class="opacity-0 scale-95"
+        >
+          <div
+            v-if="modelValue"
+            class="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-[0_32px_64px_-12px_rgba(0,0,0,0.6)] overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            @keydown="handleKey"
+          >
+            <!-- 头部 -->
+            <div class="px-6 py-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+              <div class="flex items-center gap-3">
+                <div class="p-2 bg-rose-500/10 rounded-lg">
+                  <Link class="w-5 h-5 text-rose-500" />
+                </div>
+                <div>
+                  <h2 class="text-zinc-100 font-bold text-base leading-none">添加直播窗</h2>
+                  <p class="text-zinc-500 text-[11px] mt-1.5 font-medium uppercase tracking-wider">Add New Source</p>
+                </div>
+              </div>
+              <button
+                @click="close"
+                class="p-2 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all active:scale-90"
+              >
+                <X class="w-5 h-5" />
+              </button>
+            </div>
+
+            <!-- 主体 -->
+            <div class="p-6 space-y-6">
+              <!-- 平台选择 -->
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  v-for="p in (['youtube', 'bilibili'] as const)"
+                  :key="p"
+                  @click="platform = p; error = ''"
+                  class="relative flex flex-col items-center gap-2 py-4 rounded-xl border-2 transition-all duration-300 group"
+                  :class="platform === p
+                    ? p === 'youtube'
+                      ? 'bg-red-500/5 border-red-600/50 text-red-500 shadow-[0_0_20px_rgba(220,38,38,0.1)]'
+                      : 'bg-blue-500/5 border-blue-600/50 text-blue-500 shadow-[0_0_20px_rgba(37,99,235,0.1)]'
+                    : 'bg-zinc-800/50 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'"
+                >
+                  <component :is="p === 'youtube' ? Youtube : Tv" class="w-6 h-6 transition-transform group-hover:scale-110" />
+                  <span class="text-xs font-bold uppercase tracking-widest">{{ p }}</span>
+                  <!-- 选中指示器 -->
+                  <div v-if="platform === p" class="absolute top-2 right-2 w-1.5 h-1.5 rounded-full" :class="p === 'youtube' ? 'bg-red-500' : 'bg-blue-500'"></div>
+                </button>
+              </div>
+
+              <!-- 输入框 -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between px-1">
+                  <label class="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+                    {{ platform === 'youtube' ? 'Source ID / URL' : 'Room ID / URL' }}
+                  </label>
+                  <span v-if="error" class="text-[10px] font-bold text-red-500 flex items-center gap-1 animate-pulse">
+                    <AlertCircle class="w-3 h-3" /> {{ error }}
+                  </span>
+                </div>
+                
+                <div class="relative group">
+                  <input
+                    ref="inputRef"
+                    v-model="videoId"
+                    :placeholder="platform === 'youtube' ? '输入视频 ID 或链接...' : '输入直播间号或链接...'"
+                    @input="error = ''"
+                    class="w-full bg-zinc-950 border-2 rounded-xl px-4 py-3.5 text-sm text-white
+                           placeholder-zinc-700 outline-none transition-all font-mono"
+                    :class="error
+                      ? 'border-red-600/50'
+                      : platform === 'youtube' 
+                        ? 'border-zinc-800 focus:border-red-600/30' 
+                        : 'border-zinc-800 focus:border-blue-600/30'"
+                  />
+                </div>
+                <p class="text-[10px] text-zinc-600 px-1 italic">
+                  支持直接粘贴地址栏 URL，系统将自动提取 ID。
+                </p>
+              </div>
+            </div>
+
+            <!-- 底部操作 -->
+            <div class="px-6 py-5 bg-zinc-900/80 border-t border-zinc-800 flex items-center gap-3">
+              <button
+                @click="close"
+                class="flex-1 py-3 rounded-xl text-sm font-bold text-zinc-500 hover:text-zinc-200 
+                       hover:bg-zinc-800 transition-all active:scale-95"
+              >
+                取消
+              </button>
+              <button
+                @click="submit"
+                class="flex-[2] py-3 rounded-xl text-sm font-bold text-white transition-all 
+                       active:scale-95 shadow-lg shadow-rose-900/20"
+                :class="platform === 'youtube' ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'"
+              >
+                确认添加
+              </button>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </Transition>
+  </Teleport>
+</template>
+
+<style scoped>
+/* 简单的 Spring 动画贝塞尔曲线 */
+.cubic-bezier {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\YouTubePlayer.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { loadYouTubeIframeAPI, YTPlayer } from '@/utils/youtube-loader'
+
+interface Props {
+  videoId: string
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<{
+  (e: 'timeUpdate', time: number): void
+  (e: 'ready'): void
+}>()
+
+const containerRef = ref<HTMLDivElement | null>(null)
+let ytPlayer: YTPlayer | null = null 
+let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
+
+async function initPlayer() {
+  try {
+    // 等待全局 API 加载完成
+    await loadYouTubeIframeAPI()
+
+    if (!containerRef.value || !props.videoId || !window.YT) return
+
+    // 如果播放器实例已存在，先销毁（防止内存泄露）
+    if (ytPlayer) {
+      destroyPlayer()
+    }
+
+    ytPlayer = new window.YT.Player(containerRef.value, {
+      videoId: props.videoId,
+      playerVars: {
+        autoplay: 1,
+        enablejsapi: 1,
+        origin: window.location.origin,
+        rel: 0, // 不显示相关视频
+      },
+      events: {
+        onReady: () => {
+          emit('ready')
+          startTimeUpdate()
+        },
+        onStateChange: (event: any) => {
+          // 可以在这里处理播放/暂停状态同步
+        },
+        onError: (event: any) => {
+          console.error('[YouTubePlayer] Player Error:', event.data)
+        }
+      }
+    })
+  } catch (error) {
+    console.error('[YouTubePlayer] Failed to load YouTube API:', error)
+  }
+}
+
+function startTimeUpdate() {
+  stopTimeUpdate()
+  timeUpdateInterval = setInterval(() => {
+    if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+      try {
+        const currentTime = ytPlayer.getCurrentTime()
+        emit('timeUpdate', currentTime)
+      } catch (e) {
+        // 忽略在销毁瞬间可能产生的错误
+      }
+    }
+  }, 500)
+}
+
+function stopTimeUpdate() {
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
+}
+
+function destroyPlayer() {
+  stopTimeUpdate()
+  if (ytPlayer) {
+    try {
+      ytPlayer.destroy()
+    } catch (e) {
+      console.warn('[YouTubePlayer] Destroy error:', e)
+    }
+    ytPlayer = null
+  }
+}
+
+onMounted(() => {
+  initPlayer()
+})
+
+onUnmounted(() => {
+  destroyPlayer()
+})
+
+// 监听 ID 变化：如果 ID 变了，直接使用现有实例切歌，比销毁重建更快
+watch(() => props.videoId, (newId) => {
+  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function' && newId) {
+    ytPlayer.loadVideoById(newId)
+  } else {
+    initPlayer() // 如果实例还没好，走初始化逻辑
+  }
+})
+</script>
+
+<template>
+  <div ref="containerRef" class="absolute inset-0 w-full h-full"></div>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\LayoutThumbnail.vue
+================================================================================
+
+<script setup lang="ts">
+/**
+ * 布局缩略图组件
+ * 使用 SVG 矢量绘制，保证比例精确且代码简洁
+ */
+defineProps<{
+  type: string;
+  active?: boolean; // 是否处于选中状态
+}>()
+
+// 定义颜色常量，方便统一修改
+const COLORS = {
+  bg: '#09090b',       // 黑色背景
+  border: '#27272a',   // 边框色
+  main: '#f43f5e',     // 主窗位颜色 (rose-500)
+  sub: '#3f3f46',      // 次窗位颜色 (zinc-600)
+  stroke: '#18181b'    // 窗位间的缝隙色
+}
+</script>
+
+<template>
+  <svg 
+    viewBox="0 0 100 60" 
+    class="w-full h-full rounded-md shadow-inner transition-all duration-300"
+    :class="active ? 'ring-2 ring-rose-500' : ''"
+  >
+    <!-- 底槽 -->
+    <rect width="100" height="60" :fill="COLORS.bg" />
+
+    <!-- 1本视频 -->
+    <template v-if="type === '1-s'">
+      <rect x="2" y="2" width="96" height="56" :fill="COLORS.main" rx="2" />
+    </template>
+
+    <!-- 2本视频：左右 -->
+    <template v-if="type === '2-h'">
+      <rect x="2" y="2" width="47" height="56" :fill="COLORS.main" rx="2" />
+      <rect x="51" y="2" width="47" height="56" :fill="COLORS.sub" rx="2" />
+    </template>
+
+    <!-- 2本视频：上下 -->
+    <template v-if="type === '2-v'">
+      <rect x="2" y="2" width="96" height="27" :fill="COLORS.main" rx="2" />
+      <rect x="2" y="31" width="96" height="27" :fill="COLORS.sub" rx="2" />
+    </template>
+
+    <!-- 3本视频：1大2小 (1🎞️ + 2) -->
+    <template v-if="type === '3-1+2'">
+      <rect x="2" y="2" width="63" height="56" :fill="COLORS.main" rx="2" />
+      <rect x="67" y="2" width="31" height="27" :fill="COLORS.sub" rx="2" />
+      <rect x="67" y="31" width="31" height="27" :fill="COLORS.sub" rx="2" />
+    </template>
+
+    <!-- 3本视频：三列 -->
+    <template v-if="type === '3-cols'">
+      <rect x="2" y="2" width="30" height="56" :fill="COLORS.main" rx="2" />
+      <rect x="34" y="2" width="32" height="56" :fill="COLORS.sub" rx="2" />
+      <rect x="68" y="2" width="30" height="56" :fill="COLORS.sub" rx="2" />
+    </template>
+
+    <!-- 4本视频：田字格 -->
+    <template v-if="type === '4-grid'">
+      <rect x="2" y="2" width="47" height="27" :fill="COLORS.main" rx="2" />
+      <rect x="51" y="2" width="47" height="27" :fill="COLORS.sub" rx="2" />
+      <rect x="2" y="31" width="47" height="27" :fill="COLORS.sub" rx="2" />
+      <rect x="51" y="31" width="47" height="27" :fill="COLORS.sub" rx="2" />
+    </template>
+
+    <!-- 4本视频：1大3小 -->
+    <template v-if="type === '4-1+3'">
+      <rect x="2" y="2" width="68" height="56" :fill="COLORS.main" rx="2" />
+      <rect x="72" y="2" width="26" height="17" :fill="COLORS.sub" rx="2" />
+      <rect x="72" y="21" width="26" height="18" :fill="COLORS.sub" rx="2" />
+      <rect x="72" y="41" width="26" height="17" :fill="COLORS.sub" rx="2" />
+    </template>
+  </svg>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\SidebarDrawer.vue
+================================================================================
+
+<script setup lang="ts">
+import { useRouter } from 'vue-router'
+import { Menu, Settings, HelpCircle } from 'lucide-vue-next'
+import DrawerNavSection from './drawer/DrawerNavSection.vue'
+import DrawerThemeSection from './drawer/DrawerThemeSection.vue'
+
+interface Props {
+  modelValue: boolean
+  isDark: boolean
+  currentThemeId: string
+  themes: Array<{ id: string; name: string; colors: { primary: string } }>
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<{
+  (e: 'update:modelValue', val: boolean): void
+  (e: 'toggleDark'): void
+  (e: 'setTheme', id: string): void
+}>()
+
+const router = useRouter()
+
+const close = () => emit('update:modelValue', false)
+
+const navigate = (path: string) => {
+  router.push(path)
+  close()
+}
+</script>
+
+<template>
+  <Transition name="fade">
+    <div v-if="modelValue" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="close" />
+  </Transition>
+
+  <Transition name="slide">
+    <aside v-if="modelValue" class="fixed top-0 left-0 h-full w-64 z-50 flex flex-col bg-zinc-950 border-r border-zinc-800 shadow-2xl">
+      
+      <div class="flex items-center gap-3 px-4 py-4 border-b border-zinc-800">
+        <button @click="close" class="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">
+          <Menu class="w-5 h-5" />
+        </button>
+        <router-link to="/" class="flex items-center gap-2 group" @click="close">
+          <div class="w-7 h-7 rounded-md bg-rose-600 flex items-center justify-center group-hover:bg-rose-500 transition-colors">
+            <span class="text-white text-[11px] font-black tracking-tighter">VL</span>
+          </div>
+          <span class="text-white font-semibold text-sm">VTuber Live</span>
+        </router-link>
+      </div>
+
+      <DrawerNavSection @navigate="navigate" />
+
+      <div class="px-3 py-4 border-t border-zinc-800 space-y-4">
+        <DrawerThemeSection 
+          :is-dark="isDark"
+          :current-theme-id="currentThemeId"
+          :themes="themes"
+          @toggle-dark="emit('toggleDark')"
+          @set-theme="id => emit('setTheme', id)"
+        />
+
+        <div class="flex items-center gap-2 px-1 pt-2 border-t border-zinc-800">
+          <button @click="navigate('/help')" class="flex-1 footer-btn">
+            <HelpCircle class="w-4 h-4" /> <span>帮助</span>
+          </button>
+          <button @click="navigate('/settings')" class="flex-1 footer-btn">
+            <Settings class="w-4 h-4" /> <span>设置</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  </Transition>
+</template>
+
+<style scoped>
+.footer-btn {
+  @apply flex items-center gap-2 px-3 py-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors text-sm;
+}
+
+/* 动画定义 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.slide-enter-active { transition: transform 0.3s ease-out; }
+.slide-leave-active { transition: transform 0.2s ease-in; }
+.slide-enter-from, .slide-leave-to { transform: translateX(-100%); }
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\GroupSelectorModal.vue
+================================================================================
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { X, Star, StarOff } from 'lucide-vue-next'
+import type { Organization } from '@/api'
+
+interface Props {
+  modelValue: boolean
+  organizations: Organization[]
+  likedOrgIds: number[]
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', val: boolean): void
+  (e: 'select', orgId: number): void
+}>()
+
+const sortedOrgs = computed(() => {
+  const liked: Organization[] = []
+  const unliked: Organization[] = []
+  
+  for (const org of props.organizations) {
+    if (props.likedOrgIds.includes(org.id)) {
+      liked.push(org)
+    } else {
+      unliked.push(org)
+    }
+  }
+  
+  return { liked, unliked }
+})
+
+function close() {
+  emit('update:modelValue', false)
+}
+
+function selectOrg(orgId: number) {
+  emit('select', orgId)
+  close()
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <Transition name="fade">
+      <div
+        v-if="modelValue"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        @click.self="close"
+      >
+        <Transition
+          appear
+          enter-active-class="transition-all duration-200 ease-out"
+          enter-from-class="opacity-0 scale-95"
+          enter-to-class="opacity-100 scale-100"
+          leave-active-class="transition-all duration-150 ease-in"
+          leave-from-class="opacity-100 scale-100"
+          leave-to-class="opacity-0 scale-95"
+        >
+          <div
+            v-if="modelValue"
+            class="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden"
+          >
+            <!-- Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div>
+                <h2 class="text-white font-semibold text-sm">选择分组</h2>
+                <p class="text-zinc-500 text-xs mt-0.5">选择机构查看直播成员</p>
+              </div>
+              <button
+                @click="close"
+                class="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+
+            <!-- Body -->
+            <div class="max-h-[60vh] overflow-y-auto p-4">
+              <!-- 已收藏机构 -->
+              <div v-if="sortedOrgs.liked.length > 0">
+                <div class="flex items-center gap-2 mb-3">
+                  <Star class="w-3.5 h-3.5 text-amber-400" />
+                  <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">已收藏</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mb-4">
+                  <button
+                    v-for="org in sortedOrgs.liked"
+                    :key="org.id"
+                    @click="selectOrg(org.id)"
+                    class="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 border border-zinc-700 hover:border-amber-500/50 transition-all text-left"
+                  >
+                    <img
+                      v-if="org.logo_url"
+                      :src="org.logo_url"
+                      class="w-6 h-6 rounded-full object-cover"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div v-else class="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center">
+                      <Star class="w-3 h-3 text-amber-400" />
+                    </div>
+                    <span class="text-sm text-zinc-300 truncate">{{ org.name }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 未收藏机构 -->
+              <div v-if="sortedOrgs.unliked.length > 0">
+                <div class="flex items-center gap-2 mb-3">
+                  <StarOff class="w-3.5 h-3.5 text-zinc-500" />
+                  <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider">全部机构</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <button
+                    v-for="org in sortedOrgs.unliked"
+                    :key="org.id"
+                    @click="selectOrg(org.id)"
+                    class="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/30 hover:bg-zinc-700 border border-zinc-700/50 hover:border-zinc-500 transition-all text-left"
+                  >
+                    <img
+                      v-if="org.logo_url"
+                      :src="org.logo_url"
+                      class="w-6 h-6 rounded-full object-cover"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div v-else class="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center">
+                      <span class="text-[10px] text-zinc-400">ORG</span>
+                    </div>
+                    <span class="text-sm text-zinc-400 truncate">{{ org.name }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </Transition>
+  </Teleport>
+</template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\drawer\DrawerNavSection.vue
+================================================================================
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { 
+  Home, Heart, Tv2, ListMusic, LayoutGrid, Music2, 
+  Settings, Building2, ChevronRight, ChevronDown, ChevronUp 
+} from 'lucide-vue-next'
+
+const emit = defineEmits(['navigate'])
+const showAdminMenu = ref(false)
+
+const navItems = [
+  { label: '首页', icon: Home, to: '/' },
+  { label: '收藏', icon: Heart, to: '/favorites' },
+  { label: '频道', icon: Tv2, to: '/channels' },
+  { label: '播放列表', icon: ListMusic, to: '/playlist' },
+  { label: '多窗播放', icon: LayoutGrid, to: '/multiview' },
+  { label: 'Musicdex', icon: Music2, to: '/musicdex' },
+]
+</script>
+
+<template>
+  <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
+    <button
+      v-for="item in navItems" :key="item.to"
+      @click="emit('navigate', item.to)"
+      class="nav-item group"
+    >
+      <component :is="item.icon" class="w-4 h-4" />
+      <span>{{ item.label }}</span>
+      <ChevronRight class="w-3 h-3 ml-auto opacity-0 group-hover:opacity-50 transition-all" />
+    </button>
+    
+    <div class="my-2 border-t border-zinc-800" />
+    
+    <!-- 管理员二级菜单 -->
+    <button @click="showAdminMenu = !showAdminMenu" class="nav-item">
+      <Settings class="w-4 h-4 text-zinc-500" />
+      <span class="flex-1">管理控制台</span>
+      <ChevronDown v-if="!showAdminMenu" class="w-3 h-3 opacity-50" />
+      <ChevronUp v-else class="w-3 h-3 opacity-50" />
+    </button>
+    
+    <div v-if="showAdminMenu" class="ml-4 mt-1 space-y-1 border-l border-zinc-800 pl-2">
+      <button @click="emit('navigate', '/admin/channels')" class="nav-item text-xs">
+        <Tv2 class="w-3.5 h-3.5" /> <span>频道管理</span>
+      </button>
+      <button @click="emit('navigate', '/admin/organizations')" class="nav-item text-xs">
+        <Building2 class="w-3.5 h-3.5" /> <span>机构管理</span>
+      </button>
+    </div>
+  </nav>
+</template>
+
+<style scoped>
+.nav-item {
+  @apply w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900 transition-all text-sm;
+}
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-zinc-800 rounded; }
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\drawer\DrawerThemeSection.vue
+================================================================================
+
+<script setup lang="ts">
+import { Sun, Moon, Palette } from 'lucide-vue-next'
+
+interface Props {
+  isDark: boolean
+  currentThemeId: string
+  themes: Array<{ id: string; name: string; colors: { primary: string } }>
+}
+
+defineProps<Props>()
+const emit = defineEmits(['toggleDark', 'setTheme'])
+</script>
+
+<template>
+  <div class="space-y-4 px-1">
+    <!-- 深浅色切换 -->
+    <div class="flex items-center justify-between">
+      <span class="section-title">外观模式</span>
+      <button @click="emit('toggleDark')" class="theme-toggle-btn">
+        <Moon v-if="isDark" class="w-3.5 h-3.5" />
+        <Sun v-else class="w-3.5 h-3.5" />
+        <span>{{ isDark ? '深色' : '浅色' }}</span>
+      </button>
+    </div>
+
+    <!-- 主题色选取 -->
+    <div>
+      <div class="section-title mb-2 flex items-center gap-1.5">
+        <Palette class="w-3 h-3" />主题色彩
+      </div>
+      <div class="flex flex-wrap gap-2.5">
+        <button
+          v-for="theme in themes" :key="theme.id"
+          @click="emit('setTheme', theme.id)"
+          :title="theme.name"
+          class="w-6 h-6 rounded-full border-2 transition-all hover:scale-125 active:scale-95"
+          :style="{
+            backgroundColor: theme.colors.primary,
+            borderColor: currentThemeId === theme.id ? 'white' : 'transparent'
+          }"
+        />
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.section-title {
+  @apply text-zinc-500 text-[10px] uppercase tracking-widest font-bold;
+}
+.theme-toggle-btn {
+  @apply flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-zinc-900 text-zinc-400 hover:text-white transition-colors text-xs border border-zinc-800;
+}
+</style>
+
+================================================================================
+FILE: frontend\src\components\multiview\header\ToolbarGroupSelect.vue
+================================================================================
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Star, ChevronDown } from 'lucide-vue-next'
+import { NPopover } from 'naive-ui'
+
+type GroupType = 'favorites' | number
+
+const props = defineProps<{
+  selectedGroup: GroupType | null
+  organizationName: string | null
+  membersCount: number
+}>()
+
+const emit = defineEmits(['select', 'openSelector'])
+
+const groupLabel = computed(() => {
+  if (props.selectedGroup === 'favorites') return '收藏夹'
+  if (typeof props.selectedGroup === 'number') return props.organizationName || `机构 ${props.selectedGroup}`
+  return '选择分组'
+})
+</script>
+
+<template>
+  <n-popover trigger="click" placement="bottom-start" :show-arrow="false">
+    <template #trigger>
+      <button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 transition-colors shrink-0">
+        <span>{{ groupLabel }}</span>
+        <span v-if="selectedGroup" class="text-zinc-500">({{ membersCount }})</span>
+        <ChevronDown class="w-3 h-3 opacity-50" />
+      </button>
+    </template>
+    
+    <div class="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
+      <button @click="emit('select', 'favorites')" class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors border-b border-zinc-800">
+        <Star class="w-4 h-4 text-amber-400" />
+        <span>收藏夹</span>
+      </button>
+      <button @click="emit('openSelector')" class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors">
+        <div class="w-4 h-4 rounded-full border border-zinc-500" />
+        <span>全部机构</span>
+      </button>
+    </div>
+  </n-popover>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\header\ToolbarMemberList.vue
+================================================================================
+
+<script setup lang="ts">
+import { CirclePlus } from 'lucide-vue-next'
+import { NTooltip } from 'naive-ui'
+import type { Stream } from '@/api'
+
+const props = defineProps<{
+  members: Stream[]
+  hasSelectedGroup: boolean
+}>()
+
+const emit = defineEmits(['add', 'openAddModal'])
+
+function formatLiveDuration(startedAt: string | null): string {
+  if (!startedAt) return ''
+  const diffMins = Math.floor((new Date().getTime() - new Date(startedAt).getTime()) / 60000)
+  return diffMins < 60 ? `${diffMins}m` : `${Math.floor(diffMins / 60)}h`
+}
+</script>
+
+<template>
+  <div class="flex-1 min-w-0 flex items-center overflow-x-auto scrollbar-none gap-2">
+    <n-tooltip v-for="member in members.slice(0, 15)" :key="member.id" placement="bottom">
+      <template #trigger>
+        <button @click="emit('add', member)" class="relative shrink-0 group">
+          <img v-if="member.channel_avatar" :src="member.channel_avatar" class="w-10 h-10 rounded-full border-2 border-transparent group-hover:border-rose-500 transition-all object-cover" referrerpolicy="no-referrer" />
+          <div v-else class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 font-bold">?</div>
+          <span v-if="member.started_at" class="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] px-1.5 rounded-full shadow-sm">{{ formatLiveDuration(member.started_at) }}</span>
+        </button>
+      </template>
+      <span class="text-xs">{{ member.channel_name }}</span>
+    </n-tooltip>
+
+    <button @click="emit('openAddModal')" class="p-1.5 rounded-md text-rose-400 hover:bg-zinc-800 transition-colors shrink-0">
+      <CirclePlus class="w-5 h-5" />
+    </button>
+
+    <div v-if="!hasSelectedGroup" class="text-xs text-zinc-600 italic whitespace-nowrap">选择分组查看成员</div>
+    <div v-else-if="members.length === 0" class="text-xs text-zinc-600 italic whitespace-nowrap">暂无直播</div>
+  </div>
+</template>
+
+================================================================================
+FILE: frontend\src\components\multiview\header\ToolbarPresetMenu.vue
+================================================================================
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { LayoutTemplate, Maximize2 } from 'lucide-vue-next'
+import { NPopover } from 'naive-ui'
+import { type PresetId, PRESET_META } from '@/utils/presetLayouts'
+
+const props = defineProps<{ channelCount: number }>()
+const emit = defineEmits(['apply', 'openLibrary'])
+
+const recommendations = computed(() => {
+  const n = props.channelCount
+  let ids: PresetId[] = n <= 1 ? ['1-s'] : n === 2 ? ['2-h', '2-v'] : n === 3 ? ['3-1+2', '3-cols'] : ['4-grid', '4-1+3']
+  return ids.map(id => ({ id, label: PRESET_META[id].label }))
+})
+</script>
+
+<template>
+  <n-popover trigger="click" placement="bottom" style="background-color: #18181b; border: 1px solid #3f3f46; color: white; width: 220px;">
+    <template #trigger>
+      <button class="flex items-center gap-1 p-2 rounded-md text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition-all">
+        <LayoutTemplate class="w-4 h-4" />
+        <span class="text-[10px] font-bold">布局预设</span>
+      </button>
+    </template>
+    
+    <div class="p-2 space-y-1">
+      <div class="text-[9px] text-zinc-500 font-bold mb-2 uppercase tracking-tighter">适合当前 ({{ channelCount }}) 窗</div>
+      
+      <button v-for="opt in recommendations" :key="opt.id" @click="emit('apply', opt.id)" class="w-full flex items-center gap-3 px-2 py-2 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors text-left">
+        <div class="w-8 h-5 bg-zinc-900 border border-zinc-700 rounded flex p-0.5 gap-0.5">
+            <div class="flex-1 bg-zinc-600/50"></div>
+            <div v-if="opt.id !== '1-s'" class="flex-1 bg-zinc-600/50"></div>
+        </div>
+        <span class="text-xs">{{ opt.label }}</span>
+      </button>
+
+      <div class="h-px bg-zinc-800 my-2"></div>
+      <button @click="emit('openLibrary')" class="w-full flex items-center justify-center gap-2 py-2 text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-800 rounded border border-dashed border-zinc-700 transition-all">
+        <Maximize2 class="w-3 h-3" />
+        <span>预设库</span>
+      </button>
+    </div>
+  </n-popover>
+</template>
+
+

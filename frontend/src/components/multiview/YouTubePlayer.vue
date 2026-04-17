@@ -1,102 +1,106 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-
-interface YT {
-  Player: new (element: HTMLElement, options: any) => any
-}
-
-declare global {
-  interface Window {
-    YT?: YT
-    onYouTubeIframeAPIReady?: () => void
-  }
-}
+import { loadYouTubeIframeAPI, YTPlayer } from '@/utils/youtube-loader'
 
 interface Props {
   videoId: string
 }
 
 const props = defineProps<Props>()
-
 const emit = defineEmits<{
   (e: 'timeUpdate', time: number): void
   (e: 'ready'): void
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
-let ytPlayer: any = null
+let ytPlayer: YTPlayer | null = null 
 let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
 
-function onYouTubeIframeAPIReady() {
-  if (!containerRef.value || !props.videoId || !window.YT) return
+async function initPlayer() {
+  try {
+    // 等待全局 API 加载完成
+    await loadYouTubeIframeAPI()
 
-  ytPlayer = new window.YT.Player(containerRef.value, {
-    videoId: props.videoId,
-    playerVars: {
-      autoplay: 1,
-      enablejsapi: 1,
-      origin: window.location.origin,
-    },
-    events: {
-      onReady: () => {
-        emit('ready')
-        startTimeUpdate()
-      },
-      onError: (event: any) => {
-        console.error('[YouTubePlayer] Error:', event.data)
-      }
+    if (!containerRef.value || !props.videoId || !window.YT) return
+
+    // 如果播放器实例已存在，先销毁（防止内存泄露）
+    if (ytPlayer) {
+      destroyPlayer()
     }
-  })
+
+    ytPlayer = new window.YT.Player(containerRef.value, {
+      videoId: props.videoId,
+      playerVars: {
+        autoplay: 1,
+        enablejsapi: 1,
+        origin: window.location.origin,
+        rel: 0, // 不显示相关视频
+      },
+      events: {
+        onReady: () => {
+          emit('ready')
+          startTimeUpdate()
+        },
+        onStateChange: (event: any) => {
+          // 可以在这里处理播放/暂停状态同步
+        },
+        onError: (event: any) => {
+          console.error('[YouTubePlayer] Player Error:', event.data)
+        }
+      }
+    })
+  } catch (error) {
+    console.error('[YouTubePlayer] Failed to load YouTube API:', error)
+  }
 }
 
 function startTimeUpdate() {
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-  }
+  stopTimeUpdate()
   timeUpdateInterval = setInterval(() => {
-    if (ytPlayer && ytPlayer.getCurrentTime) {
+    if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
       try {
         const currentTime = ytPlayer.getCurrentTime()
         emit('timeUpdate', currentTime)
       } catch (e) {
-        console.error('[YouTubePlayer] Get time error:', e)
+        // 忽略在销毁瞬间可能产生的错误
       }
     }
   }, 500)
 }
 
-function loadYouTubeAPI() {
-  if (window.YT && window.YT.Player) {
-    onYouTubeIframeAPIReady()
-    return
+function stopTimeUpdate() {
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
   }
+}
 
-  const tag = document.createElement('script')
-  tag.src = 'https://www.youtube.com/iframe_api'
-  const firstScriptTag = document.getElementsByTagName('script')[0]
-  if (firstScriptTag?.parentNode) {
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+function destroyPlayer() {
+  stopTimeUpdate()
+  if (ytPlayer) {
+    try {
+      ytPlayer.destroy()
+    } catch (e) {
+      console.warn('[YouTubePlayer] Destroy error:', e)
+    }
+    ytPlayer = null
   }
-
-  window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady
 }
 
 onMounted(() => {
-  loadYouTubeAPI()
+  initPlayer()
 })
 
 onUnmounted(() => {
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-  }
-  if (ytPlayer) {
-    ytPlayer.destroy()
-  }
+  destroyPlayer()
 })
 
+// 监听 ID 变化：如果 ID 变了，直接使用现有实例切歌，比销毁重建更快
 watch(() => props.videoId, (newId) => {
-  if (ytPlayer && newId) {
+  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function' && newId) {
     ytPlayer.loadVideoById(newId)
+  } else {
+    initPlayer() // 如果实例还没好，走初始化逻辑
   }
 })
 </script>

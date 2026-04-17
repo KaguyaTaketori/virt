@@ -29,16 +29,13 @@ const navigate = (path: string) => {
 </script>
 
 <template>
-  <!-- 遮罩层 -->
   <Transition name="fade">
     <div v-if="modelValue" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="close" />
   </Transition>
 
-  <!-- 侧边面板 -->
   <Transition name="slide">
     <aside v-if="modelValue" class="fixed top-0 left-0 h-full w-64 z-50 flex flex-col bg-zinc-950 border-r border-zinc-800 shadow-2xl">
       
-      <!-- 头部: Logo -->
       <div class="flex items-center gap-3 px-4 py-4 border-b border-zinc-800">
         <button @click="close" class="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">
           <Menu class="w-5 h-5" />
@@ -51,10 +48,8 @@ const navigate = (path: string) => {
         </router-link>
       </div>
 
-      <!-- 中间: 导航列表 (子组件) -->
       <DrawerNavSection @navigate="navigate" />
 
-      <!-- 底部: 主题与辅助 (子组件) -->
       <div class="px-3 py-4 border-t border-zinc-800 space-y-4">
         <DrawerThemeSection 
           :is-dark="isDark"
@@ -64,7 +59,6 @@ const navigate = (path: string) => {
           @set-theme="id => emit('setTheme', id)"
         />
 
-        <!-- 辅助功能 -->
         <div class="flex items-center gap-2 px-1 pt-2 border-t border-zinc-800">
           <button @click="navigate('/help')" class="flex-1 footer-btn">
             <HelpCircle class="w-4 h-4" /> <span>帮助</span>

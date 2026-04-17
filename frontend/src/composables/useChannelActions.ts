@@ -13,7 +13,7 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
   
   const likeMutation = useMutation({
     // 1. 执行 API 请求
-    mutationFn: async ({ id, isLiked }: { id: number; isLiked: boolean }) => {
+    mutationFn: async ({ id, isLiked }: { id: string; isLiked: boolean }) => {
       if (isLiked) return await userChannelApi.unlike(id)
       return await userChannelApi.like(id)
     },
@@ -52,7 +52,7 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
   })
 
   const blockMutation = useMutation({
-    mutationFn: async ({ id, isBlocked }: { id: number; isBlocked: boolean }) => {
+    mutationFn: async ({ id, isBlocked }: { id: string; isBlocked: boolean }) => {
       if (isBlocked) return await userChannelApi.unblock(id)
       return await userChannelApi.block(id)
     },
@@ -107,7 +107,6 @@ export function useChannelActions(channel: Ref<Channel | null | undefined>) {
 
     blockMutation.mutate({
       id: channel.value.id,
-      // 注意：这里使用 !! 确保转换为 boolean，且字段名需与 API 返回的一致（这里假设是 is_blocked）
       isBlocked: !!channel.value.is_blocked 
     })
   }

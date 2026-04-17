@@ -1,74 +1,165 @@
 <script setup lang="ts">
-import { ref, provide, computed } from 'vue'
-import { LayoutNode, swapNodes } from '@/utils/layoutEngine'
-import SplitPaneNode from './SplitPaneNode.vue'
-import { LayoutGrid } from 'lucide-vue-next'
-import { useEventListener } from '@vueuse/core';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { GridStack, type GridItemHTMLElement } from 'gridstack'
+import 'gridstack/dist/gridstack.min.css'
+import { useMultiviewStore } from '@/stores/multiview'
+import VideoCell from './VideoCell.vue'
 
-const props = defineProps<{
-  layoutTree: LayoutNode
+defineProps<{
   showDanmaku: boolean
-  danmakuSettings: any
 }>()
 
-const emit = defineEmits<{ 
-  (e: 'requestAdd'): void
-  (e: 'requestReplace', nodeId: string): void
-  (e: 'clearChannel', nodeId: string): void
-  (e: 'closeChannel', nodeId: string): void
-  (e: 'toggleDanmaku', channelId: string, enabled: boolean): void
-}>()
+const store = useMultiviewStore()
+const gridContainerRef = ref<HTMLElement | null>(null)
+let grid: GridStack | null = null
 
-// --- 全局拖拽防吞噬机制 ---
-const isDragging = ref(false)
-const draggedNodeId = ref<string | null>(null)
+let isInternalUpdate = false 
 
-function onDragStart(event: DragEvent, id: string) {
-  isDragging.value = true
-  draggedNodeId.value = id
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', id)
+function initGrid() {
+  if (!gridContainerRef.value) return
+
+  const containerHeight = gridContainerRef.value.offsetHeight
+  const rowHeight = containerHeight / 12
+
+  grid = GridStack.init({
+    column: 12,
+    row: 12,
+    cellHeight: rowHeight,
+    margin: 4,
+    float: true,
+    animate: true,
+    draggable: { handle: '.drag-handle' },
+    resizable: { handles: 'se' }
+  }, gridContainerRef.value)
+
+  grid.on('change', (event, items) => {
+    isInternalUpdate = true
+    items?.forEach(item => {
+      if (item.id) {
+        store.updateItemPosition(
+          item.id as string, 
+          item.x || 0, 
+          item.y || 0, 
+          item.w || 4, 
+          item.h || 4
+        )
+      }
+    })
+    setTimeout(() => { isInternalUpdate = false }, 100)
+  })
+}
+
+async function syncLayout() {
+  if (!grid || isInternalUpdate) return
+  
+  await nextTick()
+  await nextTick()
+
+  const els = Array.from(gridContainerRef.value?.querySelectorAll('.grid-stack-item') || []) as GridItemHTMLElement[]
+  
+  grid.batchUpdate()
+
+  els.forEach(el => {
+    if (!el.gridstackNode) {
+      const id = el.getAttribute('gs-id')
+      const item = store.items.find(i => i.id === id)
+      grid!.makeWidget(el, {
+        x: item?.x,
+        y: item?.y,
+        w: item?.w,
+        h: item?.h,
+        autoPosition: false
+      })
+    }
+  })
+
+  store.items.forEach(item => {
+    const el = els.find(e => e.getAttribute('gs-id') === item.id)
+    if (el) {
+      grid!.update(el, { 
+        x: item.x, 
+        y: item.y, 
+        w: item.w, 
+        h: item.h,
+        autoPosition: false 
+      })
+    }
+  })
+
+  const storeIds = new Set(store.items.map(i => i.id))
+  const currentWidgets = grid.getGridItems()
+  currentWidgets.forEach(w => {
+    const id = w.getAttribute('gs-id')
+    if (!id || !storeIds.has(id)) {
+      grid!.removeWidget(w, false) 
+    }
+  })
+
+  grid.batchUpdate(false)
+}
+
+watch(() => store.items, () => syncLayout(), { deep: true })
+
+const handleResize = () => {
+  if (grid && gridContainerRef.value) {
+    grid.cellHeight(gridContainerRef.value.offsetHeight / 12)
   }
 }
 
-function onDrop(targetId: string) {
-  isDragging.value = false
-  if (draggedNodeId.value && draggedNodeId.value !== targetId) {
-    swapNodes(props.layoutTree, draggedNodeId.value, targetId)
-  }
-  draggedNodeId.value = null
-}
+onMounted(() => {
+  initGrid()
+  syncLayout()
+  window.addEventListener('resize', handleResize)
+})
 
-// 监听拖拽结束（以防拖到窗口外部松手）
-useEventListener(window, 'dragend', () => { isDragging.value = false })
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  grid?.destroy(false)
+})
 
-// 将核心状态 Provider 给所有嵌套的节点
-provide('isDragging', isDragging)
-provide('showDanmaku', computed(() => props.showDanmaku))
-provide('danmakuSettings', props.danmakuSettings)
-provide('onDragStart', onDragStart)
-provide('onDrop', onDrop)
-provide('toggleDanmaku', (id: string, enabled: boolean) => emit('toggleDanmaku', id, enabled))
+const emit = defineEmits<{ (e: 'requestReplace', nodeId: string): void }>()
 </script>
 
 <template>
-  <div class="flex-1 min-h-0 w-full relative bg-zinc-950">
-    <!-- 全局透明遮罩层：只要在拖拽中，就盖住所有的 Iframe，防止事件被吞！ -->
-    <div v-if="isDragging" class="absolute inset-0 z-50 bg-white/5 cursor-grabbing" @dragover.prevent @drop="isDragging = false"></div>
+  <div class="flex-1 min-h-0 w-full relative bg-zinc-950 p-1 overflow-hidden">
+    <div ref="gridContainerRef" class="grid-stack">
+      <!-- 关键修复：添加 gs-x, gs-y, gs-w, gs-h 属性绑定 -->
+      <div
+        v-for="item in store.items"
+        :key="item.id"
+        class="grid-stack-item"
+        :gs-id="item.id"
+        :gs-x="item.x"
+        :gs-y="item.y"
+        :gs-w="item.w"
+        :gs-h="item.h"
+      >
+        <div class="grid-stack-item-content">
+          <VideoCell 
+            :item="item"
+            :show-danmaku="showDanmaku"
+            :danmaku-settings="store.danmakuSettings"
+            @clear="store.clearChannel"
+            @close="store.closeChannel"
+            @request-replace="emit('requestReplace', $event)"
+            @toggle-danmaku="store.toggleDanmaku"
+          />
+        </div>
+      </div>
+    </div>
 
-    <template v-if="layoutTree">
-      <SplitPaneNode 
-        :node="layoutTree"
-        @clear="emit('clearChannel', $event)"
-        @close="emit('closeChannel', $event)"
-        @requestReplace="emit('requestReplace', $event)"
-      />
-    </template>
-
-    <div v-else class="w-full h-full flex flex-col items-center justify-center gap-3 text-zinc-700">
-      <LayoutGrid class="w-12 h-12 opacity-20" />
-      <p class="text-sm">点击头部「添加」开始多窗观看</p>
+    <div v-if="store.items.length === 0" class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-zinc-700 pointer-events-none">
+      <p class="text-sm font-medium">点击头部“添加”按钮或选择一个分组开始</p>
     </div>
   </div>
 </template>
+
+<style scoped>
+.grid-stack { min-height: 100%; height: 100%; }
+.grid-stack-item-content { overflow: hidden !important; background: #000; border-radius: 4px; }
+:deep(.grid-stack-placeholder > .placeholder-content) {
+  background: rgba(244, 63, 94, 0.1) !important;
+  border: 2px dashed #f43f5e !important;
+  border-radius: 4px;
+}
+</style>

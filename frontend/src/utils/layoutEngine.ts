@@ -1,146 +1,79 @@
-export interface LayoutChannel {
-  platform: 'youtube' | 'bilibili' | 'empty'
-  id: string
-  danmakuEnabled?: boolean
+import { type GridItem, type LayoutChannel, type PresetId } from '@/types/multiview'
+
+export type { LayoutChannel }
+
+const generateId = () => Math.random().toString(36).substring(2, 9)
+
+/**
+ * 辅助函数：创建布局项目
+ * 这里的 h 参数确保了在 12 行网格系统中的高度
+ */
+function makeItem(x: number, y: number, w: number, h: number, channel?: LayoutChannel): GridItem {
+  return { 
+    id: generateId(), 
+    x, y, w, h, 
+    channel: channel || { platform: 'empty', id: `empty-${generateId()}` }
+  };
 }
 
-export interface LayoutNode {
-  id: string
-  type: 'split' | 'leaf'
-  direction?: 'horizontal' | 'vertical'
-  ratio?: number
-  children?: [LayoutNode, LayoutNode]
-  channel?: LayoutChannel
+// 快捷获取通道
+const L = (v: LayoutChannel[], i: number) => v[i];
+
+export const PRESET_GENERATORS: Record<PresetId, (channels: LayoutChannel[]) => GridItem[]> = {
+  '1-s': (v) => [
+    makeItem(0, 0, 12, 12, L(v, 0)),
+  ],
+
+  '2-h': (v) => [
+    makeItem(0, 0, 6, 12, L(v, 0)),
+    makeItem(6, 0, 6, 12, L(v, 1)),
+  ],
+
+  '2-v': (v) => [
+    makeItem(0, 0, 12, 6, L(v, 0)),
+    makeItem(0, 6, 12, 6, L(v, 1)),
+  ],
+
+  '3-1+2': (v) => [
+    makeItem(0, 0, 8, 12, L(v, 0)), // 左侧大屏
+    makeItem(8, 0, 4, 6,  L(v, 1)), // 右上小屏
+    makeItem(8, 6, 4, 6,  L(v, 2)), // 右下小屏
+  ],
+
+  '3-cols': (v) => [
+    makeItem(0, 0, 4, 12, L(v, 0)),
+    makeItem(4, 0, 4, 12, L(v, 1)),
+    makeItem(8, 0, 4, 12, L(v, 2)),
+  ],
+
+  '4-grid': (v) => [
+    makeItem(0, 0, 6, 6, L(v, 0)),
+    makeItem(6, 0, 6, 6, L(v, 1)),
+    makeItem(0, 6, 6, 6, L(v, 2)),
+    makeItem(6, 6, 6, 6, L(v, 3)),
+  ],
+
+  '4-1+3': (v) => [
+    makeItem(0, 0, 9, 12, L(v, 0)), // 左侧主屏
+    makeItem(9, 0, 3, 4,  L(v, 1)), // 右侧小屏1
+    makeItem(9, 4, 3, 4,  L(v, 2)), // 右侧小屏2
+    makeItem(9, 8, 3, 4,  L(v, 3)), // 右侧小屏3
+  ],
 }
 
-const PRESET_METADATA: Record<string, { label: string; icon?: string }> = {
-  '1-s':     { label: '单窗口模式' },
-  '2-h':     { label: '左右对半分割' },
-  '2-v':     { label: '上下对半分割' },
-  '3-1+2':   { label: '1大 🎞️ + 2小' },
-  '3-cols':  { label: '三列纵向并行' },
-  '4-grid':  { label: '2 × 2 田字格' },
-  '4-1+3':   { label: '1大 🎞️ + 3小' },
-
-};
-
-export function getPresetMeta(id: string) {
-  return PRESET_METADATA[id] || { label: id };
+export const PRESET_META: Record<PresetId, { label: string }> = {
+  '1-s'  : { label: '单窗口模式' },
+  '2-h'  : { label: '左右平分' },
+  '2-v'  : { label: '上下平分' },
+  '3-1+2': { label: '1主 + 2侧' },
+  '3-cols': { label: '三列并行' },
+  '4-grid': { label: '2x2 田字格' },
+  '4-1+3': { label: '1主 + 3侧' },
 }
 
-export function generateId() {
-  return Math.random().toString(36).substring(2, 9)
-}
-
-export function createLeaf(channel: LayoutChannel): LayoutNode {
-  return { id: generateId(), type: 'leaf', channel }
-}
-
-export function createEmptyLeaf(): LayoutNode {
-  return createLeaf({ platform: 'empty', id: `empty-${generateId()}` })
-}
-
-export function getActiveChannels(node: LayoutNode): LayoutChannel[] {
-  if (node.type === 'leaf') {
-    return node.channel?.platform !== 'empty' && node.channel ? [node.channel] : []
-  }
-  return [...getActiveChannels(node.children![0]), ...getActiveChannels(node.children![1])]
-}
-
-// 计算每个叶子节点的相对面积 (宽 x 高)，找出最大的节点
-function findLargestLeaf(node: LayoutNode, w: number, h: number): { node: LayoutNode, area: number, w: number, h: number } {
-  if (node.type === 'leaf') return { node, area: w * h, w, h }
-  
-  const ratio = node.ratio || 0.5
-  let left, right
-  if (node.direction === 'horizontal') {
-    left = findLargestLeaf(node.children![0], w * ratio, h)
-    right = findLargestLeaf(node.children![1], w * (1 - ratio), h)
-  } else {
-    left = findLargestLeaf(node.children![0], w, h * ratio)
-    right = findLargestLeaf(node.children![1], w, h * (1 - ratio))
-  }
-  return left.area >= right.area ? left : right
-}
-
-// 寻找第一个 empty 节点
-function findFirstEmpty(node: LayoutNode): LayoutNode | null {
-  if (node.type === 'leaf') return node.channel?.platform === 'empty' ? node : null
-  return findFirstEmpty(node.children![0]) || findFirstEmpty(node.children![1])
-}
-
-// 添加视频：优先填补空位，否则切分最大面积的窗口
-export function addChannelToTree(root: LayoutNode, channel: LayoutChannel) {
-  const emptyNode = findFirstEmpty(root)
-  if (emptyNode) {
-    emptyNode.channel = channel
-    return
-  }
-
-  // 没有空位，切分最大的
-  const { node: target, w, h } = findLargestLeaf(root, 1, 1)
-  const oldChannel = target.channel
-  
-  target.type = 'split'
-  // 根据长宽比决定横切还是竖切
-  target.direction = w > h ? 'horizontal' : 'vertical'
-  target.ratio = 0.5
-  delete target.channel
-  
-  target.children = [
-    createLeaf(oldChannel!),
-    createLeaf(channel)
-  ]
-}
-
-// 查找目标节点的父节点以及它是左(0)还是右(1)孩子
-function findParent(root: LayoutNode, targetId: string): { parent: LayoutNode, index: 0 | 1 } | null {
-  if (root.type === 'leaf') return null
-  if (root.children![0].id === targetId) return { parent: root, index: 0 }
-  if (root.children![1].id === targetId) return { parent: root, index: 1 }
-  
-  return findParent(root.children![0], targetId) || findParent(root.children![1], targetId)
-}
-
-// 彻底关闭并吞并
-export function removeNodeAndMerge(root: LayoutNode, targetId: string) {
-  if (root.id === targetId) { // 如果是根节点
-    Object.assign(root, createEmptyLeaf())
-    return
-  }
-  
-  const res = findParent(root, targetId)
-  if (!res) return
-  
-  const { parent, index } = res
-  const sibling = parent.children![index === 0 ? 1 : 0]
-  
-  // 兄弟节点直接取代父节点的位置（这就是“吞并”）
-  parent.type = sibling.type
-  parent.direction = sibling.direction
-  parent.ratio = sibling.ratio
-  parent.children = sibling.children
-  parent.channel = sibling.channel
-}
-
-// 拖拽交换两个叶子节点的内容
-export function swapNodes(root: LayoutNode, idA: string, idB: string) {
-  let nodeA: LayoutNode | null = null
-  let nodeB: LayoutNode | null = null
-  
-  function findNodes(node: LayoutNode) {
-    if (node.id === idA) nodeA = node
-    if (node.id === idB) nodeB = node
-    if (node.type === 'split') {
-      findNodes(node.children![0])
-      findNodes(node.children![1])
-    }
-  }
-  findNodes(root)
-  
-  if (nodeA && nodeB && (nodeA as LayoutNode).type === 'leaf' && (nodeB as LayoutNode).type === 'leaf') {
-    const temp = (nodeA as LayoutNode).channel
-    ;(nodeA as LayoutNode).channel = (nodeB as LayoutNode).channel
-    ;(nodeB as LayoutNode).channel = temp
-  }
-}
+export const PRESET_GROUPS = [
+  { label: '1本视频', items: ['1-s'] as PresetId[] },
+  { label: '2本视频', items: ['2-h', '2-v'] as PresetId[] },
+  { label: '3本视频', items: ['3-1+2', '3-cols'] as PresetId[] },
+  { label: '4本视频', items: ['4-grid', '4-1+3'] as PresetId[] },
+]

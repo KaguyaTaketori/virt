@@ -1,34 +1,38 @@
-/**
- * frontend/src/stores/multiview.ts（增强版）
- *
- * 问题 13 修复：MultiView.vue 与此 store 存在逻辑重复。
- * 将 applyPreset、shareUrl、loadFromShareParam 等逻辑统一收归 store，
- * 视图层只负责 UI 事件转发，不再包含业务逻辑。
- */
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
-import {
-  type LayoutNode,
-  type LayoutChannel,
-  createEmptyLeaf,
-  addChannelToTree,
-  removeNodeAndMerge,
-  getActiveChannels,
-} from '@/utils/layoutEngine'
-import { PRESET_GENERATORS, type PresetId } from '@/utils/presetLayouts'
-import  { type DanmakuSettings, DEFAULT_DANMAKU_SETTINGS } from '@/types/danmaku'
+import { debounceFilter, useLocalStorage } from '@vueuse/core'
+import { type GridItem, type LayoutChannel, type PresetId } from '@/types/multiview'
+import { PRESET_GENERATORS } from '@/utils/presetLayouts'
+import { DEFAULT_DANMAKU_SETTINGS, type DanmakuSettings } from '@/types/danmaku'
 
-const STORAGE_KEY = 'multiview_tree'
+const STORAGE_KEY = 'multiview_items'
 const DANMAKU_SETTINGS_KEY = 'danmaku_settings'
+const GRID_COLS = 12
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9)
+}
+
+function createEmptyChannel(): LayoutChannel {
+  return { platform: 'empty', id: `empty-${generateId()}` }
+}
+
 
 export const useMultiviewStore = defineStore('multiview', () => {
-  const tree = useLocalStorage<LayoutNode>(STORAGE_KEY, createEmptyLeaf())
-  const activeChannels = computed(() => getActiveChannels(tree.value))
+  const items = useLocalStorage<GridItem[]>(STORAGE_KEY, [], {
+  })
+
+  const activeChannels = computed<LayoutChannel[]>(() => 
+    items.value
+      .filter(i => i.channel.platform !== 'empty')
+      .map(i => i.channel)
+  )
+
 
   const danmakuSettings = useLocalStorage<DanmakuSettings>(
     DANMAKU_SETTINGS_KEY,
     DEFAULT_DANMAKU_SETTINGS,
+    { eventFilter: debounceFilter(500) }
   )
 
   function updateDanmakuSettings(partial: Partial<DanmakuSettings>) {
@@ -39,48 +43,140 @@ export const useMultiviewStore = defineStore('multiview', () => {
     danmakuSettings.value = { ...DEFAULT_DANMAKU_SETTINGS }
   }
 
-  // ── 频道操作 ───────────────────────────────────────────────────────────────
-  function addChannel(channel: LayoutChannel) {
-    addChannelToTree(tree.value, channel)
+  function findEmptyPosition(w: number, h: number): { x: number, y: number } | null {
+    const occupied = new Set<string>()
+    items.value.forEach(item => {
+      for (let dx = 0; dx < item.w; dx++) {
+        for (let dy = 0; dy < item.h; dy++) {
+          occupied.add(`${item.x + dx},${item.y + dy}`)
+        }
+      }
+    })
+
+    for (let y = 0; y <= 12 - h; y++) {
+      for (let x = 0; x <= GRID_COLS - w; x++) {
+        let fits = true
+        for (let dx = 0; dx < w && fits; dx++) {
+          for (let dy = 0; dy < h && fits; dy++) {
+            if (occupied.has(`${x + dx},${y + dy}`)) {
+              fits = false
+            }
+          }
+        }
+        if (fits) return { x, y }
+      }
+    }
+    return null
   }
 
+function addChannel(channel: LayoutChannel) {
+    const currentItems = items.value.filter(i => i.channel.platform !== 'empty');
+    const channels = [...currentItems.map(i => i.channel), channel];
+    
+    const autoPresets: Record<number, PresetId> = {
+      1: '1-s', 2: '2-h', 3: '3-1+2', 4: '4-grid',
+    };
+
+    const presetId = autoPresets[channels.length];
+
+    if (presetId && PRESET_GENERATORS[presetId]) {
+      const newLayout = PRESET_GENERATORS[presetId](channels);
+      
+      items.value = newLayout.map((newItem, index) => {
+        if (index < currentItems.length) {
+          return { ...newItem, id: currentItems[index].id };
+        }
+        return newItem;
+      });
+    } else {
+      const pos = findEmptyPosition(4, 4);
+      items.value = [...items.value, { 
+        id: generateId(), 
+        x: pos?.x ?? 0, 
+        y: pos?.y ?? 0, 
+        w: 4, 
+        h: 4, 
+        channel 
+      }];
+    }
+  }
+
+
   function closeChannel(nodeId: string) {
-    removeNodeAndMerge(tree.value, nodeId)
+    const remainingItems = items.value.filter(item => item.id !== nodeId)
+    
+    if (remainingItems.length === 0) {
+      items.value = []
+      return
+    }
+
+    const remainingChannels = remainingItems
+      .filter(i => i.channel.platform !== 'empty')
+      .map(i => ({ ...i.channel }))
+
+    const autoPresets: Record<number, PresetId> = {
+      1: '1-s',
+      2: '2-h',
+      3: '3-1+2',
+      4: '4-grid',
+    }
+
+    const presetId = autoPresets[remainingChannels.length]
+
+    if (presetId && PRESET_GENERATORS[presetId]) {
+      items.value = PRESET_GENERATORS[presetId](remainingChannels)
+    } else {
+      items.value = remainingItems
+    }
   }
 
   function clearChannel(nodeId: string) {
-    _traverseLeaf(tree.value, nodeId, (node) => {
-      node.channel = { platform: 'empty', id: `empty-${Date.now()}` }
-    })
+    const item = items.value.find(i => i.id === nodeId)
+    if (item) {
+      item.channel = createEmptyChannel()
+    }
   }
 
   function replaceChannel(nodeId: string, channel: LayoutChannel) {
-    _traverseLeaf(tree.value, nodeId, (node) => { node.channel = channel })
+    const item = items.value.find(i => i.id === nodeId)
+    if (item) {
+      item.channel = channel
+    }
   }
 
   function removeByPlatformId(platform: string, id: string) {
-    function find(node: LayoutNode): boolean {
-      if (node.type === 'leaf' && node.channel?.platform === platform && node.channel?.id === id) {
-        closeChannel(node.id)
-        return true
-      }
-      if (node.children) return find(node.children[0]) || find(node.children[1])
-      return false
-    }
-    find(tree.value)
+    items.value = items.value.filter(item => 
+      !(item.channel.platform === platform && item.channel.id === id)
+    )
   }
 
-  // ── 预设布局（问题 2 修复：使用 presetLayouts.ts，ID 唯一）───────────────
   function applyPreset(id: PresetId) {
-    const generator = PRESET_GENERATORS[id]
+    const currentItems = items.value.filter(i => i.channel.platform !== 'empty');
+    const activeChannels = currentItems.map(i => ({ ...i.channel }));
+
+    const generator = PRESET_GENERATORS[id];
     if (generator) {
-      tree.value = generator(activeChannels.value)
+      const newLayout = generator(activeChannels);
+      
+      items.value = newLayout.map((newItem, index) => {
+        return {
+          ...newItem,
+          id: currentItems[index]?.id || generateId()
+        };
+      });
     }
   }
 
-  // ── 分享 ───────────────────────────────────────────────────────────────────
   function buildShareCode(): string {
-    return btoa(activeChannels.value.map((c) => `${c.platform}_${c.id}`).join(','))
+    const data = items.value.map(item => ({
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      p: item.channel.platform,
+      i: item.channel.id,
+    }))
+    return btoa(JSON.stringify(data))
   }
 
   async function copyShareUrl(): Promise<void> {
@@ -91,18 +187,25 @@ export const useMultiviewStore = defineStore('multiview', () => {
 
   function loadFromShareParam(encoded: string): boolean {
     try {
-      const list = atob(encoded)
-        .split(',')
-        .map((item) => {
-          const [platform, id] = item.split('_')
-          return { platform, id } as LayoutChannel
-        })
-        .filter((c) => c.platform && c.id)
+      const data = JSON.parse(atob(encoded)) as Array<{
+        x: number
+        y: number
+        w: number
+        h: number
+        p: string
+        i: string
+      }>
 
-      if (!list.length) return false
+      if (!data.length) return false
 
-      tree.value = createEmptyLeaf()
-      list.forEach((ch) => addChannelToTree(tree.value, ch))
+      items.value = data.map(d => ({
+        id: generateId(),
+        x: d.x,
+        y: d.y,
+        w: d.w,
+        h: d.h,
+        channel: { platform: d.p as LayoutChannel['platform'], id: d.i },
+      }))
       return true
     } catch {
       return false
@@ -112,16 +215,38 @@ export const useMultiviewStore = defineStore('multiview', () => {
   function addFromVideoId(platform: 'youtube' | 'bilibili', videoId: string) {
     if (!videoId) return
     const channel: LayoutChannel = { platform, id: videoId }
+    
     const alreadyAdded = activeChannels.value.some(
       c => c.id === channel.id && c.platform === channel.platform
     )
+    
     if (!alreadyAdded) {
-      addChannelToTree(tree.value, channel)
+      addChannel(channel)
+    }
+  }
+
+  function updateItemPosition(id: string, x: number, y: number, w: number, h: number) {
+    const item = items.value.find(i => i.id === id)
+    if (item) {
+      if (item.x === x && item.y === y && item.w === w && item.h === h) return
+
+      item.x = x
+      item.y = y
+      item.w = w
+      item.h = h
+    }
+  }
+
+  function toggleDanmaku(nodeId: string) {
+    const item = items.value.find(i => i.id === nodeId)
+    if (item && item.channel) {
+      const currentState = item.channel.danmakuEnabled !== false
+      item.channel.danmakuEnabled = !currentState
     }
   }
 
   return {
-    tree,
+    items,
     activeChannels,
     danmakuSettings,
     updateDanmakuSettings,
@@ -135,21 +260,7 @@ export const useMultiviewStore = defineStore('multiview', () => {
     copyShareUrl,
     loadFromShareParam,
     addFromVideoId,
+    updateItemPosition,
+    toggleDanmaku,
   }
 })
-
-// ── 内部工具 ──────────────────────────────────────────────────────────────────
-function _traverseLeaf(
-  node: LayoutNode,
-  targetId: string,
-  fn: (node: LayoutNode) => void,
-) {
-  if (node.id === targetId && node.type === 'leaf') {
-    fn(node)
-    return
-  }
-  if (node.children) {
-    _traverseLeaf(node.children[0], targetId, fn)
-    _traverseLeaf(node.children[1], targetId, fn)
-  }
-}

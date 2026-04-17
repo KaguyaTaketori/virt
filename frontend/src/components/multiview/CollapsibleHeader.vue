@@ -4,7 +4,7 @@ import {
   Captions, Settings, RefreshCw 
 } from 'lucide-vue-next'
 import type { Stream } from '@/api'
-import type { LayoutChannel } from '@/utils/layoutEngine'
+import type { LayoutChannel } from '@/types/multiview'
 import type { PresetId } from '@/utils/presetLayouts'
 
 // 导入拆分的子组件

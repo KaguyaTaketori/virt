@@ -1,7 +1,7 @@
 // frontend/src/api/index.ts
 import axios from 'axios'
 import type { AxiosInstance, AxiosError } from 'axios'
-import type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, BilibiliInfoData, BilibiliVideosData, BilibiliDynamicsData, Role, Permission, UserWithRoles } from '@/types'
+import type { Stream, Channel, Organization, Video, PaginatedVideos, ContentNode, BilibiliInfo, BilibiliInfoData, BilibiliVideo, BilibiliDynamic, Role, Permission, UserWithRoles } from '@/types'
 
 const api: AxiosInstance = axios.create({
   baseURL: '',
@@ -64,12 +64,12 @@ export const channelApi = {
     api.get<BilibiliInfoData>(`/api/channels/${id}/bilibili/info`),
 
   getBilibiliVideos: (id: string, page?: number, pageSize?: number) =>
-    api.get<BilibiliVideosData>(`/api/channels/${id}/bilibili/videos`, {
+    api.get<BilibiliVideo>(`/api/channels/${id}/bilibili/videos`, {
       params: { page, page_size: pageSize },
     }),
 
   getBilibiliDynamics: (id: string, offset?: string, limit?: number) =>
-    api.get<BilibiliDynamicsData>(`/api/channels/${id}/bilibili/dynamics`, {
+    api.get<BilibiliDynamic>(`/api/channels/${id}/bilibili/dynamics`, {
       params: { offset, limit },
     }),
 
@@ -121,13 +121,13 @@ export const authApi = {
 }
 
 export const userChannelApi = {
-  like:       (channelId: number) =>
+  like:       (channelId: string) =>
     api.post(`/api/users/channels/${channelId}/like`),
-  unlike:     (channelId: number) =>
+  unlike:     (channelId: string) =>
     api.delete(`/api/users/channels/${channelId}/like`),
-  block:      (channelId: number) =>
+  block:      (channelId: string) =>
     api.post(`/api/users/channels/${channelId}/block`),
-  unblock:    (channelId: number) =>
+  unblock:    (channelId: string) =>
     api.delete(`/api/users/channels/${channelId}/block`),
   getLiked:   () =>
     api.get<Channel[]>('/api/users/channels', { params: { type: 'liked' } }),
@@ -137,7 +137,7 @@ export const userChannelApi = {
 
 export const adminVideosApi = {
   getVideos: (params: {
-    channel_id: number
+    channel_id: string
     status?: string | null
     duration_min?: number | null
     duration_max?: number | null

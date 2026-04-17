@@ -65,7 +65,7 @@ const videos = ref<Video[]>([])
 const channels = ref<Channel[]>([])
 const selectedIds = ref<string[]>([])
 
-const filterChannelId = ref<number | null>(null)
+const filterChannelId = ref<string | null>(null)
 const filterStatus = ref<string | null>(null)
 const durationMinMinutes = ref<number | undefined>(undefined)
 const durationMaxMinutes = ref<number | undefined>(undefined)

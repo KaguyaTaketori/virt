@@ -8,7 +8,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useOrganizations } from '@/queries'
 
 import { streamApi, userChannelApi, type Channel as ApiChannel, type Stream } from '@/api'
-import { type LayoutChannel } from '@/utils/layoutEngine'
+import { type LayoutChannel } from '@/types/multiview'
 import { PRESET_GROUPS, PRESET_META, type PresetId } from '@/utils/presetLayouts'
 
 import VideoGrid from '@/components/multiview/VideoGrid.vue'
@@ -178,7 +178,6 @@ onMounted(async () => {
 
 <template>
   <div class="h-full w-full flex flex-col overflow-hidden bg-zinc-950 text-white">
-    <!-- 侧边栏抽屉组件 -->
     <SidebarDrawer
       v-model="isDrawerOpen"
       :is-dark="themeStore.isDark"
@@ -188,7 +187,6 @@ onMounted(async () => {
       @set-theme="themeStore.setTheme"
     />
 
-    <!-- 顶部工具栏 -->
     <CollapsibleHeader
       :is-collapsed="isCollapsed"
       :channels="store.activeChannels"
@@ -213,22 +211,16 @@ onMounted(async () => {
       @add-member="handleAddMember"
     />
 
-
-    <!-- 核心网格视图 (递归树结构) -->
     <VideoGrid
-      :layout-tree="store.tree"
       :show-danmaku="showDanmaku"
-      :danmaku-settings="store.danmakuSettings"
       @request-add="openAddModal"
       @request-replace="openReplaceModal"
       @clear-channel="store.clearChannel"
       @close-channel="store.closeChannel"
     />
 
-    <!-- 添加视频模态框 -->
     <AddVideoModal v-model="isAddModalOpen" @add="handleAddChannel" />
 
-    <!-- 分组选择器模态框 -->
     <GroupSelectorModal
       v-model="isGroupSelectorOpen"
       :organizations="orgsQuery.data.value ?? []"
@@ -279,7 +271,6 @@ onMounted(async () => {
       </Transition>
     </Teleport>
 
-    <!-- 弹幕设置模态框 -->
     <Teleport to="body">
       <div
         v-if="showDanmakuSettings"

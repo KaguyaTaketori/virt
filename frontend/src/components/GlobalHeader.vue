@@ -47,7 +47,6 @@ onMounted(() => {
     class="h-14 shrink-0 flex items-center gap-4 px-4
            bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 sticky top-0 z-40"
   >
-    <!-- 左侧：Logo 与 侧边栏控制 -->
     <div class="flex items-center gap-3 shrink-0">
       <button
         @click="emit('toggleSidebar')"
@@ -73,7 +72,6 @@ onMounted(() => {
       </router-link>
     </div>
 
-    <!-- 中间：搜索栏 (响应式宽度) -->
     <div class="flex-1 max-w-2xl mx-auto flex items-center gap-2 px-4">
       <div class="relative flex-1 group">
         <Search
@@ -89,7 +87,6 @@ onMounted(() => {
                  outline-none focus:border-zinc-700 focus:bg-zinc-900
                  transition-all shadow-inner"
         />
-        <!-- 搜索框装饰：清除按钮 -->
         <button 
           v-if="searchQuery"
           @click="searchQuery = ''"
@@ -108,7 +105,6 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 右侧：通知与用户菜单 -->
     <div class="flex items-center gap-2 shrink-0">
       <button
         class="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900
@@ -119,7 +115,6 @@ onMounted(() => {
         <span class="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-zinc-950"></span>
       </button>
 
-      <!-- 用户区域 -->
       <div v-if="authStore.isLoggedIn" class="relative" ref="userMenuRef">
         <button
           @click="toggleUserMenu"
@@ -131,7 +126,6 @@ onMounted(() => {
                    border border-zinc-700 flex items-center justify-center 
                    text-xs font-bold text-white shadow-inner overflow-hidden"
           >
-             <!-- 这里的头像可以根据实际用户数据展示 -->
              <span v-if="!authStore.user?.avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() }}</span>
              <img v-else :src="authStore.user.avatar" class="w-full h-full object-cover" />
           </div>
@@ -142,7 +136,6 @@ onMounted(() => {
           <ChevronDown class="w-3.5 h-3.5 text-zinc-500 transition-transform duration-300" :class="{'rotate-180': showUserMenu}" />
         </button>
 
-        <!-- 用户下拉菜单 (高级动效) -->
         <transition name="dropdown">
           <div
             v-if="showUserMenu"
@@ -194,7 +187,6 @@ onMounted(() => {
         </transition>
       </div>
 
-      <!-- 未登录 -->
       <router-link
         v-else
         to="/login"

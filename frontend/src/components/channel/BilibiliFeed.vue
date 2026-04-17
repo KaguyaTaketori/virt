@@ -12,7 +12,7 @@ import { useChannelActions } from '@/composables/useChannelActions'
 import { formatCount, formatTimestamp, formatPubDate } from '@/utils/format'
 
 interface Props {
-  channelId: number
+  channelId: string
   activeTab: string
   platform: 'bilibili' | 'youtube'
 }
