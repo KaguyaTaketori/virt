@@ -13,7 +13,6 @@ from slowapi.util import get_remote_address
 from app.routers import (
     streams,
     channels,
-    danmaku,
     admin,
     websocket,
     organizations,
@@ -122,7 +121,6 @@ async def log_requests(request: Request, call_next):
 
 app.include_router(streams.router)
 app.include_router(channels.router)
-app.include_router(danmaku.router)
 app.include_router(admin.router)
 app.include_router(websocket.router)
 app.include_router(organizations.router)
