@@ -2,7 +2,6 @@ import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Stream, Channel, BilibiliGuard } from '@/types'
 
-export type { BilibiliGuard }
 
 export function useBilibiliGuard(): BilibiliGuard {
   const authStore = useAuthStore()

@@ -16,16 +16,18 @@ router = APIRouter(prefix="/api/streams", tags=["streams"])
 
 @router.get("/live", response_model=list[StreamResponse])
 async def get_live_streams(
+    platform: Optional[Platform] = None,
     db: AsyncSession = Depends(get_db_session),
     ctx: PlatformContext = PlatformGuardDep,
     stream_repo: StreamRepository = Depends(get_stream_repo),
 ):
-    streams = await stream_repo.get_live_streams_with_channel(
-        platform=ctx.platform if ctx.platform else None
-    )
-
-    if ctx.platform:
-        streams = [s for s in streams if s.platform == ctx.platform]
+    if platform:
+        ctx.assert_platform_access(platform)
+        streams = await stream_repo.get_live_streams_with_channel(platform=platform)
+    else:
+        streams = await stream_repo.get_live_streams_with_channel()
+        allowed = ctx.allowed_platforms
+        streams = [s for s in streams if s.platform.value in allowed]
 
     return [_to_response(s) for s in streams]
 
@@ -38,13 +40,16 @@ async def get_all_streams(
     ctx: PlatformContext = PlatformGuardDep,
     stream_repo: StreamRepository = Depends(get_stream_repo),
 ):
-    streams = await stream_repo.get_multi_with_channel(
-        platform=platform,
-        status=status,
-    )
-
-    if ctx.platform:
-        streams = [s for s in streams if s.platform == ctx.platform]
+    if platform:
+        ctx.assert_platform_access(platform)
+        streams = await stream_repo.get_multi_with_channel(
+            platform=platform,
+            status=status,
+        )
+    else:
+        streams = await stream_repo.get_multi_with_channel(status=status)
+        allowed = ctx.allowed_platforms
+        streams = [s for s in streams if s.platform.value in allowed]
 
     return [_to_response(s) for s in streams]
 

@@ -91,7 +91,7 @@ async def get_channels(
     if not channels:
         return []
 
-    channels = [ch for ch in channels if ctx.check_platform_access(ch.platform)]
+    channels = [ch for ch in channels if ctx.is_platform_allowed(ch.platform)]
 
     if platform:
         ctx.assert_platform_access(platform)

@@ -1,4 +1,4 @@
-import { ref, watch, toValue, type MaybeRefOrGetter } from 'vue'
+import { ref, watch, toValue, type MaybeRefOrGetter, computed } from 'vue'
 import { useWebSocket } from '@vueuse/core'
 import { DanmakuMessage } from '@/types/danmaku'
 
@@ -7,18 +7,17 @@ const WS_BASE =
   ((import.meta.env.VITE_API_BASE as string | undefined)?.replace(/^http/, 'ws') ?? 'ws://localhost:8000')
 
 export function useDanmakuWS(
-  videoId: MaybeRefOrGetter<string>,
-  platform: MaybeRefOrGetter<string>,
+  videoId: MaybeRefOrGetter<string | undefined>,
+  platform: MaybeRefOrGetter<string | undefined>,
   enabled: MaybeRefOrGetter<boolean>,
 ) {
   const queue = ref<DanmakuMessage[]>([])
   const url = ref<string>('')
 
-  const { data, send, close, open, isConnected } = useWebSocket(url, {
+  const { status, close, open } = useWebSocket(url, {
     autoReconnect: {
-      retries: () => -1,
+      retries: () => true, 
       delay: 1000,
-      maxDelay: 30000,
       onFailed() {
         console.warn('[WS] Reconnection failed')
       },
@@ -35,7 +34,7 @@ export function useDanmakuWS(
               userId: raw.user_id ?? raw.userId,
               comment: raw.comment ?? raw.message ?? '',
             }
-            if (!queue.value.find((m) => m.messageId === msg.messageId)) {
+            if (!queue.value.some((m) => m.messageId === msg.messageId)) {
               queue.value.push(msg)
             }
           }
@@ -45,13 +44,18 @@ export function useDanmakuWS(
     immediate: false,
   })
 
+  const isConnected = computed(() => status.value === 'OPEN')
+
   function connect() {
     const vid = toValue(videoId)
     const plat = toValue(platform)
     if (!vid || plat !== 'youtube') return
 
-    url.value = `${WS_BASE}/ws/danmaku/${vid}`
-    open()
+    const newUrl = `${WS_BASE}/ws/danmaku/${vid}`
+    if (url.value !== newUrl) {
+      url.value = newUrl
+      open()
+    }
   }
 
   function disconnect() {
@@ -64,21 +68,26 @@ export function useDanmakuWS(
     return queue.value.splice(0, queue.value.length)
   }
 
-  watch([enabled, platform, videoId], ([en, plat, vid]) => {
-    if (en && plat === 'youtube' && vid) {
-      url.value = `${WS_BASE}/ws/danmaku/${vid}`
-      open()
-    } else {
-      disconnect()
-    }
-  }, { immediate: true })
+  watch(
+    [() => toValue(enabled), () => toValue(platform), () => toValue(videoId)],
+    ([en, plat, vid]) => {
+      if (en && plat === 'youtube' && vid) {
+        url.value = `${WS_BASE}/ws/danmaku/${vid}`
+        open()
+      } else {
+        disconnect()
+      }
+    },
+    { immediate: true }
+  )
 
   return { 
     queue, 
     drainQueue, 
     connect, 
     disconnect,
-    isConnected
+    isConnected,
+    status
   }
 }
 

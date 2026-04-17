@@ -207,38 +207,32 @@ export interface BilibiliInfoData {
   archive_count: number | null
 }
 
-export interface BilibiliVideosData {
-  videos: Array<{
-    bvid: string
-    title: string
-    pic: string
-    aid: number
-    duration: string
-    pubdate: number
-    play: number
-  }>
-  total: number
+export interface BilibiliVideo {
+  bvid: string
+  title: string
+  pic: string
+  aid: number
+  duration: string
+  play: number
+  pubdate: number
 }
 
-export interface BilibiliDynamicsData {
-  dynamics: Array<{
-    dynamic_id: string
-    url: string
-    uid: string
-    uname: string
-    face: string
-    type: number
-    timestamp: number
-    content_nodes: ContentNode[]
-    images: string[]
-    repost_content: string | null
-    stat: {
-      forward: number
-      comment: number
-      like: number
-    }
-    topic: string
-    is_top: boolean
-  }>
-  next_offset: string
+export interface BilibiliDynamic {
+  dynamic_id: string
+  url: string
+  uid: string
+  uname: string
+  face: string
+  type: number
+  timestamp: number
+  content_nodes: ContentNode[]
+  images: string[]
+  repost_content: string | null
+  stat: {
+    forward: number
+    comment: number
+    like: number
+  }
+  topic: string
+  is_top: boolean
 }
