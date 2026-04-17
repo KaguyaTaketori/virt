@@ -60,18 +60,17 @@ async def list_roles(
     return await role_repo.get_all()
 
 
-@router.post("/roles", response_model=RoleResponse)
+@router.post("/roles", response_model=RoleResponse, status_code=201)
 async def create_role(
     role: RoleResponse,
-    db: AsyncSession = Depends(get_db_session),
     role_repo: RoleRepository = Depends(get_role_repo),
     _: User = SuperAdminUser,
 ):
     existing = await role_repo.get_by_name(role.name)
     if existing:
-        raise HTTPException(status_code=400, detail="Role already exists")
+        raise HTTPException(status_code=409, detail="Role already exists")
 
-    db_role = role_repo.create({"name": role.name, "description": role.description})
+    db_role = await role_repo.create({"name": role.name, "description": role.description})
     return db_role
 
 

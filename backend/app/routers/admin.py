@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.deps.guards import AdminUser
 from app.models.models import User
-from app.services.quota_guard import status as quota_status
+from app.deps import get_quota_dep
 from app.worker.tasks.bilibili import update_bilibili_streams
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -16,4 +16,4 @@ async def trigger_bilibili_update(_: User = AdminUser):
 
 @router.get("/quota")
 async def get_quota_status(_: User = AdminUser):
-    return await quota_status()
+    return await get_quota_dep().status()

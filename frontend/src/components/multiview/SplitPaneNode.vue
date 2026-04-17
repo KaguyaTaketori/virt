@@ -70,7 +70,7 @@ function isDanmakuEnabled(ch: any): boolean {
 
       <!-- 视频播放器 -->
       <template v-else>
-        <YouTubePlayer v-if="node.channel.platform === 'youtube'" :video-id="node.channel.id" @time-update="handleTimeUpdate" />
+        <YouTubePlayer v-if="node.channel.platform === 'youtube'" :video-id="node.channel.id" @time-update="handleTimeUpdate" :key="node.channel.id"/>
         <template v-else-if="node.channel.platform === 'bilibili' && authStore.canAccessBilibili">
           <iframe v-if="node.channel.id.startsWith('BV')" :src="`https://player.bilibili.com/player.html?bvid=${node.channel.id}&autoplay=1`" class="absolute inset-0 w-full h-full" frameborder="0" allowfullscreen />
           <iframe v-else :src="`https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${node.channel.id}&quality=0`" class="absolute inset-0 w-full h-full" frameborder="0" allowfullscreen />

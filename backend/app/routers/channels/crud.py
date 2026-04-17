@@ -53,11 +53,13 @@ async def _bg_sync_channel(channel_id: int) -> None:
     async with session_scope() as session:
         ch = await session.get(Channel, channel_id)
         if ch:
-            await websub_service.subscribe_channel(
-                ch.channel_id,
+            ok = await websub_service.subscribe_channel(
+                ch.id,
                 callback_url,
                 secret=settings.websub_secret or None,
             )
+            if not ok:
+                logger.warning("WebSub 订阅失败 channel_id={}", channel_id)
             logger.info("WebSub subscription registered for channel_id={}", channel_id)
 
 

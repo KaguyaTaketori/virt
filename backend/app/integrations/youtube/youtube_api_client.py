@@ -11,7 +11,7 @@ from tenacity import (
 from app.core.exceptions import YouTubeAPIError
 from app.loguru_config import logger
 from app.services.api_key_manager import get_api_key, is_api_available
-from app.services.quota_guard import can_spend, spend
+from app.deps import get_quota_dep
 from app.integrations.urls import validate_safe_url
 
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
@@ -29,11 +29,11 @@ class YouTubeApiClient:
     """
 
     async def _request(
-        self, 
-        method: str, 
-        endpoint: str, 
-        params: Dict[str, Any], 
-        use_quota: Optional[Tuple[str, int]] = None
+        self,
+        method: str,
+        endpoint: str,
+        params: Dict[str, Any],
+        use_quota: Optional[Tuple[str, int]] = None,
     ) -> Dict[str, Any]:
         """通用请求方法，处理 API Key 和配额"""
         if not await is_api_available():
@@ -42,31 +42,35 @@ class YouTubeApiClient:
         # 如果需要检查配额
         if use_quota:
             q_name, q_cost = use_quota
-            if not await can_spend(q_name, q_cost):
-                raise YouTubeAPIError(f"Quota exhausted for {q_name}", platform="youtube")
+            if not await get_quota_dep().can_spend(q_name, q_cost):
+                raise YouTubeAPIError(
+                    f"Quota exhausted for {q_name}", platform="youtube"
+                )
 
         api_key = await get_api_key()
         params["key"] = api_key
 
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            resp = await client.request(method, f"{YT_API_BASE}/{endpoint}", params=params)
-            
+            resp = await client.request(
+                method, f"{YT_API_BASE}/{endpoint}", params=params
+            )
+
             if resp.status_code != 200:
                 logger.warning("YouTube API {} Error: {}", endpoint, resp.status_code)
                 return {}
 
             if use_quota:
-                await spend(use_quota[0], use_quota[1])
-            
+                await get_quota_dep().spend(use_quota[0], use_quota[1])
+
             return resp.json()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=30))
     async def get_channel_info_api(self, channel_id: str) -> Optional[dict]:
         """通过 API 获取频道原始数据"""
         data = await self._request(
-            "GET", 
-            "channels", 
-            {"part": "snippet,brandingSettings,contentDetails", "id": channel_id}
+            "GET",
+            "channels",
+            {"part": "snippet,brandingSettings,contentDetails", "id": channel_id},
         )
         items = data.get("items", [])
         return items[0] if items else None
@@ -110,7 +114,8 @@ class YouTubeApiClient:
                 video_ids = [
                     item["snippet"]["resourceId"]["videoId"]
                     for item in data.get("items", [])
-                    if item.get("snippet", {}).get("resourceId", {}).get("kind") == "youtube#video"
+                    if item.get("snippet", {}).get("resourceId", {}).get("kind")
+                    == "youtube#video"
                 ]
                 return video_ids, data.get("nextPageToken"), 200
         except Exception as e:
@@ -121,11 +126,14 @@ class YouTubeApiClient:
         """批量获取视频详情数据"""
         if not video_ids:
             return []
-        
+
         data = await self._request(
             "GET",
             "videos",
-            {"part": "snippet,contentDetails,statistics,liveStreamingDetails", "id": ",".join(video_ids)}
+            {
+                "part": "snippet,contentDetails,statistics,liveStreamingDetails",
+                "id": ",".join(video_ids),
+            },
         )
         return data.get("items", [])
 
@@ -136,7 +144,12 @@ class YouTubeApiClient:
         )
         items = data.get("items", [])
         if items:
-            return items[0].get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+            return (
+                items[0]
+                .get("contentDetails", {})
+                .get("relatedPlaylists", {})
+                .get("uploads")
+            )
         return None
 
     async def get_playlist_total_count(self, playlist_id: str) -> Optional[int]:
@@ -165,7 +178,7 @@ class YouTubeApiClient:
                 "eventType": "live",
                 "type": "video",
             },
-            use_quota=("search.list", 1)
+            use_quota=("search.list", 1),
         )
         items = data.get("items", [])
         return items[0] if items else None
@@ -182,9 +195,11 @@ class YouTubeApiClient:
                 resp = await client.get(url, headers={"User-Agent": DEFAULT_USER_AGENT})
                 if resp.status_code != 200:
                     return None
-                
+
                 # 再次校验重定向后的 URL 安全性
-                validate_safe_url(str(resp.url), allowed_hosts={"youtube.com", "youtu.be"})
+                validate_safe_url(
+                    str(resp.url), allowed_hosts={"youtube.com", "youtu.be"}
+                )
                 html_content = resp.text
         except Exception as e:
             logger.debug("Resolve from page error for {}: {}", url[:80], e)
