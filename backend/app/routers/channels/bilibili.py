@@ -2,10 +2,9 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db_session
+from app.deps import get_db_session, get_channel_repo
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
 from app.models.models import Channel, Platform, User
 from app.auth import get_current_user_optional
@@ -17,9 +16,19 @@ from app.services.bilibili_channel_service import (
     fetch_bilibili_videos,
     fetch_bilibili_dynamics,
 )
-from app.routers.channels.crud import _get_or_404
+from app.repositories import ChannelRepository
 
 router = APIRouter()
+
+
+async def _get_or_404(
+    channel_repo: ChannelRepository,
+    channel_id: int,
+) -> Channel:
+    channel = await channel_repo.get(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    return channel
 
 
 @router.get("/{channel_id}/bilibili")
@@ -31,8 +40,9 @@ async def get_channel_bilibili_info(
     ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: Optional[User] = Depends(get_current_user_optional),
     client: BiliClient = Depends(bili_client_dep),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await _get_or_404(channel_repo, channel_id)
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
@@ -54,8 +64,9 @@ async def get_channel_bilibili_info_only(
     ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: Optional[User] = Depends(get_current_user_optional),
     client: BiliClient = Depends(bili_client_dep),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await _get_or_404(channel_repo, channel_id)
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
@@ -80,8 +91,9 @@ async def get_channel_bilibili_videos_only(
     ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: Optional[User] = Depends(get_current_user_optional),
     client: BiliClient = Depends(bili_client_dep),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await _get_or_404(channel_repo, channel_id)
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
@@ -111,8 +123,9 @@ async def get_channel_bilibili_dynamics_only(
     ctx_platform: PlatformContext = PlatformGuardDep,
     current_user: Optional[User] = Depends(get_current_user_optional),
     client: BiliClient = Depends(bili_client_dep),
+    channel_repo: ChannelRepository = Depends(get_channel_repo),
 ):
-    channel = await _get_or_404(db, channel_id)
+    channel = await _get_or_404(channel_repo, channel_id)
     ctx_platform.assert_bilibili_access()
 
     credential = _resolve_credential(current_user, client)
