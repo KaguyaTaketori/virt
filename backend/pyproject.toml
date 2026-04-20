@@ -38,4 +38,5 @@ dev = [
 dev = [
     "httpx",
     "pytest",
+    "ruff",
 ]

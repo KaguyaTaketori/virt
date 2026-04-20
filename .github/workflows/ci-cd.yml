@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
-        run: uv sync --frozen
+        run: uv sync --frozen --group dev
 
       - name: Run linter
         working-directory: backend
