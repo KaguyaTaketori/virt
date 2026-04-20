@@ -177,7 +177,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
-            docker compose pull \
+            docker compose -f docker-compose.prod.yml pull \
               ghcr.io/${{ github.repository }}-backend:${{ github.sha }} \
               ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}"
 
