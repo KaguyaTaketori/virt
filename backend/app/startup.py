@@ -100,7 +100,88 @@ async def register_scheduled_jobs() -> None:
     bilibili_auth_service.start_cleanup_task()
 
     await scheduler_service.start()
+
+    from app.worker.tasks.bilibili import update_bilibili_streams
+    from app.worker.tasks.youtube import (
+        update_youtube_streams,
+        sync_youtube_videos_incremental,
+        discover_live_streams_from_videos,
+        refresh_channel_details,
+    )
+
+    websub_active = await _is_websub_active()
+
+    scheduler_service.add_interval_job(
+        update_bilibili_streams,
+        "update_bilibili_streams",
+        seconds=60,
+    )
+    logger.info("Registered update_bilibili_streams (every 60s)")
+
+    if websub_active:
+        scheduler_service.add_interval_job(
+            update_youtube_streams,
+            "update_youtube_streams",
+            minutes=5,
+        )
+        scheduler_service.add_interval_job(
+            sync_youtube_videos_incremental,
+            "sync_youtube_videos_incremental",
+            hours=24,
+        )
+        scheduler_service.add_interval_job(
+            discover_live_streams_from_videos,
+            "discover_live_streams_from_videos",
+            hours=1,
+        )
+        scheduler_service.add_cron_job(
+            refresh_channel_details,
+            "refresh_channel_details",
+            day_of_week="mon",
+            hour=3,
+            minute=0,
+        )
+        logger.info(
+            "WebSub active: YouTube tasks reduced "
+            "(update_streams=5m, sync=24h, discover=1h, refresh=weekly)"
+        )
+    else:
+        scheduler_service.add_interval_job(
+            update_youtube_streams,
+            "update_youtube_streams",
+            minutes=2,
+        )
+        scheduler_service.add_interval_job(
+            sync_youtube_videos_incremental,
+            "sync_youtube_videos_incremental",
+            minutes=5,
+        )
+        scheduler_service.add_interval_job(
+            discover_live_streams_from_videos,
+            "discover_live_streams_from_videos",
+            minutes=2,
+        )
+        scheduler_service.add_cron_job(
+            refresh_channel_details,
+            "refresh_channel_details",
+            hour=3,
+            minute=0,
+        )
+        logger.info(
+            "WebSub inactive: YouTube tasks at full frequency "
+            "(update_streams=2m, sync=5m, discover=2m, refresh=daily)"
+        )
+
     logger.info("Scheduler started with all jobs registered")
+
+
+async def _is_websub_active() -> bool:
+    callback_url = settings.websub_callback_url
+    if not callback_url or callback_url == "https://your-domain.com/api/websub/youtube":
+        return False
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(func.count(WebSubSubscription.id)))
+        return result.scalar() > 0
 
 
 async def init_api_keys() -> None:

@@ -1,0 +1,91 @@
+name: Deploy
+
+on:
+  repository_dispatch:
+    types: [deployment]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  SERVER_USER: ${{ secrets.SERVER_USER }}
+  DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event.client_payload.sha
+    steps:
+      - name: Checkout deploy scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            docker-compose.prod.yml
+            backend/.env.production
+          sparse-checkout-cone-mode: false
+
+      - name: Generate Runtime Env File
+        run: |
+          cat <<EOF > backend/.env.production
+          ENV=PROD
+          DB_URL=${{ secrets.PRODUCTION_DB_URL }}
+          REDIS_URL=redis://redis:6379/0
+          JWT_SECRET_KEY=${{ secrets.PRODUCTION_JWT_SECRET_KEY }}
+          BILIBILI_SESSDATA=${{ secrets.PRODUCTION_BILIBILI_SESSDATA }}
+          YOUTUBE_API_KEYS=${{ secrets.PRODUCTION_YOUTUBE_API_KEYS }}
+          CORS_ORIGINS=${{ secrets.PRODUCTION_CORS_ORIGINS }}
+          SUPERADMIN_USERNAME=${{ secrets.PRODUCTION_SUPERADMIN_USERNAME }}
+          SUPERADMIN_PASSWORD=${{ secrets.PRODUCTION_SUPERADMIN_PASSWORD }}
+          EOF
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Prepare deployment directory
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ secrets.DEPLOY_DIR }}"
+
+      - name: Copy deployment files
+        run: |
+          scp docker-compose.prod.yml ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_DIR }}/
+          scp backend/.env.production ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_DIR }}/backend/
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull images
+        run: |
+          SSH_CMD="ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
+          $SSH_CMD "cd ${{ secrets.DEPLOY_DIR }} && \
+            docker compose pull \
+              ghcr.io/${{ env.IMAGE_NAME }}-backend:${{ github.event.client_payload.sha }} \
+              ghcr.io/${{ env.IMAGE_NAME }}-frontend:${{ github.event.client_payload.sha }}"
+
+      - name: Deploy with Docker Compose
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "cd ${{ secrets.DEPLOY_DIR }} && \
+            IMAGE_TAG=${{ github.event.client_payload.sha }} \
+            IMAGE_OWNER=${{ github.repository_owner }} \
+            docker compose -f docker-compose.prod.yml up -d"
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -f https://${{ secrets.SERVER_HOST }}/health || exit 1
+
+      - name: Cleanup old images
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "docker image prune -f"
+
+      
