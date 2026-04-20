@@ -108,6 +108,7 @@ async def register_scheduled_jobs() -> None:
         discover_live_streams_from_videos,
         refresh_channel_details,
     )
+    from app.worker.tasks.websub import renew_websub
 
     websub_active = await _is_websub_active()
 
@@ -141,6 +142,11 @@ async def register_scheduled_jobs() -> None:
             hour=3,
             minute=0,
         )
+        scheduler_service.add_cron_job(
+            renew_websub,
+            "renew_websub",
+            days=7,
+        )
         logger.info(
             "WebSub active: YouTube tasks reduced "
             "(update_streams=5m, sync=24h, discover=1h, refresh=weekly)"
@@ -166,6 +172,11 @@ async def register_scheduled_jobs() -> None:
             "refresh_channel_details",
             hour=3,
             minute=0,
+        )
+        scheduler_service.add_cron_job(
+            renew_websub,
+            "renew_websub",
+            days=7,
         )
         logger.info(
             "WebSub inactive: YouTube tasks at full frequency "
