@@ -9,7 +9,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
   backend-test:
@@ -187,15 +186,16 @@ jobs:
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin && \
             cd ${{ env.DEPLOY_DIR }} && \
             IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=${{ env.IMAGE_OWNER }} \
+            IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') \
             docker compose -f docker-compose.prod.yml pull"
 
       - name: Deploy with Docker Compose
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
-          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "
+            cd ${{ env.DEPLOY_DIR }} && \
             IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=${{ env.IMAGE_OWNER }} \
+            IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') \
             docker compose -f docker-compose.prod.yml up -d"
 
       - name: Health check
