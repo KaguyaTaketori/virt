@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
@@ -11,6 +11,8 @@ COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY pyproject.toml ./
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
