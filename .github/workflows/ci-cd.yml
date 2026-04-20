@@ -64,6 +64,10 @@ jobs:
     permissions:
       contents: write
       packages: write
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -119,12 +123,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Upload docker-compose
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-config
-          path: docker-compose.prod.yml
-          retention-days: 1
+      - name: Generate Runtime Env File
+        run: |
+          mkdir -p backend
+          cat <<EOF > backend/.env.production
+          ENV=PROD
+          DB_URL=${{ secrets.PRODUCTION_DB_URL }}
+          REDIS_URL=redis://redis:6379/0
+          JWT_SECRET_KEY=${{ secrets.PRODUCTION_JWT_SECRET_KEY }}
+          BILIBILI_SESSDATA=${{ secrets.PRODUCTION_BILIBILI_SESSDATA }}
+          YOUTUBE_API_KEYS=${{ secrets.PRODUCTION_YOUTUBE_API_KEYS }}
+          CORS_ORIGINS=${{ secrets.PRODUCTION_CORS_ORIGINS }}
+          SUPERADMIN_USERNAME=${{ secrets.PRODUCTION_SUPERADMIN_USERNAME }}
+          SUPERADMIN_PASSWORD=${{ secrets.PRODUCTION_SUPERADMIN_PASSWORD }}
+          EOF
 
       - name: Set output
         id: outputs
@@ -138,16 +150,52 @@ jobs:
           echo "DEPLOY_TAG=${{ github.sha }}" >> $GITHUB_ENV
           echo "DEPLOY_SHA=${{ github.sha }}" >> $GITHUB_ENV
 
-      - name: Trigger deployment
+      - name: Set up SSH
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        uses: peter-evans/repository-dispatch@v3
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          event-type: deployment
-          client-payload: |
-            {
-              "sha": "${{ github.sha }}",
-              "ref": "${{ github.ref }}",
-              "tags": "${{ steps.outputs.outputs.tags }}"
-            }
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Prepare deployment directory
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "mkdir -p ${{ env.DEPLOY_DIR }}"
+
+      - name: Copy deployment files
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          scp docker-compose.prod.yml ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}:${{ env.DEPLOY_DIR }}/
+          scp backend/.env.production ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}:${{ env.DEPLOY_DIR }}/backend/
+
+      - name: Pull images
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
+            docker compose pull \
+              ghcr.io/${{ github.repository }}-backend:${{ github.sha }} \
+              ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}"
+
+      - name: Deploy with Docker Compose
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
+            IMAGE_TAG=${{ github.sha }} \
+            IMAGE_OWNER=${{ github.repository_owner }} \
+            docker compose -f docker-compose.prod.yml up -d"
+
+      - name: Health check
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          sleep 10
+          curl -f https://${{ env.SERVER_HOST }}/health || exit 1
+
+      - name: Cleanup old images
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "docker image prune -f"
