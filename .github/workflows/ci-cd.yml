@@ -178,7 +178,7 @@ jobs:
         run: |
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
             IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=${{ github.repository_owner | downcase }} \
+            IMAGE_OWNER=${{ toLowerCase(github.repository_owner) }} \
             docker compose -f docker-compose.prod.yml pull"
 
       - name: Deploy with Docker Compose
@@ -186,7 +186,7 @@ jobs:
         run: |
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "cd ${{ env.DEPLOY_DIR }} && \
             IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=${{ github.repository_owner | downcase }} \
+            IMAGE_OWNER=${{ toLowerCase(github.repository_owner) }} \
             docker compose -f docker-compose.prod.yml up -d"
 
       - name: Health check
