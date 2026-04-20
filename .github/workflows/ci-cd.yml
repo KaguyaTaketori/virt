@@ -113,7 +113,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/virt-frontend
           tags: |
-            type=sha,prefix=
+            type=sha,format=long,prefix=
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up Docker Buildx
