@@ -176,7 +176,7 @@ async def register_scheduled_jobs() -> None:
         scheduler_service.add_cron_job(
             renew_websub,
             "renew_websub",
-            days=7,
+            day=7,
         )
         logger.info(
             "WebSub inactive: YouTube tasks at full frequency "
