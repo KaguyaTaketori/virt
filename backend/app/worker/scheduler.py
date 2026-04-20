@@ -8,7 +8,7 @@ from apscheduler.schedulers.base import STATE_STOPPED
 
 from app.loguru_config import logger
 
-DEFAULT_REDIS_HOST = "localhost"
+DEFAULT_REDIS_HOST = "redis"
 DEFAULT_REDIS_PORT = 6379
 DEFAULT_REDIS_DB = 0
 
