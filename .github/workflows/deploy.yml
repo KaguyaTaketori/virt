@@ -16,16 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.client_payload.sha
     steps:
-      - name: Checkout deploy scripts
-        uses: actions/checkout@v4
+      - name: Download deploy config
+        uses: actions/download-artifact@v4
         with:
-          sparse-checkout: |
-            docker-compose.prod.yml
-            backend/.env.production
-          sparse-checkout-cone-mode: false
+          name: deploy-config
 
       - name: Generate Runtime Env File
         run: |
+          mkdir -p backend
           cat <<EOF > backend/.env.production
           ENV=PROD
           DB_URL=${{ secrets.PRODUCTION_DB_URL }}

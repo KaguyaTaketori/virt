@@ -119,6 +119,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Upload docker-compose
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-config
+          path: docker-compose.prod.yml
+          retention-days: 1
+
       - name: Set output
         id: outputs
         run: |
