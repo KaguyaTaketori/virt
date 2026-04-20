@@ -7,12 +7,12 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.bili_client import BiliClient, get_bili_client
-from app.integrations.youtube import YouTubeSyncService, get_youtube_sync_service
+from app.integrations.bili_client import BiliClient
+from app.integrations.youtube import YouTubeSyncService
 from app.loguru_config import logger
 from app.models.models import Channel, Platform, UserChannel, Video, Stream, Danmaku
 from app.repositories import ChannelRepository, StreamRepository, UserChannelRepository
-from app.schemas.schemas import ChannelCreate, BiliLiveStatus, YTLiveStatus
+from app.schemas.schemas import ChannelCreate
 
 
 class ChannelService:

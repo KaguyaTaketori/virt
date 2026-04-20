@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from app.loguru_config import logger
 from app.services.redis_client import RedisClient

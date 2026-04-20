@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar, Optional
 
-from sqlalchemy import select, delete, update, func
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.loguru_config import logger
 
 ModelType = TypeVar("ModelType")
 

@@ -60,7 +60,7 @@ async def check_qrcode_status(
 
     if result.get("status") == "confirmed":
         credential = result.get("credential", {})
-        saved = await bilibili_user_service.save_credential(
+        await bilibili_user_service.save_credential(
             user_id=current_user.id,
             sessdata=credential.get("sessdata", ""),
             bili_jct=credential.get("bili_jct", ""),

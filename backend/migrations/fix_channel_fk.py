@@ -15,17 +15,9 @@
 from __future__ import annotations
 
 import asyncio
-from sqlalchemy import select, func, text
+from sqlalchemy import text
 from app.database.engine import AsyncSessionFactory
 from app.database import dispose_engine
-from app.models.models import (
-    Stream,
-    Video,
-    BilibiliDynamic,
-    Danmaku,
-    WebSubSubscription,
-    Channel,
-)
 from app.loguru_config import logger
 
 

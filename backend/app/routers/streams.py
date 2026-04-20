@@ -3,12 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db_session, get_stream_repo
-from app.deps.guards import BilibiliAccess
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import Platform, Stream, StreamStatus, User
+from app.models.models import Platform, Stream, StreamStatus
 from app.schemas.schemas import StreamResponse
-from app.auth import get_current_user_optional
-from app.services.permissions import has_permission
 from app.repositories import StreamRepository
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])

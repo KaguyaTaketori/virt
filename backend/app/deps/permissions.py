@@ -3,10 +3,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException, status
 
-from app.database import get_db_session
 from app.loguru_config import logger
 from app.config import settings
 

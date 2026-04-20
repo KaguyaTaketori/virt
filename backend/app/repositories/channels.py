@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
-from sqlalchemy import select, func, and_, or_, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.base import BaseRepository, PagedRepository
-from app.models.models import Channel, Organization, Platform, UserChannel, Stream
-from app.loguru_config import logger
+from app.models.models import Channel, Organization, Platform, UserChannel
 
 
 class ChannelRepository(BaseRepository[Channel]):
@@ -51,7 +49,7 @@ class ChannelRepository(BaseRepository[Channel]):
         self, platform: Optional[Platform] = None
     ) -> list[Channel]:
         """获取所有活跃的频道。"""
-        query = select(Channel).where(Channel.is_active == True)
+        query = select(Channel).where(Channel.is_active)
         if platform is not None:
             query = query.where(Channel.platform == platform)
         result = await self.session.execute(query)

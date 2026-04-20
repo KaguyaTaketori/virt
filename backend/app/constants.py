@@ -1,3 +1,5 @@
+from enum import StrEnum
+
 # YouTube 视频时长分类阈值（秒）
 YT_SHORT_MAX_SECS     = 61       # ≤ 61s 判定为 Shorts
 YT_PREMIERE_SHORT     = 300      # < 5min 强烈倾向 Premiere
@@ -21,7 +23,6 @@ DANMAKU_MAX_SEEN_IDS     = 10_000
 # WebSocket
 WS_HEARTBEAT_INTERVAL_SECS = 25
 
-from enum import StrEnum
 
 class UserRole(StrEnum):
     SUPERADMIN = "superadmin"

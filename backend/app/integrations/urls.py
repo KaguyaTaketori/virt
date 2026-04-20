@@ -5,7 +5,6 @@ import socket
 from urllib.parse import urlparse
 from typing import Optional
 
-from app.loguru_config import logger
 
 
 _YOUTUBE_ALLOWED_HOSTS = frozenset(

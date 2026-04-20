@@ -6,7 +6,7 @@ from bilibili_api import Credential
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.loguru_config import logger
-from app.models.models import Channel, User, Video, Platform, BilibiliDynamic
+from app.models.models import Channel, User, Video, BilibiliDynamic
 from app.integrations.bili_client import BiliClient
 from app.schemas.schemas import BiliDynamic, BiliVideo
 from app.repositories import VideoRepository, BilibiliDynamicRepository

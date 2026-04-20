@@ -1,6 +1,6 @@
 import re
 import html
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, Tuple
 from app.models.models import Platform
 from app.constants import (

@@ -3,7 +3,6 @@ from fastapi.responses import PlainTextResponse
 from typing import Optional
 
 from app.config import settings
-from app.loguru_config import logger
 from app.deps.guards import AdminUser, validate_websub_callback
 from app.models.models import User
 

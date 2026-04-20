@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 from bilibili_api import user, live, Credential
@@ -21,7 +20,6 @@ from tenacity import (
 from app.config import settings
 from app.core.exceptions import BilibiliAPIError
 from app.loguru_config import logger
-from app.models.models import Platform
 from app.schemas.schemas import BiliLiveStatus, BiliUserInfo, BiliDynamic, BiliVideo
 
 REQ_SLEEP_MIN = 1.0

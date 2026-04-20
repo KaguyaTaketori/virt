@@ -3,13 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func, and_, or_, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, desc
 from sqlalchemy.orm import joinedload
 
 from app.database.base import BaseRepository
-from app.models.models import Stream, Platform, StreamStatus, Channel
-from app.loguru_config import logger
+from app.models.models import Stream, Platform, StreamStatus
 
 
 class StreamRepository(BaseRepository[Stream]):

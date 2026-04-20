@@ -10,7 +10,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import text
 
 
 revision: str = "add_rbac_001"
@@ -20,8 +19,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-
     op.create_table(
         "roles",
         sa.Column("id", sa.Integer(), primary_key=True, index=True, nullable=False),
@@ -111,8 +108,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-
     op.drop_index("ix_resource_acl_lookup", table_name="resource_acls")
     op.drop_index("ix_resource_acl_unique", table_name="resource_acls")
     op.drop_table("resource_acls")

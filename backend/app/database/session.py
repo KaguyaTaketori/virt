@@ -6,7 +6,6 @@ from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.engine import AsyncSessionFactory
-from app.loguru_config import logger
 
 
 @asynccontextmanager

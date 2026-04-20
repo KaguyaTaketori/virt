@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db_session, get_channel_repo
 from app.deps.platform_guard import PlatformContext, PlatformGuardDep
-from app.models.models import Channel, Platform, User
+from app.models.models import Channel, User
 from app.auth import get_current_user_optional
 from app.integrations.bili_client import BiliClient, bili_client_dep
 from app.services.bilibili_channel_service import (

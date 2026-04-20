@@ -1,7 +1,6 @@
 from typing import Dict, List
 from fastapi import WebSocket
 import asyncio
-import json
 
 from app.config import settings
 from app.loguru_config import logger

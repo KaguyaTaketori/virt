@@ -15,7 +15,6 @@ from app.database.utils import (
     upsert,
     upsert_batch,
     upsert_stream,
-    _insert_fn,
 )
 from app.database.base import (
     BaseRepository,

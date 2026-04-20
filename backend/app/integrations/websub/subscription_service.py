@@ -4,9 +4,8 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from app.loguru_config import logger
 from app.models.models import Channel, WebSubSubscription
-from app.services.api_key_manager import get_api_key, is_api_available
+from app.services.api_key_manager import is_api_available
 from app.integrations.youtube import get_youtube_sync_service
 from app.database import session_scope
 from app.repositories import ChannelRepository
@@ -74,7 +73,6 @@ class WebSubSubscriptionService:
     ) -> None:
         if not await is_api_available():
             return
-        api_key = await get_api_key()
 
         async with session_scope() as session:
             channel = await session.scalar(

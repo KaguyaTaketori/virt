@@ -79,7 +79,7 @@ def upgrade() -> None:
             ).scalar()
             or 0
         )
-    except:
+    except Exception:
         dynamic_count = 0
 
     console.print(
@@ -113,7 +113,7 @@ def upgrade() -> None:
             {"new_id": new_id, "old_id": old_id},
         )
     connection.commit()
-    console.print(f"  [dim]已更新 streams[/dim]")
+    console.print("  [dim]已更新 streams[/dim]")
 
     console.print("\n[bold yellow][5/7][/bold yellow] 更新 videos 表 (240k+ 条记录)...")
     with Progress(
@@ -136,7 +136,7 @@ def upgrade() -> None:
 
         connection.commit()
 
-    console.print(f"  [dim]已更新 videos[/dim]")
+    console.print("  [dim]已更新 videos[/dim]")
 
     if dynamic_count > 0:
         console.print("\n[bold yellow][6/7][/bold yellow] 更新 bilibili_dynamics 表...")
@@ -148,7 +148,7 @@ def upgrade() -> None:
                 {"new_id": new_id, "old_id": old_id},
             )
         connection.commit()
-        console.print(f"  [dim]已更新 bilibili_dynamics[/dim]")
+        console.print("  [dim]已更新 bilibili_dynamics[/dim]")
     else:
         console.print(
             "\n[bold yellow][6/7][/bold yellow] 跳过 bilibili_dynamics (无数据)"
@@ -161,7 +161,7 @@ def upgrade() -> None:
             {"new_id": new_id, "old_id": old_id},
         )
     connection.commit()
-    console.print(f"  [dim]已更新 channels[/dim]")
+    console.print("  [dim]已更新 channels[/dim]")
 
     console.print("\n[bold yellow]验证数据...[/bold yellow]")
     new_ch_count = connection.execute(sa.text("SELECT COUNT(*) FROM channels")).scalar()
