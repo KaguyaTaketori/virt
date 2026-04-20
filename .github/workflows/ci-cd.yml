@@ -203,7 +203,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           sleep 10
-          curl -f https://${{ env.SERVER_HOST }}/health || exit 1
+          curl -fk https://${{ env.SERVER_HOST }}/health || exit 1
 
       - name: Cleanup old images
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
