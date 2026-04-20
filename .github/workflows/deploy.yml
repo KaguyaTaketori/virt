@@ -69,8 +69,8 @@ jobs:
           SSH_CMD="ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
           $SSH_CMD "cd ${{ secrets.DEPLOY_DIR }} && \
             docker compose pull \
-              ghcr.io/${{ env.IMAGE_NAME }}-backend:${{ github.event.client_payload.sha }} \
-              ghcr.io/${{ env.IMAGE_NAME }}-frontend:${{ github.event.client_payload.sha }}"
+              ghcr.io/${{ github.repository }}-backend:${{ github.event.client_payload.sha }} \
+              ghcr.io/${{ github.repository }}-frontend:${{ github.event.client_payload.sha }}"
 
       - name: Deploy with Docker Compose
         run: |
