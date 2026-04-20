@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   backend:
-    image: ghcr.io/${IMAGE_OWNER}/vtuber-live-backend:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER}/virt-backend:${IMAGE_TAG}
     env_file:
       - ./backend/.env.production
     ports:
@@ -22,7 +22,7 @@ services:
       - app-network
 
   frontend:
-    image: ghcr.io/${IMAGE_OWNER}/vtuber-live-frontend:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER}/virt-frontend:${IMAGE_TAG}
     ports:
       - "80:80"
       - "443:443"
