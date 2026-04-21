@@ -30,6 +30,12 @@ RETRY_MIN = 2
 RETRY_MAX = 10
 MAX_RETRIES = 3
 
+def _to_https(url: str) -> str:
+    if url and url.startswith("http://"):
+        return url.replace("http://", "https://", 1)
+    return url
+
+
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_NONE": 0,
     "DYNAMIC_TYPE_FORWARD": 1,
@@ -123,7 +129,7 @@ class BiliClient:
             mid=raw.get("mid", 0),
             name=info.get("uname", ""),
             sex=info.get("sex"),
-            face=info.get("face", ""),
+            face=_to_https(info.get("face", "")),
             sign=detail.get("sign"),
             level=info.get("level", 0),
             fans=stats.get("follower", 0),
@@ -208,7 +214,7 @@ class BiliClient:
             return BiliLiveStatus(
                 video_id=str(room_info.get("room_id", "")),
                 title=room_info.get("title"),
-                thumbnail_url=room_info.get("user_cover") or room_info.get("keyframe"),
+                thumbnail_url=_to_https(room_info.get("user_cover") or room_info.get("keyframe")),
                 status="live",
                 viewer_count=room_info.get("online", 0),
                 started_at=started_at,
@@ -227,7 +233,7 @@ class BiliClient:
             return BiliLiveStatus(
                 video_id=str(room_info.get("room_id", "")),
                 title=room_info.get("title"),
-                thumbnail_url=room_info.get("user_cover"),
+                thumbnail_url=_to_https(room_info.get("user_cover")),
                 status="upcoming",
                 viewer_count=0,
                 scheduled_at=scheduled_at,
@@ -312,7 +318,7 @@ class BiliClient:
 
             uid = str(module_author.get("mid", ""))
             uname = module_author.get("name", "")
-            face = module_author.get("face", "")
+            face = _to_https(module_author.get("face", ""))
             timestamp = int(module_author.get("pub_ts") or 0)
 
             is_top = (module_tag.get("text") == "置顶") or (
@@ -345,7 +351,7 @@ class BiliClient:
                             {
                                 "type": "emoji",
                                 "text": n.get("text"),
-                                "url": emoji_data.get("icon_url"),
+                                "url": _to_https(emoji_data.get("icon_url")),
                             }
                         )
                     elif ntype == "RICH_TEXT_NODE_TYPE_AT":
@@ -354,7 +360,7 @@ class BiliClient:
                         )
 
                 pics = opus.get("pics") or []
-                images = [p.get("url", "") for p in pics if p.get("url")]
+                images = [_to_https(p.get("url", "")) for p in pics if p.get("url")]
 
             elif "archive" in major:
                 archive = major["archive"]
@@ -364,7 +370,7 @@ class BiliClient:
                     {"type": "text", "text": f"【发布视频】{title}\n{desc}".strip()}
                 )
                 if archive.get("cover"):
-                    images = [archive.get("cover")]
+                    images = [_to_https(archive.get("cover"))]
 
             if not content_nodes:
                 self_text = (module_dynamic.get("desc") or {}).get("text", "").strip()

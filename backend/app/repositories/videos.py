@@ -176,8 +176,8 @@ class VideoRepository(BaseRepository[Video]):
             index_elements=["channel_id", "video_id"],
             values=records,
             update_cols={
-                "title": ..., "thumbnail_url": ...,
-                "duration": ..., "view_count": ..., "like_count": ...,
+                "title": "title", "thumbnail_url": "thumbnail_url",
+                "duration": "duration", "view_count": "view_count", "like_count": "like_count",
             }
         )
 

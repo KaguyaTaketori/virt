@@ -46,9 +46,15 @@ async def upsert_batch(
     stmt = _insert_fn(model).values(values)
 
     if update_cols:
+        set_dict = {}
+        for key, value in update_cols.items():
+            if isinstance(value, str):
+                set_dict[key] = getattr(stmt.excluded, value)
+            else:
+                set_dict[key] = value
         upsert_stmt = stmt.on_conflict_do_update(
             index_elements=index_elements,
-            set_=update_cols,
+            set_=set_dict,
         )
     else:
         upsert_stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
