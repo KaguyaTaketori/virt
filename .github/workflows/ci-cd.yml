@@ -188,8 +188,8 @@ jobs:
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin && \
             cd ${{ env.DEPLOY_DIR }} && \
-            IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') \
+            export IMAGE_TAG=${{ github.sha }} && \
+            export IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') && \
             docker compose -f docker-compose.prod.yml pull"
 
       - name: Deploy with Docker Compose
@@ -197,9 +197,10 @@ jobs:
         run: |
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "
             cd ${{ env.DEPLOY_DIR }} && \
+            docker rm -f \$(docker compose -f docker-compose.prod.yml ps -q) 2>/dev/null || true && \
             docker compose -f docker-compose.prod.yml down --remove-orphans && \
-            IMAGE_TAG=${{ github.sha }} \
-            IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') \
+            export IMAGE_TAG=${{ github.sha }} && \
+            export IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') && \
             docker compose -f docker-compose.prod.yml up -d"
 
       - name: Health check
