@@ -197,6 +197,7 @@ jobs:
         run: |
           ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "
             cd ${{ env.DEPLOY_DIR }} && \
+            docker compose -f docker-compose.prod.yml down --remove-orphans && \
             IMAGE_TAG=${{ github.sha }} \
             IMAGE_OWNER=\$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') \
             docker compose -f docker-compose.prod.yml up -d"
